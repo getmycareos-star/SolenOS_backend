@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
+DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABASE_URL else ""
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL or "test" not in DATABASE_NAME,
+    reason="requires a disposable migrated PostgreSQL test database",
+)
 
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
