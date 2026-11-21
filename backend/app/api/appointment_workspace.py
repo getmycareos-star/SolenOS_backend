@@ -1239,16 +1239,51 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         item for item in event_items
         if str(item.get("event_type", "")).casefold() in {"appointment", "clinic_visit"}
     ]
+    # The shared projection is not the only retrieval dependency. Legacy
+    # person-scoped sources below are queried independently; any failed source
+    # must affect the overall retrieval status instead of being presented as
+    # an empty care record.
+    source_retrieval_failures = []
+    if fact_rows is None:
+        source_retrieval_failures.append("care_facts")
+    if open_loop_source_status == "failed":
+        source_retrieval_failures.append("open_loops")
+    if assertion_source_status == "failed":
+        source_retrieval_failures.append("care_assertions")
+    if question_source_status == "failed":
+        source_retrieval_failures.append("open_questions")
+    if contradiction_source_status == "failed":
+        source_retrieval_failures.append("contradictions")
+    if document_source_status == "failed":
+        source_retrieval_failures.append("documents")
+    if evidence_review_status == "failed":
+        source_retrieval_failures.append("evidence_review_records")
+    if claim_assessment_status == "failed":
+        source_retrieval_failures.append("evidence_claim_assessments")
+    if completeness_status == "failed":
+        source_retrieval_failures.append("evidence_completeness_assessments")
+    if decision_source.get("status") == "failed":
+        source_retrieval_failures.append("decisions")
+    if outcome_source.get("status") == "failed":
+        source_retrieval_failures.append("decision_outcomes")
+
+    source_retrieval_partial = any(
+        item.get("retrieval_complete") is False or item.get("has_more") is True
+        for item in source_completeness.values()
+        if isinstance(item, dict)
+    )
     context_retrieval_failed = bool(
         living_care_record_context.get("retrieval_error")
         or living_care_record_context.get("schema_status") == "failed"
         or living_care_record_context.get("failed_sources")
+        or source_retrieval_failures
     )
     context_retrieval_partial = bool(
         living_care_record_context.get("schema_status") != "complete"
         or living_care_record_context.get("missing_required_sources")
         or living_care_record_context.get("missing_optional_sources")
         or living_care_record_context.get("retrieval_projection_complete") is not True
+        or source_retrieval_partial
     )
     if context_retrieval_failed:
         appointment_context_code = "retrieval_failed"
@@ -1294,10 +1329,16 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "schema_status": living_care_record_context.get("schema_status"),
         "scan_complete": living_care_record_context.get("retrieval_scan_complete") is True,
         "projection_complete": living_care_record_context.get("retrieval_projection_complete") is True,
-        "failed_sources": living_care_record_context.get("failed_sources", []),
+        "failed_sources": list(dict.fromkeys(
+            list(living_care_record_context.get("failed_sources", []) or [])
+            + source_retrieval_failures
+        )),
         "missing_required_sources": living_care_record_context.get("missing_required_sources", []),
         "missing_optional_sources": living_care_record_context.get("missing_optional_sources", []),
-        "retrieval_error": living_care_record_context.get("retrieval_error"),
+        "retrieval_error": (
+            living_care_record_context.get("retrieval_error")
+            or ("appointment_preparation_source_retrieval_failed" if source_retrieval_failures else None)
+        ),
     }
 
     return {
