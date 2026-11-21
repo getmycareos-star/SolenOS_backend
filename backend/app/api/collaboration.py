@@ -1248,7 +1248,7 @@ async def upload_evidence(
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
-                "client_submitted_review_status": client_review_status,
+                "client_submitted_scan_review_status": client_review_status,
                 "rotation_degrees": rotation_degrees,
                 "crop_insets_percent": crop_insets,
                 "text_prepared_by_client": text_prepared,
