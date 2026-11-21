@@ -245,6 +245,20 @@ def test_lifecycle_transitions_require_explicit_completion_and_write_actor_audit
     assert completed.json()["status"] == "completed"
     assert completed.json()["completed_at"]
 
+    from app.models.care_continuity import CareActionOutcome
+    outcome_db = TestSessionLocal()
+    try:
+        saved_outcome = outcome_db.query(CareActionOutcome).filter_by(
+            person_id=session["person"]["id"],
+            action_id=action_id,
+        ).one()
+        assert saved_outcome.outcome_status == "completed"
+        assert saved_outcome.notes == "Caregiver recorded that the clinic visit took place and documented the next steps."
+        assert saved_outcome.evidence_ids == []
+        assert saved_outcome.created_by_caregiver_id == session["caregiver"]["id"]
+    finally:
+        outcome_db.close()
+
     history = client.get(
         f"/api/v1/registered-actions/{action_id}/history",
         headers=headers(session),
