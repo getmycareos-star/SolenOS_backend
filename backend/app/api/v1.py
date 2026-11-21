@@ -2149,29 +2149,45 @@ def record_feedback(
         )
 
     engine = LearningEngine(db)
-    engine.record_feedback(session.person_id, category, detail, session.caregiver_id)
-    engine.after_save(session.person_id)
-    # Only explicitly submitted feedback is staged for product-improvement review.
-    # Personal learning memory above remains user-scoped regardless of this opt-in.
-    stage_consented_feedback(
-        db,
-        person_id=session.person_id,
-        caregiver_id=session.caregiver_id,
-        category=category,
-        detail=detail,
-        consent=consent,
-    )
-    event = LearningEventModel(
-        person_id=session.person_id,
-        event_type="feedback",
-        detail=f"{category}: {detail}",
-        source_type="feedback",
-        caregiver_id=session.caregiver_id,
-    )
-    db.add(event)
-    db.commit()
-    db.refresh(event)
-    return event
+    try:
+        # Keep scoped learning memory, optional redacted improvement sample,
+        # and durable receipt in one transaction. A failed write must not leave
+        # a partial record that makes a caregiver retry create duplicate state.
+        engine.record_feedback(
+            session.person_id,
+            category,
+            detail,
+            session.caregiver_id,
+            commit=False,
+        )
+        engine.after_save(session.person_id)
+        # Only explicitly submitted feedback is staged for product-improvement review.
+        # Personal learning memory remains user-scoped and is never auto-exported.
+        stage_consented_feedback(
+            db,
+            person_id=session.person_id,
+            caregiver_id=session.caregiver_id,
+            category=category,
+            detail=detail,
+            consent=consent,
+        )
+        event = LearningEventModel(
+            person_id=person_id,
+            event_type="feedback",
+            detail=f"{category}: {detail}",
+            source_type="feedback",
+            caregiver_id=session.caregiver_id,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        return event
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Your feedback could not be saved completely. Please retry.",
+        ) from exc
 
 
 @router.post("/parse-time", response_model=NaturalLanguageTimeParse)
