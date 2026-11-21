@@ -609,21 +609,22 @@ def main():
                 {"criterion": "record completeness", "result": "partial", "rationale": "The synthetic source is intentionally minimal."},
             ],
         }
-        status, evidence_review_first = request(
-            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
-            token=token_a, body=evidence_review_payload,
-        )
-        require(status == 201 and evidence_review_first.get("id")
-                and evidence_review_first.get("idempotent_replay") is False,
-                f"PostgreSQL evidence review create failed: {status}: {evidence_review_first}")
-        evidence_review_id = evidence_review_first["id"]
-        status, evidence_review_retry = request(
-            "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
-            token=token_a, body=evidence_review_payload,
-        )
-        require(status == 201 and evidence_review_retry.get("id") == evidence_review_id
-                and evidence_review_retry.get("idempotent_replay") is True,
-                f"PostgreSQL exact evidence-review retry created a duplicate: {status}: {evidence_review_retry}")
+        def submit_evidence_review(_):
+            return request(
+                "POST", f"/api/v1/care-continuity/evidence/{professional_source_id}/reviews",
+                token=token_a, body=evidence_review_payload,
+            )
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            concurrent_review_results = list(pool.map(submit_evidence_review, range(2)))
+        require(all(status == 201 for status, _ in concurrent_review_results),
+                f"Concurrent PostgreSQL evidence-review retries failed: {concurrent_review_results}")
+        concurrent_review_bodies = [body for _, body in concurrent_review_results]
+        created_reviews = [body for body in concurrent_review_bodies if body.get("idempotent_replay") is False]
+        replayed_reviews = [body for body in concurrent_review_bodies if body.get("idempotent_replay") is True]
+        require(len(created_reviews) == 1 and len(replayed_reviews) == 1
+                and created_reviews[0].get("id") == replayed_reviews[0].get("id"),
+                f"Concurrent PostgreSQL evidence-review retries must produce one row and one replay: {concurrent_review_results}")
+        evidence_review_id = created_reviews[0]["id"]
         changed_review_payload = {
             **evidence_review_payload,
             "rationale": "Changed rationale must not reuse the original PostgreSQL retry key.",
