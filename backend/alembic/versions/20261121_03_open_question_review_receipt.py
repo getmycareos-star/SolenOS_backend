@@ -1,14 +1,14 @@
 """Persist clarification review reconciliation receipts.
 
 Revision ID: 20261121_03_open_question_review_receipt
-Revises: 20261121_02_evidence_review_idempotency
+Revises: 20261121_02_evidence_review_idem
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
 revision = "20261121_03_open_question_review_receipt"
-down_revision = "20261121_02_evidence_review_idempotency"
+down_revision = "20261121_02_evidence_review_idem"
 branch_labels = None
 depends_on = None
 
