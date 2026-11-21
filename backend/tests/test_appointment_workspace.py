@@ -3429,3 +3429,45 @@ def test_appointment_brief_does_not_leak_documents_without_document_permission(c
     assert brief.status_code == 200, brief.text
     assert brief.json()["documents"] == []
     assert brief.json()["source_coverage"]["documents"] == "restricted"
+
+
+def test_appointment_outcome_without_recorded_visit_date_does_not_invent_observed_at(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created = test_client.post("/api/v1/appointment-workspaces", headers=headers, json={
+        "status": "outcome_pending",
+        "payload": {
+            "caregiverReport": "Caregiver reports that the clinic requested another follow-up.",
+        },
+        "change_reason": "Save an appointment report without a recorded visit date",
+    })
+    assert created.status_code == 201, created.text
+    record_id = created.json()["id"]
+
+    generated = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals",
+        headers=headers,
+        json={},
+    )
+    assert generated.status_code == 200, generated.text
+    proposal = next(
+        item for item in generated.json()["items"]
+        if item["proposed_change"].get("field") == "caregiver_report"
+    )
+
+    accepted = test_client.post(
+        f"/api/v1/appointment-workspaces/{record_id}/outcome-proposals/{proposal['id']}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    assert accepted.status_code == 200, accepted.text
+
+    with TestSessionLocal() as db:
+        assertion = db.query(CareAssertion).filter(
+            CareAssertion.id == accepted.json()["assertion_id"],
+            CareAssertion.person_id == owner["person"]["id"],
+        ).one()
+        assert assertion.observed_at is None
+        assert assertion.event_time_text is None
+        assert assertion.epistemic_state == "reported"
+        assert assertion.assertion_status == "caregiver_reviewed"
