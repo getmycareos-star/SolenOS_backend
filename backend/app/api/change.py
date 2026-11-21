@@ -486,6 +486,10 @@ def transition_change_confirmation(
         new_status=payload.status,
         reason=normalized_reason,
         evidence_ids=supplied_evidence_ids,
+        # SQLite's CURRENT_TIMESTAMP default has one-second precision. Set the
+        # event time in the application so rapid, valid transitions retain
+        # their true chronological order in both SQLite tests and PostgreSQL.
+        created_at=datetime.now(timezone.utc),
     )
     change.confirmation_status = payload.status
     db.add(transition)
