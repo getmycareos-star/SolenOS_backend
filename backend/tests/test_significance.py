@@ -841,3 +841,21 @@ def test_decrease_magnitude_is_nonnegative_and_coverage_context_is_accurate():
         )
     finally:
         teardown_db()
+
+
+def test_contextual_associations_ignore_events_without_occurrence_timestamps():
+    from types import SimpleNamespace
+    from app.services.significance import _contextual_associations
+
+    class QueryMustNotRun:
+        def query(self, *_args, **_kwargs):
+            raise AssertionError("No temporal query is valid without dated events")
+
+    undated_events = [
+        SimpleNamespace(occurred_at=None, event_type="fatigue"),
+        SimpleNamespace(occurred_at=None, event_type="sleep"),
+    ]
+    assert _contextual_associations(
+        QueryMustNotRun(), "person-1", undated_events,
+        datetime.now(timezone.utc),
+    ) == []
