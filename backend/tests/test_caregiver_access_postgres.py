@@ -330,9 +330,12 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
                 db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
-                # The foreign identity is deliberately retained in this disposable
-                # PostgreSQL test database. Its append-only care-state and audit
-                # history must not be deleted merely to make fixture cleanup tidy.
+                if foreign_person_id:
+                    db.query(CareStateRevision).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    _redact_test_audit_events(db, foreign_person_id)
+                    db.query(AnonymousSession).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
+                    db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
                 if person_id:
                     db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
