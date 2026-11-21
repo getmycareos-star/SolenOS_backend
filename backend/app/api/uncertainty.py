@@ -437,11 +437,13 @@ def review_question_answer(
                     status_code=503,
                     detail="Care-continuity reconciliation failed; the clarification review was not committed. Retry the review.",
                 ) from exc
-        engine.db.commit()
-        engine.db.refresh(event)
         if execution is not None:
             execution["stages"]["reconciliation"] = "committed"
+            # Persist the execution receipt in the same transaction as the
+            # append-only reviewer decision and accepted assertion.
             event.care_continuity_execution = execution
+        engine.db.commit()
+        engine.db.refresh(event)
         return event
     except IntegrityError as exc:
         engine.db.rollback()
