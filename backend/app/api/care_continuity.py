@@ -2145,6 +2145,7 @@ def current_care_projection(
             row.get("source_label")
             or row.get("author_label")
             or row.get("observer_label")
+            or ("Caregiver report" if source_name == "action_outcomes" else None)
             or (primary_source.reported_by_label if primary_source else None)
             or (primary_source.original_author if primary_source else None)
             or (
@@ -2160,7 +2161,8 @@ def current_care_projection(
             or "not_recorded"
         )
         epistemic_status = (
-            row.get("epistemic_status")
+            ("reported" if source_name == "action_outcomes" else None)
+            or row.get("epistemic_status")
             or row.get("epistemic_state")
             or row.get("assertion_status")
             or row.get("decision_status")
