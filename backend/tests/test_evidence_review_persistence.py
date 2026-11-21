@@ -159,6 +159,74 @@ def test_evidence_review_create_retrieve_is_persisted_and_person_scoped(review_r
     assert client_b.post("/api/v1/care-continuity/evidence/review-evidence-a/reviews", json=payload).status_code == 404
 
 
+
+def test_evidence_review_exact_retry_returns_one_persisted_review(review_records):
+    client_a, _ = review_records
+    payload = {
+        "review_type": "reliability",
+        "outcome": "unverified",
+        "rationale": "The original caregiver report is preserved; independent confirmation is not recorded.",
+        "policy_version": "evidence-review-v1",
+        "request_key": "review-retry-key-0001",
+        "criteria": CRITERIA,
+    }
+
+    first = client_a.post(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews",
+        json=payload,
+    )
+    assert first.status_code == 201, first.text
+    first_saved = first.json()
+    assert first_saved["idempotent_replay"] is False
+
+    retry = client_a.post(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews",
+        json=payload,
+    )
+    assert retry.status_code == 201, retry.text
+    retry_saved = retry.json()
+    assert retry_saved["id"] == first_saved["id"]
+    assert retry_saved["idempotent_replay"] is True
+
+    history = client_a.get(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews"
+    )
+    assert history.status_code == 200, history.text
+    assert [item["id"] for item in history.json()] == [first_saved["id"]]
+
+    db = SessionLocal()
+    try:
+        assert db.query(EvidenceReviewRecord).filter_by(
+            person_id="review-person-a",
+            evidence_id="review-evidence-a",
+            request_key="review-retry-key-0001",
+        ).count() == 1
+    finally:
+        db.close()
+
+    changed_payload = {**payload, "rationale": "Changed content must not reuse the original retry key."}
+    conflict = client_a.post(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews",
+        json=changed_payload,
+    )
+    assert conflict.status_code == 409, conflict.text
+
+
+def test_evidence_review_rejects_malformed_retry_key(review_records):
+    client_a, _ = review_records
+    response = client_a.post(
+        "/api/v1/care-continuity/evidence/review-evidence-a/reviews",
+        json={
+            "review_type": "reliability",
+            "outcome": "unverified",
+            "rationale": "A review needs a valid retry identity.",
+            "policy_version": "evidence-review-v1",
+            "request_key": "short",
+            "criteria": CRITERIA,
+        },
+    )
+    assert response.status_code == 422, response.text
+
 def test_evidence_review_history_cannot_be_updated_or_deleted(review_records):
     client_a, _ = review_records
     response = client_a.post("/api/v1/care-continuity/evidence/review-evidence-a/reviews", json={
