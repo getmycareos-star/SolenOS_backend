@@ -80,6 +80,14 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
                 Caregiver(id=foreign_caregiver_id, name="Foreign caregiver", relationship="family", person_id=foreign_person_id),
             ])
             db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                role="family",
+                access_scope="full_record",
+                status="active",
+                permissions=["view_lcr", "add_evidence", "correct_records"],
+            ))
             db.add(CareEvent(
                 id=event_id,
                 person_id=person_id,
@@ -238,7 +246,7 @@ def test_postgres_delta_replay_is_invalidated_by_a_later_correction():
             role="family",
             access_scope="full_record",
             status="active",
-            permissions=["view_lcr", "add_evidence"],
+            permissions=["view_lcr", "add_evidence", "correct_records"],
         ))
         event = CareEvent(
             id=event_id,
