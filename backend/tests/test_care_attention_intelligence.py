@@ -613,9 +613,14 @@ def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_s
         }],
         "explanation": "A saved sleep change needs review.",
     }])
-    assert len(important) == 1
-    item = important[0]
-    assert item["care_significance"] == "attention_candidate"
+    # An attention candidate without a stable, complete baseline must remain
+    # visible for clarification; a meaningful-candidate verdict alone is not
+    # enough to elevate it as an important change.
+    assert important == []
+    assert len(clarification) == 1
+    item = clarification[0]
+    assert item["category"] == "needs_clarification"
+    assert item["care_significance"] == "unverified_attention_candidate"
     assert item["significance_verdict"] == "meaningful_candidate"
     assert item["significance_assessment_id"] == "assessment-dimensions"
     assert item["significance_assessment_status"] == "linked"
@@ -628,7 +633,6 @@ def test_persisted_change_keeps_evidence_significance_and_follow_up_dimensions_s
     assert item["linked_follow_up_outcome_status"] == "outcome_unknown"
     assert item["linked_follow_up_id"] == "loop-dimensions"
     assert item["history_completeness"] == "partial_or_unknown"
-    assert clarification == []
 
 
 def test_missing_significance_assessment_is_disclosed_without_hiding_saved_follow_up():
