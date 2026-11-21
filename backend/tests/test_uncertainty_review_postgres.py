@@ -2,6 +2,7 @@
 
 import os
 import uuid
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +18,12 @@ from app.models.care_continuity import (
 from app.models.uncertainty import OpenQuestionReviewEvent
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABASE_URL else ""
 pytestmark = pytest.mark.skipif(
-    not DATABASE_URL or not DATABASE_URL.startswith("postgresql"),
-    reason="requires migrated PostgreSQL DATABASE_URL",
+    not DATABASE_URL
+    or not DATABASE_URL.startswith("postgresql")
+    or "test" not in DATABASE_NAME,
+    reason="requires a migrated, disposable PostgreSQL test database",
 )
 
 
