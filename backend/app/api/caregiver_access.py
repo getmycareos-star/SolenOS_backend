@@ -506,18 +506,17 @@ class ResponsibilityTransferCreate(BaseModel):
 
 
 def _current_profile(request: Request, db: Session) -> tuple[str, str, CaregiverProfile]:
-    person_id = getattr(request.state, "scoped_person_id", None)
-    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
-        raise HTTPException(status_code=401, detail="A valid care-record session is required")
-    require_caregiver_permission(db, str(person_id), str(caregiver_id), "view_lcr")
+    # Resolve the bearer session at the route boundary when request.state was
+    # not propagated by the outer HTTP middleware.
+    person_id, caregiver_id = _full_access_scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     try:
         profile = ensure_caregiver_profile_for_session(
-            db, person_id=str(person_id), session_caregiver_id=str(caregiver_id)
+            db, person_id=person_id, session_caregiver_id=caregiver_id
         )
     except ValueError as exc:
         raise HTTPException(status_code=403, detail="Caregiver identity is not linked to this care record") from exc
-    return str(person_id), str(caregiver_id), profile
+    return person_id, caregiver_id, profile
 
 
 @router.post("/responsibility-transfers", status_code=201)
