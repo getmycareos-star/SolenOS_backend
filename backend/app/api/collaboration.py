@@ -4694,7 +4694,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
             [{"role": "system", "content": system + " " + run_instruction},
              {"role": "user", "content": "Original source text:\\n" + source}],
             response_format="json",
-            options={"temperature": 0, "num_predict": 1200},
+            options={"temperature": 0.2, "top_p": 0.9, "num_predict": 1200},
         )
         try:
             parsed = json.loads(raw)
