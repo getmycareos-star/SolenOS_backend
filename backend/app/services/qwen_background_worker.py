@@ -763,7 +763,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             QwenBackgroundJob.id == job_id,
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.caregiver_id == caregiver_id,
-        ).with_for_update().first()
+        ).populate_existing().with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
             return True
@@ -1255,7 +1255,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     raise ValueError("document_intake_evidence_id_invalid")
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
-                ).with_for_update().first()
+                ).populate_existing().with_for_update().first()
                 if current_job is None or current_job.status == "cancelled":
                     db.rollback()
                     return True
@@ -1270,7 +1270,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 # requeue the deleted document after the processing call returns.
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
-                ).with_for_update().first()
+                ).populate_existing().with_for_update().first()
                 if current_job is None or current_job.status == "cancelled":
                     db.rollback()
                     return True
@@ -1431,7 +1431,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         # cancelled job must never persist a derived answer after that deletion.
         current_job = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.id == job.id
-        ).with_for_update().first()
+        ).populate_existing().with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
             return True
