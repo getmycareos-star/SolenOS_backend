@@ -78,15 +78,29 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
             receipt = response.json()
 
             assert receipt["success"] is True
-            assert receipt["qwen_extraction_status"] == "available", receipt
+            assert receipt["qwen_extraction_status"] == "queued", receipt
+            assert receipt["qwen_job_id"]
             assert receipt["qwen_analysis_id"]
             assert receipt["qwen_review_required"] is True
             assert receipt["qwen_written_to_lcr"] is False
-            assert isinstance(receipt["qwen_candidates"], dict)
-            assert set(receipt["qwen_candidates"]).issuperset({"observations", "open_questions"})
-            assert isinstance(receipt["qwen_candidates"]["observations"], list)
-            assert receipt["qwen_candidates"]["observations"], "real Qwen did not extract a caregiver-reported observation"
             assert receipt["evidence_ids"]
+
+            # Daily Capture acknowledges the persisted source immediately and
+            # delegates model extraction to the durable Qwen worker.
+            deadline = time.monotonic() + 300
+            job_result = None
+            while time.monotonic() < deadline:
+                job_response = client.get(
+                    f"/api/v1/assistant/jobs/{receipt['qwen_job_id']}",
+                    headers=headers,
+                )
+                assert job_response.status_code == 200, job_response.text
+                job_result = job_response.json()
+                if job_result["status"] == "completed":
+                    break
+                assert job_result["status"] not in {"failed", "cancelled"}, job_result
+                time.sleep(1.5)
+            assert job_result and job_result["status"] == "completed", job_result
 
             with test_session_local() as db:
                 event = db.query(CareEvent).filter(
@@ -107,7 +121,11 @@ def test_real_qwen_daily_capture_persists_source_and_keeps_candidates_out_of_lcr
                     CaptureAnalysis.source_evidence_id == evidence.id,
                     CaptureAnalysis.extraction_status == "available",
                 ).one()
-                assert analysis.candidates == receipt["qwen_candidates"]
+                candidates = analysis.candidates
+                assert isinstance(candidates, dict)
+                assert set(candidates).issuperset({"observations", "open_questions"})
+                assert isinstance(candidates["observations"], list)
+                assert candidates["observations"], "real Qwen did not extract a caregiver-reported observation"
                 assert note in evidence.source_text
                 assert event.id == receipt["id"]
                 assert db.query(CareAssertion).filter(
@@ -295,7 +313,7 @@ def test_real_qwen_natural_language_daily_care_preserves_all_clauses_and_compani
                 json={
                     "person_id": person_id,
                     "text": "What has the caregiver recorded about sleep, morning changes, dinner and resting?",
-                    "client_turn_id": f"live-natural-companion-{suffix}",
+                    "client_turn_id": str(uuid.uuid4()),
                 },
             )
             assert companion.status_code == 200, companion.text
