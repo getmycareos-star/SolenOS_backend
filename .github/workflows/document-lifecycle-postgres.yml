@@ -117,7 +117,7 @@ jobs:
             docker.io/pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 \
             server /data --console-address ":9001"
           for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:9000/minio/health/live >/dev/null; then
+            if docker exec solenos-silo silo healthcheck ready; then
               exit 0
             fi
             sleep 2
