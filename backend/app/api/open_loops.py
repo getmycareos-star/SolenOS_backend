@@ -416,7 +416,11 @@ def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
             return saved.get("verification_rule") == expected_rule
         return True
     if event_type == "closure_verified":
-        event_context = after.get("event_context") or {}
+        event_context = after.get("event_context")
+        if not isinstance(event_context, dict) or "closure_note" not in event_context:
+            # Older audit events did not retain the closure note. Preserve
+            # replay compatibility for those records without guessing its value.
+            return after.get("closure_evidence", []) == evidence
         return (
             after.get("closure_evidence", []) == evidence
             and event_context.get("closure_note") == payload.text
