@@ -79,3 +79,50 @@ def test_qwen_claim_extraction_fails_closed_on_malformed_model_output(monkeypatc
         collaboration.qwen_claim_extraction(_request(), request=None, db=None)
 
     assert error.value.status_code == 503
+
+
+def test_qwen_care_understanding_keeps_only_verbatim_source_fragments(monkeypatch):
+    monkeypatch.setattr(collaboration, "_scope", lambda *_args: ("person-1", "caregiver-1"))
+    payload = collaboration.QwenCareUnderstandingRequest(raw_text="Mom ate breakfast this morning.")
+    model_output = {
+        "observations": [
+            {
+                "description": "Mom ate breakfast this morning",
+                "approximate_time": "this morning",
+                "confidence": "high",
+                "raw_fragment": "Mom ate breakfast this morning.",
+            },
+            {
+                "description": "She was happy",
+                "approximate_time": None,
+                "confidence": "high",
+                "raw_fragment": "She was happy.",
+            },
+        ],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert len(result["understanding"]["observations"]) == 1
+    assert result["understanding"]["observations"][0]["raw_fragment"] == "Mom ate breakfast this morning."
+    assert result["provider"] == "private_ollama_qwen"
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
+
+
+def test_qwen_care_understanding_fails_closed_on_invalid_json(monkeypatch):
+    monkeypatch.setattr(collaboration, "_scope", lambda *_args: ("person-1", "caregiver-1"))
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: "not-json")
+    payload = collaboration.QwenCareUnderstandingRequest(raw_text="Mom ate breakfast.")
+
+    with pytest.raises(HTTPException) as error:
+        collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert error.value.status_code == 503
