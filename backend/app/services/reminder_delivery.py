@@ -8,16 +8,16 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import and_, case, cast, exists, literal, or_, String
+from sqlalchemy import String, case, cast, exists, literal, or_
 from sqlalchemy.exc import IntegrityError
 
 
 from app.core.database import SessionLocal
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
-
-# All care notifications stay in the authenticated SolenOS inbox. No external channel is enabled.
 from app.models.reminder import CareReminder
 from app.models.caregiver_access import CaregiverAccessGrant
+
+# All care notifications stay in the authenticated SolenOS inbox. No external channel is enabled.
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 30
