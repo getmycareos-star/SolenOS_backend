@@ -138,7 +138,7 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
                 }
             )
             if not item["priority_basis"]:
-                item["priority_basis"].append("An unresolved care commitment is recorded.")
+                item["priority_basis"].append("This follow-up is still open.")
             important.append(item)
     return immediate, important, deferred, clarification
 
