@@ -5,6 +5,7 @@ from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, creat
 from sqlalchemy.orm import Session
 
 from app.services.lcr_context import (
+    MAX_TEXT_CHARS,
     _load_source_schema,
     build_lcr_context,
     format_lcr_context_for_prompt,
@@ -870,6 +871,52 @@ def test_lcr_context_includes_person_scoped_care_revisions_and_prior_change_anal
         assert "not that the person's real-world condition changed" in prompt
         assert "not an independently verified fact or diagnosis" in prompt
         assert "Private other-person" not in prompt
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
+
+def test_large_json_change_analysis_is_bounded_before_parsing():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    analyses = Table(
+        "care_delta_runs", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("source", String),
+        Column("event_date", DateTime),
+        Column("source_event_id", String),
+        Column("evidence_ids", String),
+        Column("delta_json", String),
+        Column("model_name", String),
+        Column("created_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
+    metadata.create_all(engine)
+    now = datetime(2026, 11, 22, tzinfo=timezone.utc)
+    try:
+        with engine.begin() as connection:
+            connection.execute(analyses.insert(), [{
+                "id": "oversized-sleep-analysis",
+                "person_id": "person-a",
+                "source": "daily_care",
+                "event_date": now,
+                "source_event_id": "sleep-event-a",
+                "evidence_ids": "[]",
+                "delta_json": json.dumps({"topic": "sleep", "summary": "x" * 4000}),
+                "model_name": "qwen-test",
+                "created_by_caregiver_id": "caregiver-a",
+                "created_at": now,
+            }])
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=5, query="sleep",
+            )
+        value = context["sources"]["change_analyses"]["items"][0]["delta_json"]
+        assert isinstance(value, str)
+        assert value.endswith("… [truncated]")
+        assert len(value) == MAX_TEXT_CHARS + len("… [truncated]")
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
