@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
+DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABASE_URL else ""
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL
+    or not any(token in DATABASE_NAME for token in ("test", "benchmark")),
+    reason="requires a disposable migrated PostgreSQL test database",
+)
 
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
@@ -300,11 +306,14 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert recovered_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
     finally:
-        # This PostgreSQL database is disposable and each test uses unique
-        # synthetic identities. Preserve append-only care, learning and audit
-        # history; the CI database is discarded after the job.
+        # This PostgreSQL service database is disposable and each test creates
+        # unique identities. Preserve append-only care-state and learning/audit
+        # history rather than deleting parent rows to make cleanup look tidy.
         if engine:
             engine.dispose()
+
+
+
 def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution_and_shared_reads():
     suffix = uuid.uuid4().hex[:10]
     invite_email = f"concurrent-{suffix}@example.test"
@@ -404,11 +413,14 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
                 invited_caregiver_id,
             }
     finally:
-        # This PostgreSQL database is disposable and each test uses unique
-        # synthetic identities. Preserve append-only care, learning and audit
-        # history; the CI database is discarded after the job.
+        # Keep synthetic test identities and their append-only care/audit
+        # history in this disposable PostgreSQL database. Unique IDs isolate
+        # test runs; the database is discarded after the CI job.
         if engine:
             engine.dispose()
+
+
+
 def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_history():
     suffix = uuid.uuid4().hex[:10]
     invite_email = f"responsibility-{suffix}@example.test"
@@ -479,9 +491,12 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
             assert responsibility.status_code == 200, responsibility.text
             source_id = responsibility.json()["id"]
 
+            # Responsibility transfers are an administrative action. The
+            # primary caregiver initiates the transfer after the recipient's
+            # responsibility and follow-up have been recorded.
             transfer = client.post(
                 "/api/v1/caregiver-access/responsibility-transfers",
-                headers=recipient_headers,
+                headers=primary_headers,
                 json={
                     "source_responsibility_id": source_id,
                     "to_caregiver_profile_id": primary_body["caregiver"]["profile_id"],
@@ -549,8 +564,8 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
                 assert stored_handoff.to_caregiver_id == primary_body["caregiver"]["profile_id"]
                 assert stored_handoff.is_completed is False
     finally:
-        # This PostgreSQL database is disposable and each test uses unique
-        # synthetic identities. Preserve append-only care, learning and audit
-        # history; the CI database is discarded after the job.
+        # Keep synthetic test identities and their append-only care/audit
+        # history in this disposable PostgreSQL database. Unique IDs isolate
+        # test runs; the database is discarded after the CI job.
         if engine:
             engine.dispose()
