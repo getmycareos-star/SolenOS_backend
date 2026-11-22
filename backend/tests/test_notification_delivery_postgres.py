@@ -1,9 +1,11 @@
-"""PostgreSQL integration for durable Web Push attempts, retry and recovery."""
-from datetime import datetime, timedelta, timezone
-import sys
-from types import SimpleNamespace
-import uuid
+"""PostgreSQL acceptance for the in-app-only notification policy.
+
+Legacy browser-push subscriptions must be revoked and queued deliveries cancelled.
+No external provider is called and no new browser subscription is persisted.
+"""
 import os
+import uuid
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -11,46 +13,26 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL or not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg2://")),
+    reason="requires migrated PostgreSQL DATABASE_URL",
+)
 
+from app.core.database import get_db
 from app.main import app
 from app.models.notifications import (
     CareNotification,
     CarePushDelivery,
     CarePushSubscription,
-    DeliveryFailureEvent,
     NotificationDeliveryAttempt,
 )
-import app.api.push_notifications as push_api
 import app.services.reminder_delivery as delivery_service
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
 
 
-def _valid_vapid_settings(secret_key: str):
-    import base64
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.hazmat.primitives.serialization import (
-        Encoding,
-        NoEncryption,
-        PrivateFormat,
-        PublicFormat,
-    )
-
-    private = ec.generate_private_key(ec.SECP256R1())
-    public = private.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
-    pem = private.private_bytes(Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()).decode("ascii")
-    public_key = base64.urlsafe_b64encode(public).rstrip(b"=").decode("ascii")
-    return SimpleNamespace(
-        vapid_public_key=public_key,
-        vapid_private_key=pem,
-        vapid_subject="mailto:support@solenosai.net",
-        secret_key=secret_key,
-    )
-
-
-def test_web_push_failure_retry_and_provider_acceptance_are_durable_and_idempotent(monkeypatch):
+def test_legacy_browser_push_is_disabled_and_existing_deliveries_are_cancelled():
     notification_columns = {
         column["name"]: column
         for column in inspect(engine).get_columns("notification_delivery_attempts")
@@ -61,117 +43,102 @@ def test_web_push_failure_retry_and_provider_acceptance_are_durable_and_idempote
         "notification identifiers up to the 255-character model contract"
     )
 
-    settings = _valid_vapid_settings("postgres-delivery-test-secret")
-    monkeypatch.setattr(push_api, "get_settings", lambda: settings)
-    monkeypatch.setattr(delivery_service, "get_settings", lambda: settings)
-
-    calls = []
-
-    class FakeWebPushException(Exception):
-        def __init__(self, status_code: int):
-            super().__init__("synthetic provider outage")
-            self.response = SimpleNamespace(status_code=status_code)
-
-    def fake_webpush(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise FakeWebPushException(503)
-        return SimpleNamespace(status_code=201)
-
-    monkeypatch.setitem(
-        sys.modules,
-        "pywebpush",
-        SimpleNamespace(WebPushException=FakeWebPushException, webpush=fake_webpush),
-    )
-
     client = TestClient(app)
-    created = client.post(
-        "/api/v1/sessions/anonymous",
-        json={"name": f"Push retry recipient {uuid.uuid4().hex[:8]}", "caregiver_name": "Primary caregiver"},
-    )
-    assert created.status_code == 201, created.text
-    session = created.json()
-    headers = {"Authorization": f"Bearer {session['access_token']}"}
-    endpoint = f"https://fcm.googleapis.com/fcm/send/{uuid.uuid4().hex}"
-    registered = client.post(
-        "/api/v1/notifications/push/subscriptions",
-        headers=headers,
-        json={"endpoint": endpoint, "keys": {"p256dh": "test-public-key", "auth": "test-auth-secret"}},
-    )
-    assert registered.status_code == 201, registered.text
 
-    with Session() as db:
-        subscription = db.query(CarePushSubscription).filter_by(
-            person_id=session["person"]["id"],
-            caregiver_id=session["caregiver"]["id"],
-        ).one()
-        notification_time = subscription.created_at + timedelta(seconds=2)
-        notification = CareNotification(
-            id=f"postgres-push-retry-{uuid.uuid4().hex}",
-            person_id=session["person"]["id"],
-            caregiver_id=session["caregiver"]["id"],
-            title="Private care reminder title",
-            body="Private care details must never be sent to the lock screen.",
-            category="reminder_due",
-            priority="normal",
-            created_at=notification_time,
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    notification_id = str(uuid.uuid4())
+    subscription_id = str(uuid.uuid4())
+    delivery_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    person_id = caregiver_id = None
+    try:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={
+                "name": f"In-app-only notification recipient {uuid.uuid4().hex[:8]}",
+                "caregiver_name": "Primary caregiver",
+            },
         )
-        db.add(notification)
-        db.commit()
-        notification_id = notification.id
+        assert created.status_code == 201, created.text
+        session = created.json()
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        headers = {"Authorization": f"Bearer {session['access_token']}"}
 
-    first_attempt_at = notification_time + timedelta(seconds=1)
-    with Session() as db:
-        accepted = delivery_service.deliver_pending_web_pushes(db=db, now=first_attempt_at)
-        assert accepted == 0
+        capability = client.get("/api/v1/notifications/push/public-key", headers=headers)
+        assert capability.status_code == 200, capability.text
+        assert capability.json() == {"available": False, "public_key": None, "reason": "in_app_only"}
 
-    with Session() as db:
-        delivery = db.query(CarePushDelivery).filter_by(notification_id=notification_id).one()
-        failures = db.query(DeliveryFailureEvent).filter_by(delivery_id=delivery.id).all()
-        attempts = db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification_id).all()
-        assert delivery.status == "retry_scheduled"
-        assert delivery.attempt_count == 1
-        assert delivery.next_attempt_at == first_attempt_at + timedelta(seconds=60)
-        assert len(failures) == 1
-        assert failures[0].failure_code == "http_503"
-        assert failures[0].retryable is True
-        assert failures[0].resolved_at is None
-        assert len(attempts) == 1
-        assert attempts[0].result == "retry_scheduled"
-        assert attempts[0].attempt_number == 1
+        rejected = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers=headers,
+            json={
+                "endpoint": f"https://fcm.googleapis.com/fcm/send/legacy-{uuid.uuid4().hex}",
+                "keys": {"p256dh": "legacy-public-key", "auth": "legacy-auth-key"},
+            },
+        )
+        assert rejected.status_code == 410, rejected.text
 
-    retry_at = first_attempt_at + timedelta(seconds=61)
-    with Session() as db:
-        accepted = delivery_service.deliver_pending_web_pushes(db=db, now=retry_at)
-        assert accepted == 1
+        with Session() as db:
+            notification = CareNotification(
+                id=notification_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title="Private care reminder",
+                body="Private care details stay in the SolenOS inbox.",
+                category="reminder_due",
+                priority="normal",
+                created_at=now,
+            )
+            subscription = CarePushSubscription(
+                id=subscription_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                endpoint_hash="a" * 64,
+                encrypted_subscription="legacy-encrypted-subscription",
+                user_agent="legacy browser",
+                created_at=now,
+                last_seen_at=now,
+            )
+            delivery = CarePushDelivery(
+                id=delivery_id,
+                notification_id=notification_id,
+                subscription_id=subscription_id,
+                status="retry_scheduled",
+                attempt_count=1,
+                next_attempt_at=now,
+                last_error_code="http_503",
+                last_error_message="Legacy provider retry must be cancelled.",
+            )
+            db.add_all([notification, subscription, delivery])
+            db.commit()
 
-    with Session() as db:
-        delivery = db.query(CarePushDelivery).filter_by(notification_id=notification_id).one()
-        failures = db.query(DeliveryFailureEvent).filter_by(delivery_id=delivery.id).all()
-        attempts = db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification_id).order_by(
-            NotificationDeliveryAttempt.attempt_number.asc()
-        ).all()
-        assert delivery.status == "accepted"
-        assert delivery.attempt_count == 2
-        assert delivery.provider_accepted_at == retry_at
-        assert delivery.last_error_code is None
-        assert len(failures) == 1
-        assert failures[0].resolved_at == retry_at
-        assert len(attempts) == 2
-        assert [item.result for item in attempts] == ["retry_scheduled", "provider_accepted"]
-        assert [item.attempt_number for item in attempts] == [1, 2]
-        assert all(item.person_id == session["person"]["id"] for item in attempts)
-        assert all(item.caregiver_id == session["caregiver"]["id"] for item in attempts)
+        with Session() as db:
+            assert delivery_service.deliver_pending_web_pushes(db=db, now=now) == 0
+            subscription = db.query(CarePushSubscription).filter_by(id=subscription_id).one()
+            delivery = db.query(CarePushDelivery).filter_by(id=delivery_id).one()
+            assert subscription.revoked_at == now
+            assert delivery.status == "cancelled"
+            assert delivery.last_error_code == "in_app_only_policy"
+            assert "SolenOS inbox" in (delivery.last_error_message or "")
+            assert db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification_id).count() == 0
 
-    # A worker restart/replay after provider acceptance must not send again.
-    with Session() as db:
-        accepted = delivery_service.deliver_pending_web_pushes(db=db, now=retry_at + timedelta(minutes=10))
-        assert accepted == 0
-    with Session() as db:
-        assert db.query(CarePushDelivery).filter_by(notification_id=notification_id).count() == 1
-        assert db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification_id).count() == 2
-
-    assert len(calls) == 2
-    for call in calls:
-        assert "Private care reminder title" not in call["data"]
-        assert "Private care details" not in call["data"]
+        # Re-running the worker is safe and must not create a provider attempt.
+        with Session() as db:
+            assert delivery_service.deliver_pending_web_pushes(db=db, now=now) == 0
+            assert db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification_id).count() == 0
+    finally:
+        app.dependency_overrides.clear()
+        if Session is not None:
+            with Session() as db:
+                db.query(CarePushDelivery).filter_by(id=delivery_id).delete(synchronize_session=False)
+                db.query(CarePushSubscription).filter_by(id=subscription_id).delete(synchronize_session=False)
+                db.query(CareNotification).filter_by(id=notification_id).delete(synchronize_session=False)
+                db.commit()
