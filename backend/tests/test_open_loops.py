@@ -1218,3 +1218,139 @@ def test_closure_retry_rejects_changed_closure_note():
     assert retry.status_code == 200, retry.text
     assert retry.json()["accepted"] is True
     assert changed.status_code == 409, changed.text
+
+
+def test_all_remaining_open_loop_retries_reject_changed_mutation_payloads():
+    client = TestClient(app)
+    _, headers = session(client, "Remaining retry recipient")
+
+    cancelled_loop = create_loop(client, headers, "follow_up")
+    cancel_payload = {
+        "text": "The family chose not to continue this follow-up.",
+        "evidence": [],
+        "idempotency_key": "cancel-payload-integrity",
+    }
+    first_cancel = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
+        headers=headers,
+        json=cancel_payload,
+    )
+    same_cancel = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
+        headers=headers,
+        json=cancel_payload,
+    )
+    changed_cancel = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
+        headers=headers,
+        json={**cancel_payload, "text": "A different cancellation reason."},
+    )
+    assert first_cancel.status_code == 200, first_cancel.text
+    assert same_cancel.status_code == 200, same_cancel.text
+    assert changed_cancel.status_code == 409, changed_cancel.text
+
+    reopen_payload = {
+        "text": "The family wants to reopen this follow-up.",
+        "evidence": [],
+        "idempotency_key": "reopen-payload-integrity",
+    }
+    first_reopen = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
+        headers=headers,
+        json=reopen_payload,
+    )
+    same_reopen = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
+        headers=headers,
+        json=reopen_payload,
+    )
+    changed_reopen = client.post(
+        f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
+        headers=headers,
+        json={**reopen_payload, "text": "A different reason for reopening."},
+    )
+    assert first_reopen.status_code == 200, first_reopen.text
+    assert same_reopen.status_code == 200, same_reopen.text
+    assert changed_reopen.status_code == 409, changed_reopen.text
+
+    contradiction = create_loop(client, headers, "contradiction")
+    contradiction_source = create_source_evidence(contradiction)
+    reconciliation_payload = {
+        "text": "The reports describe different dates; neither account is discarded.",
+        "evidence": [{"evidence_id": contradiction_source, "kind": "source_comparison"}],
+        "idempotency_key": "reconciliation-payload-integrity",
+    }
+    first_reconciliation = client.post(
+        f"/api/v1/open-loops/{contradiction['id']}/reconcile",
+        headers=headers,
+        json=reconciliation_payload,
+    )
+    same_reconciliation = client.post(
+        f"/api/v1/open-loops/{contradiction['id']}/reconcile",
+        headers=headers,
+        json=reconciliation_payload,
+    )
+    changed_reconciliation = client.post(
+        f"/api/v1/open-loops/{contradiction['id']}/reconcile",
+        headers=headers,
+        json={**reconciliation_payload, "text": "The reports describe the same date."},
+    )
+    assert first_reconciliation.status_code == 200, first_reconciliation.text
+    assert same_reconciliation.status_code == 200, same_reconciliation.text
+    assert changed_reconciliation.status_code == 409, changed_reconciliation.text
+
+    verified_loop = create_loop(client, headers, "pending_action")
+    verification_source = create_source_evidence(verified_loop)
+    verification_payload = {
+        "text": "The saved clinic note supports the reported outcome.",
+        "evidence": [{"evidence_id": verification_source}],
+        "verification_rule": "The outcome must match the saved clinic note.",
+        "idempotency_key": "verification-payload-integrity",
+    }
+    first_verification = client.post(
+        f"/api/v1/open-loops/{verified_loop['id']}/verify-outcome",
+        headers=headers,
+        json=verification_payload,
+    )
+    same_verification = client.post(
+        f"/api/v1/open-loops/{verified_loop['id']}/verify-outcome",
+        headers=headers,
+        json=verification_payload,
+    )
+    changed_verification = client.post(
+        f"/api/v1/open-loops/{verified_loop['id']}/verify-outcome",
+        headers=headers,
+        json={**verification_payload, "text": "A different outcome was verified."},
+    )
+    assert first_verification.status_code == 200, first_verification.text
+    assert same_verification.status_code == 200, same_verification.text
+    assert changed_verification.status_code == 409, changed_verification.text
+
+    corroborated_loop = create_loop(client, headers, "pending_action")
+    first_source = create_source_evidence(corroborated_loop, "First independent corroboration source.")
+    second_source = create_source_evidence(corroborated_loop, "Second independent corroboration source.")
+    create_independent_corroboration(client, headers, first_source, second_source)
+    corroboration_payload = {
+        "text": "Two separately originated records were reviewed.",
+        "evidence": [{"evidence_id": first_source}, {"evidence_id": second_source}],
+        "verification_rule": "The outcome must be supported by independent records.",
+        "idempotency_key": "corroboration-payload-integrity",
+    }
+    first_corroboration = client.post(
+        f"/api/v1/open-loops/{corroborated_loop['id']}/corroborate-outcome",
+        headers=headers,
+        json=corroboration_payload,
+    )
+    same_corroboration = client.post(
+        f"/api/v1/open-loops/{corroborated_loop['id']}/corroborate-outcome",
+        headers=headers,
+        json=corroboration_payload,
+    )
+    changed_corroboration = client.post(
+        f"/api/v1/open-loops/{corroborated_loop['id']}/corroborate-outcome",
+        headers=headers,
+        json={**corroboration_payload, "text": "A different corroboration statement."},
+    )
+    assert first_corroboration.status_code == 200, first_corroboration.text
+    assert same_corroboration.status_code == 200, same_corroboration.text
+    assert changed_corroboration.status_code == 409, changed_corroboration.text
