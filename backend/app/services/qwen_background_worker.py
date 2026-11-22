@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -655,9 +656,15 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     # source/job locks alive and block subsequent Daily Care retries.
     db.rollback()
 
-    if quick_check_in_capture:
-        # The persisted event/evidence already contains the complete structured
-        # report. Do not infer observations or generate clarification work.
+    test_inference_bypass = (
+        os.getenv("APP_ENV", "").strip().casefold() == "test"
+        and os.getenv("SOLENOS_TEST_DISABLE_QWEN", "").strip().casefold() in {"1", "true", "yes"}
+    )
+    if quick_check_in_capture or test_inference_bypass:
+        # The persisted source report remains authoritative. In deterministic
+        # CI mode, skip model-only candidate extraction rather than requiring
+        # an Ollama service or manufacturing model output. Reconciliation of
+        # the saved event/evidence continues through the deterministic engine.
         candidates = {"observations": [], "open_questions": []}
     else:
         candidates = await asyncio.to_thread(
@@ -788,11 +795,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         observation_count,
         len(source_text),
     )
-    extraction_status = "not_applicable" if quick_check_in_capture else "available"
-    assessment_status = "not_applicable" if quick_check_in_capture else (
+    extraction_status = "not_applicable" if quick_check_in_capture or test_inference_bypass else "available"
+    assessment_status = "not_applicable" if quick_check_in_capture or test_inference_bypass else (
         "available" if candidate_count else "not_applicable"
     )
-    review_status = "not_required" if quick_check_in_capture or natural_language_update or not candidate_count else "required"
+    review_status = "not_required" if quick_check_in_capture or test_inference_bypass or natural_language_update or not candidate_count else "required"
 
     # Commit the extraction/assessment receipt before derived reconciliation.
     # If reconciliation or LCR projection later fails, the caregiver's original
