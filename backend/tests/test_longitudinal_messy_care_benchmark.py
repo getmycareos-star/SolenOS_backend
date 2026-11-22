@@ -2378,7 +2378,7 @@ def test_situation_assessment_snapshot_survives_new_authorized_session_and_prese
         assessment_id = created.json()["assessment_id"]
         assessment = created.json()["assessment"]
         assert assessment["source_state_fingerprint"]
-        assert assessment["current_care_reality"]["records"]
+        assert any(item.get("id") == event.id for item in assessment["current_care_reality"]["records"])
 
         fresh = client.get(
             "/api/v1/care-continuity/situation-understanding",
