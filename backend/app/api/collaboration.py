@@ -4364,6 +4364,11 @@ async def create_qwen_lcr_proposal(
         QwenModelOutput.person_id == person_id,
         QwenModelOutput.caregiver_id == caregiver_id,
     ).with_for_update().first()
+    if output is not None and output.workflow == "two_week_review":
+        raise HTTPException(
+            status_code=409,
+            detail="Two-week review summaries are review history, not Living Care Record entries",
+        )
     if (
         output is None
         or output.written_to_lcr
