@@ -404,7 +404,7 @@ def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
         if not saved or saved.get("text") != payload.text or saved.get("evidence", []) != evidence:
             return False
         if event_type in {"outcome_attested", "outcome_corroborated"}:
-            expected_rule = payload.verification_rule or (event.before_state or {}).get("verification_rule")
+            expected_rule = (event.before_state or {}).get("verification_rule") or payload.verification_rule
             return saved.get("verification_rule") == expected_rule
         return True
     if event_type == "closure_verified":
