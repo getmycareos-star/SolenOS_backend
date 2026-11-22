@@ -113,7 +113,7 @@ def _open_loop_decisions(open_loops: list[dict[str, Any]], now: datetime):
         }:
             item["category"] = "needs_clarification"
             item["priority_basis"].append(
-                "The care significance of this follow-up has not been established. More information is needed before it can be treated as something that needs action or can wait."
+                "We do not yet have enough information to tell whether this needs action or can wait."
             )
             clarification.append(item)
         elif normalized_reasons.intersection({

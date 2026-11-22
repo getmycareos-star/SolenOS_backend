@@ -65,7 +65,7 @@ def test_unknown_open_loop_significance_stays_in_needs_clarification():
     assert result["needs_attention_now"] == []
     assert result["important_to_address"] == []
     assert result["can_wait_with_documented_basis"] == []
-    assert all("care significance" in item["priority_basis"][0] for item in clarification.values())
+    assert all("enough information" in item["priority_basis"][0] for item in clarification.values())
 
 
 def test_unexplained_high_priority_is_not_automatically_urgent():
