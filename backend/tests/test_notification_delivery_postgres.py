@@ -85,6 +85,11 @@ def test_legacy_browser_push_is_disabled_and_existing_deliveries_are_cancelled()
             },
         )
         assert rejected.status_code == 410, rejected.text
+        with Session() as db:
+            assert db.query(CarePushSubscription).filter_by(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+            ).count() == 0
 
         with Session() as db:
             notification = CareNotification(
