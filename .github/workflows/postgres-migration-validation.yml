@@ -198,15 +198,23 @@ jobs:
           print("CAREGIVER_RESPONSIBILITY_TRANSFER_REPAIR=PASS")
           PY
 
-      - name: Verify appointment idempotency migration downgrade and re-upgrade
+      - name: Verify reversible appointment and evidence-review migrations downgrade and re-upgrade in isolation
         working-directory: backend
         run: |
           set -Eeuo pipefail
-          # Later event-time reconciliation migrations are intentionally
-          # forward-only to preserve persisted care history. Exercise the
-          # reversible appointment idempotency revision in isolation.
-          python -m alembic downgrade 20261107_04_assert_event_time
-          python -m alembic upgrade head
+          # The main validation database is already at head and includes
+          # forward-only review receipts. Never downgrade it across persisted
+          # history. Round-trip only reversible revisions in a disposable DB.
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE solenos_review_migration_roundtrip"
+          ROUNDTRIP_DATABASE_URL="${DATABASE_URL%/solenos_test}/solenos_review_migration_roundtrip"
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_01_appt_date_optional
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_02_evidence_review_idem
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic downgrade 20261121_01_appt_date_optional
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic downgrade 20261120_10_caregiver_context_model_alignment
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_01_appt_date_optional
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_02_evidence_review_idem
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade head
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic current
           python -m alembic current
 
       - name: Verify LCR history schema columns, indexes and foreign keys
