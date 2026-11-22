@@ -1174,3 +1174,47 @@ def test_response_outcome_and_update_retries_reject_changed_payloads():
     assert first_update.status_code == 200, first_update.text
     assert same_update.status_code == 200, same_update.text
     assert changed_update.status_code == 409, changed_update.text
+
+
+
+def test_closure_retry_rejects_changed_closure_note():
+    client = TestClient(app)
+    _, headers = session(client, "Care recipient")
+    loop = create_loop(client, headers, "awaiting_response")
+
+    response = client.post(
+        f"/api/v1/open-loops/{loop['id']}/responses",
+        headers=headers,
+        json={
+            "text": "The clinic returned the call.",
+            "evidence": [{"kind": "caregiver_report", "text": "The clinic returned the call."}],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    close_payload = {
+        "text": "Caregiver confirmed the follow-up was completed.",
+        "evidence": [{"kind": "caregiver_report", "text": "The follow-up was completed."}],
+        "idempotency_key": "closure-note-payload-integrity",
+    }
+    first = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json=close_payload,
+    )
+    retry = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json=close_payload,
+    )
+    changed = client.post(
+        f"/api/v1/open-loops/{loop['id']}/close",
+        headers=headers,
+        json={**close_payload, "text": "A different closure note."},
+    )
+
+    assert first.status_code == 200, first.text
+    assert first.json()["accepted"] is True
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["accepted"] is True
+    assert changed.status_code == 409, changed.text
