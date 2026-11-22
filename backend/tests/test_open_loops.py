@@ -1354,3 +1354,38 @@ def test_all_remaining_open_loop_retries_reject_changed_mutation_payloads():
     assert first_corroboration.status_code == 200, first_corroboration.text
     assert same_corroboration.status_code == 200, same_corroboration.text
     assert changed_corroboration.status_code == 409, changed_corroboration.text
+
+
+
+def test_outcome_verification_retry_rejects_changed_ignored_rule():
+    client = TestClient(app)
+    _, headers = session(client, "Verification rule recipient")
+    original_rule = "The recorded outcome must match the saved clinic letter."
+    loop = create_loop(
+        client, headers, "pending_action",
+        verification_rule=original_rule,
+    )
+    source_id = create_source_evidence(loop, "Saved clinic letter supporting the outcome.")
+    payload = {
+        "text": "The outcome matches the saved clinic letter.",
+        "evidence": [{"evidence_id": source_id}],
+        "idempotency_key": "verification-rule-payload-integrity",
+    }
+
+    first = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers, json=payload,
+    )
+    identical = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers, json=payload,
+    )
+    changed_ignored_rule = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers,
+        json={**payload, "verification_rule": "A different verification rule."},
+    )
+
+    assert first.status_code == 200, first.text
+    assert identical.status_code == 200, identical.text
+    assert changed_ignored_rule.status_code == 409, changed_ignored_rule.text
