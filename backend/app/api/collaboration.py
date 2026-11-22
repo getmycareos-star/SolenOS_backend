@@ -4685,8 +4685,13 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
         "invent details, or convert uncertainty into certainty."
     )
     def extract_once(label: str) -> dict:
+        run_instruction = (
+            "First independent pass: read the source from the beginning and extract only clearly supported claims."
+            if label == "A"
+            else "Second independent pass: re-read the original source from scratch. Do not assume the first pass is complete; independently check for omitted distinct claims while keeping the same strict evidence standard."
+        )
         raw = qwen_chat(
-            [{"role": "system", "content": system + f" This is independent extraction run {label}."},
+            [{"role": "system", "content": system + " " + run_instruction},
              {"role": "user", "content": "Original source text:\\n" + source}],
             response_format="json",
             options={"temperature": 0, "num_predict": 1200},
