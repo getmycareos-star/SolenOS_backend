@@ -43,6 +43,7 @@ from app.api.document_intelligence import (
     _existing_assertion_for_exact_document_duplicate,
 )
 from app.models.care import Caregiver, Person, Evidence
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.uncertainty import OpenQuestion
@@ -88,6 +89,11 @@ def test_postgres_completed_and_cancelled_document_jobs_without_analysis_remain_
                 relationship="family", person_id=person_id,
             ))
             db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id, caregiver_id=caregiver_id,
+                role="primary", access_scope="full_record", status="active",
+                can_manage_members=True, granted_by_caregiver_id=caregiver_id,
+            ))
             db.add_all([
                 Evidence(
                     id=completed_evidence_id, person_id=person_id, type="document",
@@ -169,6 +175,11 @@ def test_postgres_completed_document_analysis_outside_visible_limit_is_not_marke
                 relationship="family", person_id=person_id,
             ))
             db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id, caregiver_id=caregiver_id,
+                role="primary", access_scope="full_record", status="active",
+                can_manage_members=True, granted_by_caregiver_id=caregiver_id,
+            ))
             for evidence_id, text_value in (
                 (visible_evidence_id, "Most recent saved document."),
                 (hidden_evidence_id, "Earlier saved document."),
