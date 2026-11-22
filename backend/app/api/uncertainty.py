@@ -439,9 +439,12 @@ def review_question_answer(
                 ) from exc
         if execution is not None:
             execution["stages"]["reconciliation"] = "committed"
-            # Finalize the immutable receipt before the event is first flushed.
+            # Set the complete immutable receipt before the event is first
+            # flushed. Updating an already-inserted review event would violate
+            # the append-only contract and fail PostgreSQL's immutability guard.
             event.care_continuity_execution = execution
-        # Persist the review event once, with its complete immutable payload.
+        # Insert only after reconciliation has completed and the event payload
+        # is final; the review event is immutable from its first persistence.
         engine.db.add(event)
         engine.db.commit()
         engine.db.refresh(event)

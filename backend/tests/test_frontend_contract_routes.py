@@ -269,6 +269,10 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         ]
         assert len(listed_uploads) == 2
         assert all(isinstance(item.get("extra_metadata"), dict) for item in listed_uploads)
+        saved_original = next(item for item in listed_uploads if item["id"] == evidence_id)
+        scan_processing = saved_original["extra_metadata"]["scan_processing"]
+        assert scan_processing["client_declared_review_status"] == "not_provided"
+        assert scan_processing["client_submitted_scan_review_status"] == "caregiver_reviewed"
         assert any(item["extra_metadata"].get("duplicate_detected") is True for item in listed_uploads)
         assert all(
             item["extra_metadata"]["source_integrity"]["original_binary_available"] is True
@@ -350,7 +354,7 @@ def test_original_upload_download_and_cross_record_denial(monkeypatch):
         assert saved_evidence is not None
         scan_metadata = json.loads(saved_evidence.extra_metadata)["scan_processing"]
         assert scan_metadata["client_declared_review_status"] == "not_provided"
-        assert scan_metadata["client_submitted_review_status"] == "caregiver_reviewed"
+        assert scan_metadata["client_submitted_scan_review_status"] == "caregiver_reviewed"
         assert scan_metadata["rotation_degrees"] == 1.5
         assert scan_metadata["crop_insets_percent"] == {"top": 2.0, "right": 3.0, "bottom": 4.0, "left": 5.0}
         assert scan_metadata["text_prepared_by_client"] is True
