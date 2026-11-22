@@ -9,6 +9,7 @@ import logging
 import hashlib
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
+from app.services.daily_capture_status import daily_capture_extraction_status
 from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import (
@@ -816,12 +817,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                 "evidence_ids": linked_evidence_ids,
                 "structured_detail_count": structured_detail_count,
                 "idempotent_replay": True,
-                "qwen_extraction_status": existing_analysis.extraction_status if existing_analysis else (
-                    "queued" if existing_job and existing_job.status in {"queued", "processing"}
-                    else "available" if existing_job and existing_job.status == "completed"
-                    else "failed" if existing_job and existing_job.status == "failed"
-                    else "unavailable"
-                ),
+                "qwen_extraction_status": daily_capture_extraction_status(existing_analysis, existing_job),
                 "qwen_candidates": existing_analysis.candidates if existing_analysis else None,
                 "qwen_analysis_id": existing_analysis.id if existing_analysis else None,
                 "qwen_job_id": existing_job.id if existing_job else None,
