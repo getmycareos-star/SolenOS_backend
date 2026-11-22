@@ -22,7 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareDeltaRun
+from app.models.care_continuity import CareAssertion, CareDeltaRun
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob
 import app.api.daily_care_intelligence as daily_care_intelligence
@@ -237,7 +237,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 return {
                     "observations": [{
                         "source_quote": "Mum was unusually confused this afternoon and refused lunch.",
-                        "observation": "Caregiver reported confusion and refused lunch.",
+                        "observation": "unusually confused this afternoon and refused lunch",
                         "review_status": "pending_review",
                     }],
                     "open_questions": [],
@@ -306,6 +306,53 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert history_capture["capture_processing"]["analysis_id"] == analysis_id
             assert history_capture["capture_processing"]["extraction_status"] == "available"
             assert history_capture["capture_processing"]["review_required"] is True
+
+            # AI-extracted detail must remain pending until this caregiver explicitly approves it.
+            # The accepted assertion must preserve the original source and be visible to a fresh LCR read.
+            review_response = client.post(
+                f"/api/v1/capture/analyses/{analysis_id}/review",
+                headers=headers,
+                json={"candidate_index": 0, "decision": "accept"},
+            )
+            assert review_response.status_code == 200, review_response.text
+            review_body = review_response.json()
+            assert review_body["review_decision"] == "accept"
+            assert review_body["written_to_lcr"] is True
+            assert review_body["assertion_id"]
+            assert review_body["longitudinal_retrieval_status"] == "verified"
+
+            accepted_analysis = client.get(
+                f"/api/v1/capture/analyses/{analysis_id}", headers=headers
+            )
+            assert accepted_analysis.status_code == 200, accepted_analysis.text
+            assert accepted_analysis.json()["review_required"] is False
+            assert accepted_analysis.json()["candidates"]["observations"][0]["review_status"] == "accepted_by_caregiver"
+
+            with SessionLocal() as db:
+                accepted_assertion = db.query(CareAssertion).filter_by(
+                    id=review_body["assertion_id"], person_id=person_id
+                ).one()
+                assert accepted_assertion.assertion_status == "caregiver_reviewed"
+                assert accepted_assertion.source_event_id == event_id
+                assert accepted_assertion.evidence_ids == [evidence_id]
+                accepted_context = build_unified_lcr_context(
+                    db, person_id, caregiver_id, query="confused lunch", limit_per_source=50
+                )
+                accepted_ids = {
+                    row["id"] for row in accepted_context["sources"]["assertions"]["items"]
+                }
+                assert accepted_assertion.id in accepted_ids
+
+            reviewed_history = client.get(
+                "/api/v1/daily-care/intelligence/history?limit=200&offset=0",
+                headers=headers,
+            )
+            assert reviewed_history.status_code == 200, reviewed_history.text
+            reviewed_capture = next(
+                row for row in reviewed_history.json()["records"]
+                if row.get("source_id") == event_id
+            )
+            assert reviewed_capture["capture_processing"]["review_required"] is False
 
             retry = client.post(
                 "/api/v1/daily/log",
