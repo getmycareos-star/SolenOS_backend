@@ -1124,9 +1124,9 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     # before less decision-relevant source notes. Otherwise a large evidence-review
     # history can consume the bounded caveat list and hide the page of the very
     # document claim the Companion is being asked to explain.
-    # Stable-sort by source priority only. Keep the retrieval order within
-    # each source so the bounded caveat list preserves the same record ordering
-    # caregivers see in the underlying LCR projection.
+    # Prioritize assertion caveats with page-level document provenance, then
+    # preserve retrieval order within each priority group. This keeps the source
+    # page for accepted document claims visible under the bounded caveat budget.
     source_caveats.sort(
         key=lambda caveat: (
             caveat.get("source_type") != "assertions",
