@@ -28,6 +28,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
+from app.models.open_loop import OpenLoopRecord
 
 BASE_URL = "http://127.0.0.1:8012"
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -2066,6 +2067,74 @@ def main():
                 and next(item for item in reminder_list if item.get("id") == cancelled_reminder_id).get("status") == "cancelled",
                 f"PostgreSQL reminder lifecycle did not persist before restart: {reminder_list_status}: {reminder_list}")
 
+        # Persist an appointment outcome, explicit follow-up, and reviewed LCR
+        # assertion before the real Uvicorn restart. This closes the gap between
+        # the in-process appointment PostgreSQL test and restart recovery.
+        appointment_follow_up_item_id = "restart-follow-up-" + uuid.uuid4().hex
+        appointment_workspace_body = {
+            "status": "outcome_pending",
+            "payload": {
+                "caregiverReport": "Caregiver reports that dressing needed two-person assistance this morning.",
+                "clinicianFindings": "Caregiver recorded that the clinic asked for a call next Tuesday.",
+                "decisions": "Family plans to ask about transport support.",
+                "followUps": [{
+                    "id": appointment_follow_up_item_id,
+                    "action": "Call the clinic for the appointment result",
+                    "owner_label": "Family caregiver",
+                    "owner_role": "caregiver",
+                    "status": "open",
+                }],
+            },
+            "change_reason": "PostgreSQL restart recovery appointment fixture",
+            "idempotency_key": "restart-appointment-" + uuid.uuid4().hex,
+        }
+        appointment_create_status, appointment_workspace = request(
+            "POST", "/api/v1/appointment-workspaces",
+            body=appointment_workspace_body, token=token_a,
+        )
+        require(appointment_create_status == 201 and appointment_workspace.get("id"),
+                f"Appointment workspace did not persist before restart: {appointment_create_status}: {appointment_workspace}")
+        appointment_workspace_id = appointment_workspace["id"]
+
+        proposal_status, appointment_proposals = request(
+            "POST", f"/api/v1/appointment-workspaces/{appointment_workspace_id}/outcome-proposals",
+            token=token_a,
+        )
+        proposal_items = (appointment_proposals or {}).get("items") or []
+        require(proposal_status == 200 and len(proposal_items) == 3,
+                f"Appointment outcome proposals were not created from saved caregiver notes: {proposal_status}: {appointment_proposals}")
+        accepted_outcome_status, accepted_outcome = request(
+            "POST",
+            f"/api/v1/appointment-workspaces/{appointment_workspace_id}/outcome-proposals/{proposal_items[0]['id']}/review",
+            body={"decision": "accept"}, token=token_a,
+        )
+        require(accepted_outcome_status == 200
+                and accepted_outcome.get("written_to_lcr") is True
+                and accepted_outcome.get("assertion_id"),
+                f"Explicitly accepted appointment outcome was not saved to the LCR: {accepted_outcome_status}: {accepted_outcome}")
+        appointment_assertion_id = accepted_outcome["assertion_id"]
+        rejected_outcome_status, rejected_outcome = request(
+            "POST",
+            f"/api/v1/appointment-workspaces/{appointment_workspace_id}/outcome-proposals/{proposal_items[2]['id']}/review",
+            body={"decision": "reject"}, token=token_a,
+        )
+        require(rejected_outcome_status == 200 and rejected_outcome.get("written_to_lcr") is False,
+                f"Rejected appointment proposal was incorrectly written to the LCR: {rejected_outcome_status}: {rejected_outcome}")
+
+        appointment_follow_up_hash = hashlib.sha256(
+            ("follow-up-id:" + appointment_follow_up_item_id).encode("utf-8")
+        ).hexdigest()[:24]
+        appointment_follow_up_source_id = f"{appointment_workspace_id}:{appointment_follow_up_hash}"
+        with SessionLocal() as db:
+            appointment_follow_up = db.query(OpenLoopRecord).filter_by(
+                person_id=person_a,
+                source_type="appointment_workspace_follow_up",
+                source_id=appointment_follow_up_source_id,
+            ).one_or_none()
+            require(appointment_follow_up is not None and appointment_follow_up.status == "open",
+                    "Appointment follow-up was not durably linked to the shared Open Loop store")
+            appointment_follow_up_id = appointment_follow_up.id
+
         stop_server(server)
         server = start_server()
 
@@ -2085,6 +2154,49 @@ def main():
                 and post_restart_login.get("access_token") != second_device.get("access_token"),
                 "Post-restart independent login changed the account/person/caregiver identity or reused the old session")
         token_a = post_restart_login["access_token"]
+        # The workspace revision, caregiver-approved outcome, rejected proposal,
+        # and linked follow-up must all survive a process restart and fresh login.
+        appointment_read_status, restored_appointment_workspace = request(
+            "GET", f"/api/v1/appointment-workspaces/{appointment_workspace_id}", token=token_a,
+        )
+        require(appointment_read_status == 200
+                and restored_appointment_workspace.get("id") == appointment_workspace_id
+                and restored_appointment_workspace.get("version_number") == 1
+                and (restored_appointment_workspace.get("payload") or {}).get("followUps", [{}])[0].get("id") == appointment_follow_up_item_id,
+                f"Appointment workspace did not survive Uvicorn restart: {appointment_read_status}: {restored_appointment_workspace}")
+        appointment_replay_status, appointment_replay = request(
+            "POST", "/api/v1/appointment-workspaces",
+            body=appointment_workspace_body, token=token_a,
+        )
+        require(appointment_replay_status == 201
+                and appointment_replay.get("id") == appointment_workspace_id,
+                f"Appointment save retry after restart did not return the original workspace: {appointment_replay_status}: {appointment_replay}")
+        appointment_follow_up_status, restored_appointment_follow_up = request(
+            "GET", f"/api/v1/open-loops/{appointment_follow_up_id}", token=token_a,
+        )
+        require(appointment_follow_up_status == 200
+                and restored_appointment_follow_up.get("loop", {}).get("id") == appointment_follow_up_id
+                and restored_appointment_follow_up.get("loop", {}).get("source_id") == appointment_follow_up_source_id
+                and restored_appointment_follow_up.get("loop", {}).get("status") == "open",
+                f"Appointment follow-up did not survive Uvicorn restart: {appointment_follow_up_status}: {restored_appointment_follow_up}")
+        appointment_follow_up_history_status, appointment_follow_up_history = request(
+            "GET", f"/api/v1/open-loops/{appointment_follow_up_id}/history", token=token_a,
+        )
+        require(appointment_follow_up_history_status == 200 and any(
+            item.get("event_type") == "created_from_appointment_follow_up"
+            for item in appointment_follow_up_history
+        ), f"Appointment follow-up history did not survive Uvicorn restart: {appointment_follow_up_history_status}: {appointment_follow_up_history}")
+        appointment_assertions_status, appointment_assertions = request(
+            "GET", f"/api/v1/care-continuity/assertions/{person_a}", token=token_a,
+        )
+        require(appointment_assertions_status == 200 and any(
+            item.get("id") == appointment_assertion_id for item in appointment_assertions
+        ), "Caregiver-approved appointment outcome did not survive Uvicorn restart in the LCR")
+        foreign_appointment_status, foreign_appointment = request(
+            "GET", f"/api/v1/appointment-workspaces/{appointment_workspace_id}", token=token_b,
+        )
+        require(foreign_appointment_status == 404,
+                f"Another care record accessed the appointment workspace after restart: {foreign_appointment_status}: {foreign_appointment}")
         post_restart_reminder_status, post_restart_reminders = request(
             "GET", f"/api/v1/reminders/{person_a}", token=token_a,
         )
