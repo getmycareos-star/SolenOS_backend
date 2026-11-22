@@ -216,6 +216,30 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert replayed_queue["job_id"] == processing_job_id
             assert replayed_queue["idempotent_replay"] is True
 
+        # A worker can report completed even when its extraction/analysis write
+        # did not survive. That must not disappear from the caregiver's document
+        # queue or be presented as "waiting"; the original remains retryable.
+        with Session() as db:
+            processing_job = db.query(QwenBackgroundJob).filter_by(id=processing_job_id).one()
+            processing_job.status = "completed"
+            db.commit()
+        with Session() as db:
+            incomplete_state = list_document_intelligence(
+                _request(person_id, caregiver_id), 50, db
+            )
+            incomplete_job = next(
+                item for item in incomplete_state["processing_jobs"]
+                if item["evidence_id"] == evidence_id
+            )
+            assert incomplete_job["status"] == "failed"
+            assert incomplete_job["error_code"] == "completed_without_analysis"
+            retried_incomplete_job = queue_document_intake(
+                evidence_id, _request(person_id, caregiver_id), db
+            )
+            assert retried_incomplete_job["job_id"] == processing_job_id
+            assert retried_incomplete_job["status"] == "queued"
+            assert retried_incomplete_job["idempotent_replay"] is False
+
         # Execute the real durable worker against PostgreSQL. Only the candidate
         # model output is deterministic; upload, extraction, persistence and job
         # lifecycle all use the real database and service implementations.
