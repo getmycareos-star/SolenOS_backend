@@ -4268,6 +4268,47 @@ def evaluate_deployed_qwen(request: Request):
     }
 
 
+@router.get("/assistant/reviews/two-week")
+def list_two_week_reviews(
+    request: Request,
+    limit: int = Query(default=10, ge=1, le=30),
+    db: Session = Depends(get_db),
+):
+    """List only this caregiver's persisted two-week review outputs and review history."""
+    person_id, caregiver_id = _scope(request, db)
+    rows = db.query(QwenBackgroundJob, QwenModelOutput).join(
+        QwenModelOutput,
+        QwenModelOutput.job_id == QwenBackgroundJob.id,
+    ).filter(
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "two_week_review",
+        QwenBackgroundJob.status == "completed",
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+        QwenModelOutput.workflow == "two_week_review",
+    ).order_by(QwenModelOutput.created_at.desc(), QwenModelOutput.id.desc()).limit(limit).all()
+    items = []
+    for job, output in rows:
+        items.append({
+            "job_id": job.id,
+            "output_id": output.id,
+            "status": job.status,
+            "workflow": output.workflow,
+            "reply": output.output_text,
+            "output_review_status": output.review_status,
+            "review_required": bool(output.review_required),
+            "written_to_lcr": bool(output.written_to_lcr),
+            "persistence": "read_only_assistance",
+            "source_event_ids": json.loads(output.source_event_ids_json or "[]"),
+            "source_evidence_ids": json.loads(output.source_evidence_ids_json or "[]"),
+            "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
+            "created_at": output.created_at.isoformat() if output.created_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        })
+    return {"items": items, "count": len(items)}
+
+
 @router.post("/assistant/jobs", status_code=202)
 async def create_qwen_background_job(
     payload: QwenBackgroundJobCreate,
