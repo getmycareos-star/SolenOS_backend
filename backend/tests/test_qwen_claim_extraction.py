@@ -21,14 +21,14 @@ def test_qwen_claim_extraction_uses_two_separate_model_calls_and_validates_sourc
             "entity_type": "event",
             "event_type": "fall_observed",
             "confidence_tag": "reported",
-            "source_span": {"start_offset": 0, "end_offset": 19, "text": "Mom fell yesterday"},
+            "source_span": {"start_offset": 0, "end_offset": 18, "text": "Mom fell yesterday"},
         }]},
         {"claims": [{
             "claim_text": "She seemed tired",
             "entity_type": "symptom",
             "event_type": "fatigue_reported",
             "confidence_tag": "reported",
-            "source_span": {"start_offset": 21, "end_offset": 37, "text": "She seemed tired"},
+            "source_span": {"start_offset": 20, "end_offset": 36, "text": "She seemed tired"},
         }]},
     ]
 
