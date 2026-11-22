@@ -5977,7 +5977,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
                 "accepted", "caregiver_reviewed", "reported",
             }:
                 continue
-            description = str(payload.get("source_text") or payload.get("value") or "").strip()
+            # The accepted assertion value is the current reviewed care detail.
+            # source_text remains its preserved original report and must not override
+            # a later caregiver-approved correction during current-state readback.
+            description = str(payload.get("value") or payload.get("source_text") or "").strip()
         else:
             continue
         if not description:
