@@ -173,9 +173,19 @@ def _history_bundle(
         job = job_by_event.get(event_id)
         capture_processing = None
         if analysis is not None or job is not None:
-            extraction_status = analysis.extraction_status if analysis is not None else (
-                "failed" if job and job.status == "failed" else "queued"
-            )
+            if analysis is not None:
+                extraction_status = analysis.extraction_status
+            elif job is None:
+                extraction_status = "unavailable"
+            elif job.status in {"queued", "processing"}:
+                extraction_status = "queued"
+            elif job.status in {"failed", "cancelled"}:
+                extraction_status = "failed"
+            else:
+                # A completed worker without its persisted CaptureAnalysis is
+                # an incomplete lifecycle, not a successful extraction. Never
+                # leave the caregiver UI showing a queued or reviewable result.
+                extraction_status = "unavailable"
             candidates = analysis.candidates if analysis is not None and isinstance(analysis.candidates, dict) else {}
             observations = candidates.get("observations")
             observations = observations if isinstance(observations, list) else []
