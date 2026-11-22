@@ -703,6 +703,17 @@ def test_two_week_review_decisions_are_scoped_and_append_only(monkeypatch):
         assert status.json()["review_required"] is False
         assert status.json()["output_review_status"] == "needs_follow_up"
         assert status.json()["written_to_lcr"] is False
+        assert [entry["decision"] for entry in status.json()["review_history"]] == ["reviewed", "needs_follow_up"]
+
+        history = client.get("/api/v1/assistant/reviews/two-week?limit=10", headers=first_headers)
+        assert history.status_code == 200, history.text
+        assert history.json()["count"] == 1
+        assert history.json()["items"][0]["job_id"] == job_id
+        assert history.json()["items"][0]["output_id"] == output_id
+        assert [entry["decision"] for entry in history.json()["items"][0]["review_history"]] == ["reviewed", "needs_follow_up"]
+        other_history = client.get("/api/v1/assistant/reviews/two-week?limit=10", headers=second_headers)
+        assert other_history.status_code == 200, other_history.text
+        assert other_history.json()["items"] == []
 
         db = TestingSessionLocal()
         try:
