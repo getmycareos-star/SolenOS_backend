@@ -80,7 +80,7 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 3. The PostgreSQL care-profile lifecycle test passes, including invited caregiver visibility and per-caregiver relationship separation.
 4. Frontend typecheck, regression suite and production build pass.
 5. Browser E2E uses the PostgreSQL-backed backend and proves profile persistence across refresh/new account session, server-only situation hydration, and Companion conversation restoration when the device-local pointer is absent.
-6. PostgreSQL integration proves Companion conversation listing after bearer refresh and denies access across caregiver/person scopes.
+6. PostgreSQL integration proves Companion conversation listing after bearer refresh and denies access across caregiver/person scopes; `test_two_week_review_postgres.py` proves two-week review decisions, idempotent replay, new-login history retrieval, source-reference preservation and cross-person isolation.
 7. Migration tests prove legacy notification attempt backfills, caregiver-context ORM alignment, and zero schema-contract differences after upgrade.
 8. Production `/ready` reports the expected migration head and schema contract; a real authenticated production read/write/readback test is completed without exposing real caregiver data.
 9. Backup restore is rehearsed and verified against PostgreSQL.
