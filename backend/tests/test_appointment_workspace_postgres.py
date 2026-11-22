@@ -116,6 +116,23 @@ def test_postgres_appointment_workspace_create_update_retry_and_isolation(monkey
                 assert replay.status_code == 200, replay.text
                 assert replay.json()["version_number"] == 2
 
+                # The same persisted appointment revision must not create a
+                # second follow-up or a second creation event on idempotent replay.
+                from app.models.open_loop import OpenLoopRecord, OpenLoopEvent
+                verification_db = test_session_local()
+                try:
+                    synced = verification_db.query(OpenLoopRecord).filter(
+                        OpenLoopRecord.person_id == owner.json()["person"]["id"],
+                        OpenLoopRecord.source_type == "appointment_workspace_follow_up",
+                        OpenLoopRecord.source_id.like(record_id + ":%"),
+                    ).all()
+                    assert len(synced) == 1, "one explicit appointment action must create one shared follow-up"
+                    assert verification_db.query(OpenLoopEvent).filter_by(loop_id=synced[0].id).count() == 1, (
+                        "an idempotent appointment replay must not append another follow-up creation event"
+                    )
+                finally:
+                    verification_db.close()
+
                 changed_retry = client.patch(
                     f"/api/v1/appointment-workspaces/{record_id}",
                     headers=headers,
