@@ -795,7 +795,6 @@ def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, e
     evidence = db.query(EvidenceModel).filter(
         EvidenceModel.id == evidence_id,
         EvidenceModel.person_id == person_id,
-        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
     ).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Saved source could not be found.")
