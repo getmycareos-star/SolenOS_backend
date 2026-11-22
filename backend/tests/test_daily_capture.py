@@ -2128,6 +2128,19 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         process_daily_capture_job(receipt["qwen_job_id"], monkeypatch, exact_source_candidates)
         assert receipt["qwen_review_required"] is False
 
+        processing_history = client.get(
+            "/api/v1/daily-care/intelligence/history?limit=200&offset=0",
+            headers=headers,
+        )
+        assert processing_history.status_code == 200, processing_history.text
+        reviewable_record = next(
+            row for row in processing_history.json()["records"]
+            if row.get("source_id") == receipt["id"]
+        )
+        assert reviewable_record["capture_processing"]["review_required"] is True
+        assert reviewable_record["capture_processing"]["analysis_id"] == receipt["qwen_analysis_id"]
+        assert "Review the suggested details" in reviewable_record["capture_processing"]["message"]
+
         db = TestingSessionLocal()
         try:
             event = db.query(CareEvent).filter_by(id=receipt["id"]).one()
