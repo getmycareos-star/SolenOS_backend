@@ -177,6 +177,16 @@ def live_qwen_context():
             session,
             "Caregiver reported that the person prefers a quiet room after lunch.",
         )
+        care_understanding_source = (
+            "Caregiver reported that the person slept poorly last night. "
+            "The nurse observed that the person walked with a frame this morning. "
+            "The caregiver said the person prefers a quiet room after lunch."
+        )
+        _, care_understanding_evidence_ids = _record_fixture(
+            client,
+            session,
+            care_understanding_source,
+        )
         yield {
             "client": client,
             "session": session,
@@ -184,7 +194,91 @@ def live_qwen_context():
             "medication_event_id": medication_event_id,
             "medication_evidence_ids": medication_evidence_ids,
             "handoff_evidence_ids": handoff_evidence_ids,
+            "care_understanding_evidence_id": care_understanding_evidence_ids[0],
+            "care_understanding_source": care_understanding_source,
         }
+
+
+def test_real_qwen_claim_extraction_runs_two_independent_passes_without_lcr_write(live_qwen_context, monkeypatch):
+    from app.api import collaboration as collaboration_api
+
+    original_qwen_chat = collaboration_api.qwen_chat
+    calls = []
+
+    def capture_qwen_chat(messages, *args, **kwargs):
+        calls.append(messages)
+        return original_qwen_chat(messages, *args, **kwargs)
+
+    monkeypatch.setattr(collaboration_api, "qwen_chat", capture_qwen_chat)
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    source = live_qwen_context["care_understanding_source"]
+    evidence_id = live_qwen_context["care_understanding_evidence_id"]
+    response = client.post(
+        "/api/v1/assistant/claim-extraction",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"evidence_id": evidence_id, "raw_text": source},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert len(calls) == 2, f"claim extraction must make two independent real-Qwen calls; observed {len(calls)}"
+    first_system = " ".join(str(item.get("content", "")) for item in calls[0] if item.get("role") == "system")
+    second_system = " ".join(str(item.get("content", "")) for item in calls[1] if item.get("role") == "system")
+    assert "First independent pass" in first_system
+    assert "Second independent pass" in second_system
+    assert data.get("provider") == "private_ollama_qwen", data
+    assert data.get("evidence_id") == evidence_id, data
+    assert data.get("written_to_lcr") is False, data
+    assert data.get("review_required") is True, data
+    runs = [data.get("run_a"), data.get("run_b")]
+    assert all(isinstance(run, dict) and isinstance(run.get("claims"), list) for run in runs), data
+    claims = [claim for run in runs for claim in run["claims"]]
+    assert claims, "real Qwen returned no source claims for an explicit multi-observation source"
+    for claim in claims:
+        span = claim.get("source_span")
+        if span is not None:
+            assert source[span["start_offset"]:span["end_offset"]] == span["text"], claim
+            assert span["text"] in source, claim
+
+
+def test_real_qwen_care_understanding_is_source_grounded_and_review_only(live_qwen_context, monkeypatch):
+    from app.api import collaboration as collaboration_api
+
+    original_qwen_chat = collaboration_api.qwen_chat
+    calls = []
+
+    def capture_qwen_chat(messages, *args, **kwargs):
+        calls.append(messages)
+        return original_qwen_chat(messages, *args, **kwargs)
+
+    monkeypatch.setattr(collaboration_api, "qwen_chat", capture_qwen_chat)
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    source = live_qwen_context["care_understanding_source"]
+    evidence_id = live_qwen_context["care_understanding_evidence_id"]
+    response = client.post(
+        "/api/v1/assistant/care-understanding",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"evidence_id": evidence_id, "raw_text": source},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert len(calls) == 1, f"care understanding must use one real-Qwen inference; observed {len(calls)}"
+    assert data.get("provider") == "private_ollama_qwen", data
+    assert data.get("evidence_id") == evidence_id, data
+    assert data.get("written_to_lcr") is False, data
+    assert data.get("review_required") is True, data
+    understanding = data.get("understanding")
+    assert isinstance(understanding, dict), data
+    assert any(understanding.get(key) for key in ("observations", "events", "decisions", "outcomes")), data
+    for key, items in understanding.items():
+        assert isinstance(items, list), (key, items)
+        for item in items:
+            if key == "possible_links":
+                assert item.get("causation_claimed") is False, item
+                assert item.get("text") in source, item
+            else:
+                assert item.get("raw_fragment") in source, (key, item)
 
 
 @pytest.mark.parametrize("workflow", ENABLED_WORKFLOWS)
