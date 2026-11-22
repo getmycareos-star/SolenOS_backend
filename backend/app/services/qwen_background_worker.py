@@ -1491,10 +1491,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         if job is not None:
             try:
                 db.rollback()
-                current = db.query(QwenBackgroundJob).filter(QwenBackgroundJob.id == job.id).first()
-                if current is not None and current.status == "cancelled" and current.error_code == "document_deleted":
-                    # The caregiver's deletion is terminal. Do not turn it into
-                    # a retry merely because an already-running worker returned.
+                current = db.query(QwenBackgroundJob).filter(
+                    QwenBackgroundJob.id == job.id
+                ).populate_existing().first()
+                if current is not None and current.status == "cancelled":
+                    # Cancellation is terminal regardless of why the caregiver
+                    # or source lifecycle stopped the job. Never requeue it.
                     db.rollback()
                     return True
                 if current is not None:
