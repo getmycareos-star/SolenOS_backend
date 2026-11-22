@@ -41,7 +41,7 @@
 | 21 | User settings | Care profile and notification settings are server-backed; display/accessibility preferences are intentionally device-local | Partial | Verify every active account-level setting. Device-local visual preferences are not care facts; legacy language/data-training keys must not be represented as cross-device settings unless backed by a server contract. |
 | 22 | Audit events and security-relevant actions | `AuditLogEvent`, account security events, append-only PostgreSQL protections | Unverified | Run append-only, redaction/erasure, actor attribution and security-operation audit tests on PostgreSQL. |
 | 23 | Community posts, reactions, saved stories and peer experiences | `CommunityPost` and `CommunityReaction` exist in separate community tables; router and UI are intentionally disabled | Blocked | Community routes are not registered and both community feature flags are false. Post/reaction code is not an active user path. Saved-story bookmarks are browser-local only and have no durable model/API. Do not enable the feature until moderation, bookmark persistence, authorization and PostgreSQL lifecycle tests are complete. |
-| 23a | Community saved-story bookmarks | `solenos_saved_posts` in browser localStorage only | Missing | No caregiver-scoped PostgreSQL bookmark model or API exists. This remains blocked with Community and must be implemented before the feature is re-enabled. |
+| 23a | Community saved-story bookmarks | No active product workflow; Community remains disabled and fail-closed | Blocked | Intentionally excluded from the active MVP. Do not add bookmark persistence or re-enable Community as part of this programme. |
 
 ## Additional discovered persistence requirements
 
