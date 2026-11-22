@@ -25,9 +25,8 @@ from app.core.config import get_settings
 from app.core.database import SessionLocal
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription, DeliveryFailureEvent, NotificationDeliveryAttempt
 
-# Care changes and clarification requests stay in the authenticated inbox.
-# Browser push is reserved for explicitly due reminders.
-PUSH_NOTIFICATION_CATEGORIES = frozenset({"reminder_due", "open_loop_due"})
+# All care notifications stay in the authenticated SolenOS inbox. No external channel is enabled.
+PUSH_NOTIFICATION_CATEGORIES = frozenset()
 from app.models.reminder import CareReminder
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.services.web_push_config import vapid_configuration_error
@@ -276,284 +275,32 @@ def _resolve_delivery_failures(session, delivery, current):
     ).update({"resolved_at": current, "updated_at": current}, synchronize_session=False)
 
 def deliver_pending_web_pushes(db=None, now=None):
-    """Send privacy-preserving Web Push payloads and persist provider receipts/retries."""
-    settings = get_settings()
-    configuration_error = vapid_configuration_error(settings)
-    if configuration_error is not None:
-        logger.error("Web Push is disabled: %s", configuration_error)
-        return 0
-    try:
-        from pywebpush import WebPushException, webpush
-    except ImportError:
-        logger.error("Web Push is configured but pywebpush is not installed")
-        return 0
-
+    """Cancel legacy browser-push work and revoke subscriptions; never contact a provider."""
     owns_session = db is None
     session = db or SessionLocal()
     current = now or datetime.now(timezone.utc)
-    accepted = 0
-    secret = settings.secret_key or "local-development-only-not-for-production"
-    cipher_key = base64.urlsafe_b64encode(
-        hashlib.sha256((secret + ":solenos-web-push-subscriptions:v1").encode("utf-8")).digest()
-    )
-    cipher = Fernet(cipher_key)
     try:
-        # A delivery can become stale before its retry time arrives. Cancel it
-        # even when it is no longer eligible for the due query below; otherwise
-        # superseded/in-app-only messages remain pending forever.
-        in_app_only_pending = (
-            session.query(CarePushDelivery)
-            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
-            .filter(
-                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
-                CareNotification.status == "active",
-                CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
-            )
-            .all()
-        )
-        for delivery in in_app_only_pending:
-            delivery.status = "cancelled"
-            delivery.last_error_code = "in_app_only_category"
-            delivery.last_error_message = "This care message stays in the in-app inbox."
-        if in_app_only_pending:
-            session.commit()
-
-        stale_pending = (
-            session.query(CarePushDelivery, CareNotification)
-            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
-            .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
-            .filter(
-                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
-                or_(
-                    CareNotification.status != "active",
-                    CarePushSubscription.revoked_at.is_not(None),
-                    and_(
-                        CareNotification.category == "open_loop_due",
-                        or_(
-                            CareNotification.priority.notin_(("high", "critical", "urgent", "emergency")),
-                            CareNotification.read_at.is_not(None),
-                        ),
-                    ),
-                ),
-            )
-            .all()
-        )
-        for delivery, notification in stale_pending:
-            delivery.status = "cancelled"
-            if (
-                notification.category == "open_loop_due"
-                and notification.status == "active"
-                and (
-                    notification.read_at is not None
-                    or notification.priority not in {"high", "critical", "urgent", "emergency"}
-                )
-            ):
-                delivery.last_error_code = "notification_not_push_eligible"
-                delivery.last_error_message = "The follow-up is available in the in-app inbox without a push interruption."
-            else:
-                delivery.last_error_code = "notification_no_longer_deliverable"
-                delivery.last_error_message = "The source is no longer active or this device is no longer subscribed."
-        if stale_pending:
-            session.commit()
-
-        # Only notify a device about events created after that device was linked.
-        subscriptions = session.query(CarePushSubscription).filter(
+        active_subscriptions = session.query(CarePushSubscription).filter(
             CarePushSubscription.revoked_at.is_(None)
         ).all()
-        for subscription in subscriptions:
-            notifications = session.query(CareNotification).filter(
-                CareNotification.person_id == subscription.person_id,
-                CareNotification.caregiver_id == subscription.caregiver_id,
-                CareNotification.created_at >= subscription.created_at,
-                CareNotification.status == "active",
-                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
-                or_(
-                    CareNotification.category != "open_loop_due",
-                    and_(
-                        CareNotification.priority.in_(("high", "critical", "urgent", "emergency")),
-                        CareNotification.read_at.is_(None),
-                    ),
-                ),
-            ).all()
-            for notification in notifications:
-                existing = session.query(CarePushDelivery.id).filter(
-                    CarePushDelivery.notification_id == notification.id,
-                    CarePushDelivery.subscription_id == subscription.id,
-                ).first()
-                if existing is None:
-                    session.add(CarePushDelivery(
-                        id=str(uuid.uuid4()),
-                        notification_id=notification.id,
-                        subscription_id=subscription.id,
-                        status="pending",
-                        attempt_count=0,
-                        next_attempt_at=current,
-                    ))
-                    try:
-                        session.commit()
-                    except IntegrityError:
-                        session.rollback()
+        for subscription in active_subscriptions:
+            subscription.revoked_at = current
 
-        due = (
-            session.query(CarePushDelivery, CareNotification, CarePushSubscription)
-            .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
-            .join(CarePushSubscription, CarePushSubscription.id == CarePushDelivery.subscription_id)
-            .filter(
-                CarePushDelivery.status.in_(("pending", "retry_scheduled")),
-                CareNotification.status == "active",
-                CareNotification.category.in_(PUSH_NOTIFICATION_CATEGORIES),
-                CarePushDelivery.next_attempt_at <= current,
-                CarePushDelivery.attempt_count < 5,
-                CarePushSubscription.revoked_at.is_(None),
-            )
-            .order_by(CarePushDelivery.next_attempt_at.asc())
-            .with_for_update(skip_locked=True)
-            .limit(100)
-            .all()
-        )
-        retry_delays = (60, 300, 1800, 7200, 21600)
-        for delivery, notification, subscription in due:
-            # Re-read lifecycle state immediately before contacting the push
-            # provider. A source may have been resolved after the due query.
-            session.refresh(notification)
-            if notification.status != "active":
-                delivery.status = "cancelled"
-                delivery.last_error_code = "notification_no_longer_active"
-                delivery.last_error_message = "The care source no longer requires this notification."
-                session.commit()
-                continue
-            if notification.category == "open_loop_due":
-                from app.services.proactive_care_communications import open_loop_due_notification_state
-                still_active, next_status, reason = open_loop_due_notification_state(
-                    session, notification, current
-                )
-                if not still_active:
-                    notification.status = next_status
-                    notification.resolution_reason = reason
-                    notification.resolved_at = current
-                    notification.updated_at = current
-                    delivery.status = "cancelled"
-                    delivery.last_error_code = (reason or "source_resolved")[:64]
-                    delivery.last_error_message = "The recorded follow-up is no longer due."
-                    session.commit()
-                    continue
-                if (
-                    notification.read_at is not None
-                    or notification.priority not in {"high", "critical", "urgent", "emergency"}
-                ):
-                    delivery.status = "cancelled"
-                    delivery.last_error_code = "notification_not_push_eligible"
-                    delivery.last_error_message = "The follow-up is available in the in-app inbox without a push interruption."
-                    session.commit()
-                    continue
-            preference = session.query(CareNotificationPreference).filter(
-                CareNotificationPreference.person_id == notification.person_id,
-                CareNotificationPreference.caregiver_id == notification.caregiver_id,
-            ).first()
-            if preference is not None and not preference.reminders_enabled:
-                delivery.status = "cancelled"
-                delivery.last_error_code = "reminders_disabled"
-                delivery.last_error_message = "Caregiver disabled reminder notifications"
-                session.commit()
-                continue
-            release_at = quiet_hours_release_at(preference, current)
-            if release_at is not None and notification.priority not in {"emergency", "critical", "urgent"}:
-                delivery.next_attempt_at = release_at
-                session.commit()
-                continue
-            delivery.attempt_count += 1
-            delivery.last_attempt_at = current
-            try:
-                serialized = cipher.decrypt(
-                    subscription.encrypted_subscription.encode("ascii")
-                ).decode("utf-8")
-                subscription_info = json.loads(serialized)
-                # Never put care details on a lock screen. The caregiver opens
-                # SolenOS to inspect the authenticated notification feed.
-                payload = json.dumps({
-                    "title": "SolenOS",
-                    "body": "You have a care update. Open SolenOS to review it.",
-                    "url": "/workspace",
-                    "notification_id": notification.id,
-                })
-                webpush(
-                    subscription_info=subscription_info,
-                    data=payload,
-                    vapid_private_key=_vapid_private_key_der(settings.vapid_private_key),
-                    vapid_claims={"sub": settings.vapid_subject},
-                    ttl=60 * 60,
-                )
-                delivery.status = "accepted"
-                delivery.provider_accepted_at = current
-                delivery.last_error_code = None
-                delivery.last_error_message = None
-                _resolve_delivery_failures(session, delivery, current)
-                _record_delivery_attempt(session, delivery, notification, subscription, current, "provider_accepted")
-                accepted += 1
-                session.commit()
-            except InvalidToken:
-                # SECRET_KEY rotation invalidates the encrypted subscription.
-                # Revoke it so the caregiver can register this browser again.
-                subscription.revoked_at = current
-                delivery.status = "expired"
-                delivery.last_error_code = "subscription_decryption_failed"
-                delivery.last_error_message = "Browser subscription could not be decrypted; re-registration is required"
-                _record_delivery_failure(
-                    session, delivery, notification, subscription, current,
-                    delivery.last_error_code, "Browser subscription could not be decrypted; re-registration is required", False,
-                )
-                _record_delivery_attempt(session, delivery, notification, subscription, current, "subscription_invalid", delivery.last_error_code)
-                session.commit()
-            except WebPushException as exc:
-                status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                delivery.last_error_code = f"http_{status_code}" if status_code else "provider_error"
-                delivery.last_error_message = "Push provider rejected the request"
-                if status_code in (404, 410):
-                    subscription.revoked_at = current
-                    delivery.status = "expired"
-                elif delivery.attempt_count >= 5:
-                    delivery.status = "failed"
-                else:
-                    delivery.status = "retry_scheduled"
-                    delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
-                _record_delivery_failure(
-                    session, delivery, notification, subscription, current,
-                    delivery.last_error_code, delivery.last_error_message,
-                    delivery.status == "retry_scheduled",
-                )
-                _record_delivery_attempt(session, delivery, notification, subscription, current, delivery.status, delivery.last_error_code)
-                session.commit()
-            except Exception as exc:
-                delivery.last_error_code = type(exc).__name__[:64]
-                # Keep a bounded diagnostic for operators while removing URLs and
-                # credential-like values that provider exceptions may echo.
-                diagnostic = str(exc)
-                for sensitive in (
-                    settings.vapid_private_key,
-                    getattr(settings, "vapid_public_key", ""),
-                    settings.secret_key,
-                ):
-                    if sensitive:
-                        diagnostic = diagnostic.replace(sensitive, "[redacted]")
-                diagnostic = re.sub(r"https?://\\S+", "[provider-url]", diagnostic)
-                diagnostic = re.sub(r"(?i)(authorization|token|secret|private[_ -]?key)\\s*[:=]\\s*[^ ,;]+", r"\\1=[redacted]", diagnostic)
-                delivery.last_error_message = (
-                    f"Push provider error ({delivery.last_error_code}): {diagnostic[:240]}"
-                    if diagnostic else "Push delivery could not be completed"
-                )
-                if delivery.attempt_count >= 5:
-                    delivery.status = "failed"
-                else:
-                    delivery.status = "retry_scheduled"
-                    delivery.next_attempt_at = current + timedelta(seconds=retry_delays[delivery.attempt_count - 1])
-                _record_delivery_failure(
-                    session, delivery, notification, subscription, current,
-                    delivery.last_error_code, delivery.last_error_message,
-                    delivery.status == "retry_scheduled",
-                )
-                _record_delivery_attempt(session, delivery, notification, subscription, current, delivery.status, delivery.last_error_code)
-                session.commit()
-        return accepted
+        pending_deliveries = session.query(CarePushDelivery).filter(
+            CarePushDelivery.status.in_(("pending", "retry_scheduled"))
+        ).all()
+        for delivery in pending_deliveries:
+            delivery.status = "cancelled"
+            delivery.last_error_code = "in_app_only_policy"
+            delivery.last_error_message = "Notifications are available only in the SolenOS inbox."
+
+        if active_subscriptions or pending_deliveries:
+            session.commit()
+        return 0
+    except Exception:
+        session.rollback()
+        logger.exception("Could not close legacy browser-push subscriptions under the in-app-only policy")
+        raise
     finally:
         if owns_session:
             session.close()
