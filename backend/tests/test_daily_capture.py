@@ -2139,7 +2139,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         )
         assert reviewable_record["capture_processing"]["review_required"] is True
         assert reviewable_record["capture_processing"]["analysis_id"] == receipt["qwen_analysis_id"]
-        assert "Review the suggested details" in reviewable_record["capture_processing"]["message"]
+        assert "Check these details before adding them to your Care Record." in reviewable_record["capture_processing"]["message"]
 
         db = TestingSessionLocal()
         try:
