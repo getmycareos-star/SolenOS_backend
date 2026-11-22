@@ -1110,6 +1110,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
         "LCR context metadata: "
         + json.dumps({
             "schema_status": context.get("schema_status"),
+            "source_caveats": source_caveats[:20],
             "history_coverage": context.get("history_coverage"),
             "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
             "retrieval_projection_complete": context.get("retrieval_projection_complete", False),
@@ -1119,7 +1120,6 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 "status": "not_assessed",
                 "interpretation_limit": "No source-lineage assessment was supplied.",
             }),
-            "source_caveats": source_caveats[:20],
         }, ensure_ascii=False, separators=(",", ":"))
     )
 
