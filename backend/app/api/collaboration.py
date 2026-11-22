@@ -7763,6 +7763,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 [*event_context, *assertion_context, *appointment_context, *evidence_context, *shared_lcr_lines],
             )
             medication_safety_fallback = _medication_change_safety_response(user_text)
+            deterministic_reply = None
             if _should_use_medication_dose_recall_fallback(
                 user_text,
                 emergency=emergency,
@@ -7778,7 +7779,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 history_source_lines = list(dict.fromkeys(
                     medication_recall_context["event_lines"]
                 ))
-                reply = _care_history_extractive_answer(
+                deterministic_reply = _care_history_extractive_answer(
                     user_text, history_source_lines
                 ) or (
                     "I can't confirm the prescribed dose from the records retrieved. "
@@ -7786,19 +7787,50 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "Please check the prescription or contact the prescriber or pharmacist."
                 )
                 care_history_fallback_from_outage = bool(
-                    reply.startswith("The saved notes mention medication:")
+                    deterministic_reply.startswith("The saved notes mention medication:")
                 )
-            elif not emergency and "LOW-CAPACITY RESPONSE" in caregiver_guidance:
-                reply = (
+            elif medication_safety_fallback:
+                deterministic_reply = medication_safety_fallback
+            elif missing_measurement_fallback:
+                deterministic_reply = missing_measurement_fallback
+            elif conflict_fallback:
+                deterministic_reply = conflict_fallback
+            elif unsupported_trend_fallback:
+                deterministic_reply = _trend_uncertainty_response(trend_assessment)
+            elif document_question_for_fallback and not emergency:
+                # Connection failures and other model-runtime errors must use
+                # the same integrity-verified, person-scoped document fallback
+                # as explicit model HTTP errors. Do not make a saved document
+                # unreadable merely because the model is unavailable.
+                document_fallback_context = list(dict.fromkeys([
+                    *included_model_context_lines,
+                    *verified_document_context_lines,
+                ]))
+                deterministic_reply = _document_extractive_answer(
+                    user_text, document_fallback_context
+                )
+            elif not emergency:
+                deterministic_reply = _care_history_extractive_answer(
+                    user_text, included_model_context_lines
+                )
+                care_history_fallback_from_outage = bool(deterministic_reply)
+
+            if (
+                not deterministic_reply
+                and not emergency
+                and "LOW-CAPACITY RESPONSE" in caregiver_guidance
+            ):
+                deterministic_reply = (
                     "I hear that you're exhausted. "
                     "We can take this one concern at a time."
                 )
                 low_capacity_support_fallback_used = True
-            else:
+            if not deterministic_reply:
                 raise HTTPException(
                     status_code=503,
                     detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
                 ) from exc
+            reply = deterministic_reply
         validation_source = user_text + "\n" + "\n".join(bounded_context)
         document_fallback_context = list(dict.fromkeys([
             *included_model_context_lines,
