@@ -502,10 +502,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
     from app.models.care_continuity import EvidenceObservation
-    from app.services.capture_review import (
-        persist_source_grounded_daily_observations,
-        supplement_source_grounded_daily_observations,
-    )
+    from app.services.capture_review import supplement_source_grounded_daily_observations
     from app.services.uncertainty import persist_source_clarification_questions
     from app.services.care_continuity_execution import execute_care_continuity_reconciliation
     from app.services.lcr_context import build_lcr_context
@@ -681,10 +678,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     candidates["observations"] = [
         {
             **item,
-            "review_status": (
-                "recorded_as_reported_observation"
-                if natural_language_update else "pending_review"
-            ),
+            "review_status": "pending_review",
         }
         for item in candidates["observations"]
         if isinstance(item, dict)
@@ -737,42 +731,11 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         return True
 
     candidate_count = len(candidates["observations"])
-    if natural_language_update:
-        observation_count = persist_source_grounded_daily_observations(
-            db,
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            evidence_id=evidence_id,
-            source_event_id=event_id,
-            source_text=source_text,
-            candidates=candidates,
-            reported_at=event.recorded_at,
-        )
-        # Source-grounded observations are primary record data. Commit them
-        # before derived change/question reconciliation so a later derived-stage
-        # failure cannot roll back the caregiver's captured observations.
-        db.flush()
-        persisted_observation_count = db.query(EvidenceObservation.id).filter(
-            EvidenceObservation.person_id == person_id,
-            EvidenceObservation.evidence_id == evidence_id,
-            EvidenceObservation.extraction_run_id == event_id,
-        ).count()
-        if persisted_observation_count < observation_count:
-            raise RuntimeError("daily_capture_observation_persistence_not_verified")
-        observation_count = persisted_observation_count
-        db.commit()
-        current_job = db.query(QwenBackgroundJob).filter(
-            QwenBackgroundJob.id == job_id,
-            QwenBackgroundJob.person_id == person_id,
-            QwenBackgroundJob.caregiver_id == caregiver_id,
-        ).with_for_update().first()
-        if current_job is None or current_job.status == "cancelled":
-            db.rollback()
-            return True
-    else:
-        # Structured captures are not promoted from model candidates into LCR
-        # assertions. Keep every extracted item pending caregiver review.
-        observation_count = 0
+    # Keep the caregiver's original report in the LCR, but do not write AI-split
+    # observations as care-record entries before the caregiver reviews them.
+    # Accepted candidates are added through the existing capture-review endpoint.
+    observation_count = 0
+    if not natural_language_update:
         questions = candidates.get("open_questions") or []
         if questions:
             persist_source_clarification_questions(
@@ -799,7 +762,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     assessment_status = "not_applicable" if quick_check_in_capture or test_inference_bypass else (
         "available" if candidate_count else "not_applicable"
     )
-    review_status = "not_required" if quick_check_in_capture or test_inference_bypass or natural_language_update or not candidate_count else "required"
+    review_status = "required" if candidate_count and not (quick_check_in_capture or test_inference_bypass) else "not_required"
 
     # Commit the extraction/assessment receipt before derived reconciliation.
     # If reconciliation or LCR projection later fails, the caregiver's original
