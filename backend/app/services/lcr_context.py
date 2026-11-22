@@ -270,7 +270,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "table": "open_loop_records",
         "required": False,
         "fields": [
-            "id", "loop_type", "title", "description", "status", "outcome_status",
+            "id", "loop_type", "title", "description", "status", "outcome_status", "source_type", "source_id",
             "caregiver_id", "assigned_caregiver_id", "owner_role", "owner_label", "uncertainty", "missing_information", "options",
             "request_text", "recipient_label", "requested_at", "last_contact_at",
             "verification_rule", "deadline_at", "deadline_source", "deadline_timezone",
