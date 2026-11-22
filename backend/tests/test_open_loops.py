@@ -1389,3 +1389,35 @@ def test_outcome_verification_retry_rejects_changed_ignored_rule():
     assert first.status_code == 200, first.text
     assert identical.status_code == 200, identical.text
     assert changed_ignored_rule.status_code == 409, changed_ignored_rule.text
+
+    corroborated = create_loop(
+        client, headers, "pending_action",
+        verification_rule=original_rule,
+    )
+    first_source = create_source_evidence(corroborated, "First independent clinic record.")
+    second_source = create_source_evidence(corroborated, "Second independent clinic record.")
+    create_independent_corroboration(client, headers, first_source, second_source)
+    corroboration_payload = {
+        "text": "Two separately originated clinic records support the reported outcome.",
+        "evidence": [
+            {"evidence_id": first_source},
+            {"evidence_id": second_source},
+        ],
+        "idempotency_key": "corroboration-rule-payload-integrity",
+    }
+    first_corroboration = client.post(
+        f"/api/v1/open-loops/{corroborated['id']}/corroborate-outcome",
+        headers=headers, json=corroboration_payload,
+    )
+    identical_corroboration = client.post(
+        f"/api/v1/open-loops/{corroborated['id']}/corroborate-outcome",
+        headers=headers, json=corroboration_payload,
+    )
+    changed_corroboration_rule = client.post(
+        f"/api/v1/open-loops/{corroborated['id']}/corroborate-outcome",
+        headers=headers,
+        json={**corroboration_payload, "verification_rule": "A different corroboration rule."},
+    )
+    assert first_corroboration.status_code == 200, first_corroboration.text
+    assert identical_corroboration.status_code == 200, identical_corroboration.text
+    assert changed_corroboration_rule.status_code == 409, changed_corroboration_rule.text
