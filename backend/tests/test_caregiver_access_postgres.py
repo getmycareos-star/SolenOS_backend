@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -20,12 +20,8 @@ from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant, CaregiverInvitation, CaregiverResponsibilityTransfer
-from app.models.caregiver_account import CaregiverAccount
 from app.models.privacy_delivery import AuditLogEvent
-from app.models.care_continuity import CareDeltaRun, CareStateRevision, EvidenceObservation, EvidenceSourceRelationship
-from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility, CaregiverHandoff
-from app.models.memory import LearningEvent
-from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
+from app.models.caregiver_intelligence import CaregiverResponsibility, CaregiverHandoff
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
