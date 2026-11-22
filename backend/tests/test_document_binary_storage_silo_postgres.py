@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
+from app.models.care import Evidence
 from app.models.collaboration import EvidenceUpload
 from app.services import document_binary_storage as storage
 
@@ -81,7 +82,9 @@ def test_s3_object_ownership_download_checksum_and_postgres_recovery():
 
             with Session() as db:
                 upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
-                assert upload.person_id == person_id
+                evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+                assert evidence.person_id == person_id
+                assert evidence.uploaded_by_caregiver_id == caregiver_id
                 assert upload.storage_backend == "s3"
                 storage_key = upload.storage_key
                 assert storage_key == f"care-records/{person_id}/documents/{evidence_id}"
