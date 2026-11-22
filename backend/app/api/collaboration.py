@@ -5978,14 +5978,22 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             }:
                 continue
             # The accepted assertion value is the current reviewed care detail.
-            # source_text remains its preserved original report and must not override
-            # a later caregiver-approved correction during current-state readback.
-            description = str(payload.get("value") or payload.get("source_text") or "").strip()
+            # Preserve the field label when the value is terse, and use the original
+            # report only for topic matching/provenance—not as the current answer.
+            value = str(payload.get("value") or "").strip()
+            source_text = str(payload.get("source_text") or "").strip()
+            field = str(payload.get("field") or "").strip()
+            if value and field and not value.casefold().startswith(f"{field.casefold()}:"):
+                description = f"{field}: {value}"
+            else:
+                description = value or source_text
         else:
             continue
         if not description:
             continue
         terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        if source_type == "care_assertions":
+            terms.update(re.findall(r"[a-z0-9']{3,}", source_text.casefold()))
         matched_topics = {
             label for label, variants in topics if terms & variants
         }
