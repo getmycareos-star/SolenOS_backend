@@ -1801,6 +1801,13 @@ def main():
         )
         require(first_action_status == 200 and retry_action_status == 200,
                 f"Same-key Open Loop action retry failed: {first_action_status}, {retry_action_status}")
+        changed_action_retry = {**retry_action, "text": "Different action with the same idempotency key"}
+        changed_action_status, changed_action_response = request(
+            "POST", f"/api/v1/open-loops/{open_loop_id}/actions",
+            token=token_a, body=changed_action_retry,
+        )
+        require(changed_action_status == 409,
+                f"Reusing an action key with a changed payload must return 409: {changed_action_status}: {changed_action_response}")
         status, after_action_retry = request(
             "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
         )
