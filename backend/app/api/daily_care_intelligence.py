@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
+from app.services.daily_capture_status import daily_capture_extraction_status
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence as EvidenceModel, Correction
 from app.models.time_location import Appointment
@@ -173,19 +174,7 @@ def _history_bundle(
         job = job_by_event.get(event_id)
         capture_processing = None
         if analysis is not None or job is not None:
-            if analysis is not None:
-                extraction_status = analysis.extraction_status
-            elif job is None:
-                extraction_status = "unavailable"
-            elif job.status in {"queued", "processing"}:
-                extraction_status = "queued"
-            elif job.status in {"failed", "cancelled"}:
-                extraction_status = "failed"
-            else:
-                # A completed worker without its persisted CaptureAnalysis is
-                # an incomplete lifecycle, not a successful extraction. Never
-                # leave the caregiver UI showing a queued or reviewable result.
-                extraction_status = "unavailable"
+            extraction_status = daily_capture_extraction_status(analysis, job)
             candidates = analysis.candidates if analysis is not None and isinstance(analysis.candidates, dict) else {}
             observations = candidates.get("observations")
             observations = observations if isinstance(observations, list) else []
