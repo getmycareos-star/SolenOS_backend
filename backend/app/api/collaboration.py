@@ -4654,8 +4654,8 @@ def review_two_week_output(
 def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request, db: Session = Depends(get_db)):
     """Run two independent, read-only Qwen claim extractions for persisted source text."""
     _scope(request, db)
-    source = payload.raw_text.strip()
-    if not source:
+    source = payload.raw_text
+    if not source.strip():
         raise HTTPException(status_code=422, detail="Source text is required")
 
     system_prompt = (
