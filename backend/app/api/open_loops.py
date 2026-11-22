@@ -412,6 +412,10 @@ def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
         if not saved or saved.get("text") != payload.text or saved.get("evidence", []) != evidence:
             return False
         if event_type in {"outcome_attested", "outcome_corroborated"}:
+            event_context = after.get("event_context")
+            if isinstance(event_context, dict) and "submitted_verification_rule" in event_context:
+                if event_context.get("submitted_verification_rule") != payload.verification_rule:
+                    return False
             expected_rule = (event.before_state or {}).get("verification_rule") or payload.verification_rule
             return saved.get("verification_rule") == expected_rule
         return True
@@ -916,7 +920,10 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
         "interpretation_limit": "Persisted source linkage verifies record existence and scope; it does not automatically establish semantic entailment, prove which account is true, or establish that an action caused the outcome.",
     }]
     loop.outcome_status = "outcome_reported"
-    _audit(db, loop, "outcome_attested", before, payload.evidence, payload.idempotency_key)
+    _audit(
+        db, loop, "outcome_attested", before, payload.evidence, payload.idempotency_key,
+        event_context={"submitted_verification_rule": payload.verification_rule},
+    )
     db.commit()
     db.refresh(loop)
     return _snapshot(loop)
@@ -971,7 +978,10 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
         "interpretation_limit": "The care record contains a caregiver-reviewed independent-source relationship for this pair. This does not automatically establish that either source semantically entails the outcome, that either source is true, or that an action caused the outcome.",
     }]
     loop.outcome_status = "outcome_verified"
-    _audit(db, loop, "outcome_corroborated", before, payload.evidence, payload.idempotency_key)
+    _audit(
+        db, loop, "outcome_corroborated", before, payload.evidence, payload.idempotency_key,
+        event_context={"submitted_verification_rule": payload.verification_rule},
+    )
     try:
         db.commit()
     except IntegrityError:
