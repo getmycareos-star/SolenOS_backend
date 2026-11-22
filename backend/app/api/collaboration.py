@@ -769,6 +769,10 @@ class QwenBackgroundJobCreate(BaseModel):
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
+class TwoWeekReviewDecision(BaseModel):
+    decision: str = Field(pattern="^(reviewed|needs_follow_up)$")
+
+
 class QwenAssistRequest(BaseModel):
     # Community is intentionally excluded while that product area is disabled.
     workflow: QwenWorkflow
@@ -4461,11 +4465,78 @@ async def get_qwen_background_job(
         "review_required": (
             bool(daily_capture_result.get("review_required"))
             if daily_capture_workflow and daily_capture_result is not None
-            else job.status == "completed"
+            else bool(output.review_required) if output is not None else False
         ),
         "persistence": "read_only_assistance",
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
+
+
+@router.post("/assistant/jobs/{job_id}/review")
+def review_two_week_output(
+    job_id: str,
+    payload: TwoWeekReviewDecision,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Persist a caregiver's review decision for a two-week summary without changing the LCR."""
+    person_id, caregiver_id = _scope(request, db)
+    job = db.query(QwenBackgroundJob).filter(
+        QwenBackgroundJob.id == job_id,
+        QwenBackgroundJob.person_id == person_id,
+        QwenBackgroundJob.caregiver_id == caregiver_id,
+        QwenBackgroundJob.workflow == "two_week_review",
+        QwenBackgroundJob.status == "completed",
+    ).with_for_update().first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Two-week review not found")
+    output = db.query(QwenModelOutput).filter(
+        QwenModelOutput.job_id == job.id,
+        QwenModelOutput.person_id == person_id,
+        QwenModelOutput.caregiver_id == caregiver_id,
+        QwenModelOutput.workflow == "two_week_review",
+    ).with_for_update().first()
+    if output is None:
+        raise HTTPException(status_code=404, detail="Two-week review output not found")
+    decision = payload.decision
+    previous = output.review_status
+    if previous == decision and output.review_required is False:
+        return {
+            "job_id": job.id,
+            "output_id": output.id,
+            "review_status": output.review_status,
+            "review_required": False,
+            "written_to_lcr": False,
+            "idempotent_replay": True,
+        }
+    now = datetime.now(timezone.utc)
+    db.add(QwenJobEvent(
+        job_id=job.id,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        event_type="caregiver_review_decision",
+        from_status=previous,
+        to_status=decision,
+        metadata_json={
+            "workflow": "two_week_review",
+            "review_required": False,
+            "written_to_lcr": False,
+            "decision": decision,
+        },
+        created_at=now,
+    ))
+    output.review_status = decision
+    output.review_required = False
+    db.commit()
+    db.refresh(output)
+    return {
+        "job_id": job.id,
+        "output_id": output.id,
+        "review_status": output.review_status,
+        "review_required": bool(output.review_required),
+        "written_to_lcr": False,
+        "idempotent_replay": False,
     }
 
 
