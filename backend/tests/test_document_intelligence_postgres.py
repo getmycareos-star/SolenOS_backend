@@ -123,6 +123,75 @@ def test_postgres_completed_document_job_without_saved_analysis_remains_visible_
         engine.dispose()
 
 
+def test_postgres_completed_document_analysis_outside_visible_limit_is_not_marked_failed():
+    """A saved extraction beyond the visible page limit is still a completed job."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-list-limit-person-{suffix}"
+    caregiver_id = f"doc-list-limit-caregiver-{suffix}"
+    visible_evidence_id = f"doc-list-limit-visible-{suffix}"
+    hidden_evidence_id = f"doc-list-limit-hidden-{suffix}"
+    job_id = f"doc-list-limit-job-{suffix}"
+    now = datetime.now(timezone.utc)
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Document list limit fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Document list caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            for evidence_id, text_value in (
+                (visible_evidence_id, "Most recent saved document."),
+                (hidden_evidence_id, "Earlier saved document."),
+            ):
+                db.add(Evidence(
+                    id=evidence_id, person_id=person_id, type="document",
+                    source_text=text_value, uploaded_by_caregiver_id=caregiver_id,
+                ))
+            db.flush()
+            db.add(CaptureAnalysis(
+                person_id=person_id, caregiver_id=caregiver_id,
+                source_evidence_id=visible_evidence_id,
+                source_text="Most recent saved document.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "new.txt"},
+                created_at=now,
+            ))
+            db.add(CaptureAnalysis(
+                person_id=person_id, caregiver_id=caregiver_id,
+                source_evidence_id=hidden_evidence_id,
+                source_text="Earlier saved document.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1", "filename": "old.txt"},
+                created_at=now - timedelta(days=1),
+            ))
+            db.add(QwenBackgroundJob(
+                id=job_id, person_id=person_id, caregiver_id=caregiver_id,
+                task_text="Process saved document for caregiver review.",
+                context_text="", evidence_ids_json=json.dumps([hidden_evidence_id]),
+                workflow="document_intake", status="completed",
+            ))
+            db.commit()
+
+        with Session() as db:
+            state = list_document_intelligence(_request(person_id, caregiver_id), 1, db)
+            assert len(state["items"]) == 1
+            assert state["items"][0]["source_evidence_id"] == visible_evidence_id
+            assert state["processing_jobs"] == []
+    finally:
+        with Session() as db:
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(CaptureAnalysis).filter_by(person_id=person_id).delete(synchronize_session=False)
+            db.query(Evidence).filter(Evidence.id.in_([visible_evidence_id, hidden_evidence_id])).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
+
+
 def _restart_postgres_service_container(engine):
     """Restart the disposable CI PostgreSQL service and prove committed rows survive."""
     if os.getenv("SOLENOS_TEST_POSTGRES_RESTART") != "1":
