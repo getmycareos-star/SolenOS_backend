@@ -230,6 +230,24 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                     )
                     assert fresh_lcr.status_code == 200, fresh_lcr.text
                     assert sum(item.get("id") == assertion_id for item in fresh_lcr.json().get("items", [])) == 1
+
+                    assistant_readback = client.post(
+                        "/api/v1/conversation/message",
+                        headers={"Authorization": f"Bearer {fresh_token}"},
+                        json={
+                            "person_id": person_id,
+                            "text": "What did I report about sleep?",
+                            "client_turn_id": f"daily-care-assistant-readback-{suffix}",
+                        },
+                    )
+                    assert assistant_readback.status_code == 200, assistant_readback.text
+                    assistant_body = assistant_readback.json()
+                    assert corrected_observation in assistant_body["reply"]
+                    assert assistant_body["written_to_lcr"] is False
+                    assert assistant_body["ai_generated"] is False
+                    assert assistant_body["response_mode"] == "source_quoted_care_history"
+                    assert model_calls == []
+
                     foreign_lcr = client.get(
                         "/api/v1/care-continuity/current-care?limit_per_source=50",
                         headers={"Authorization": f"Bearer {foreign_token}"},
