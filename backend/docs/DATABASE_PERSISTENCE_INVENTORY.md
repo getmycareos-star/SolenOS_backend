@@ -103,7 +103,7 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 
 ## Current-main revalidation delta — 2026-11-22
 
-**Inspected source snapshot:** backend `9a5bf29455a9786ae0dbaed34bc2608811e8235a`; frontend `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c`. This is a source snapshot, not a verified release candidate.
+**Inspected source snapshot:** backend code/tests `3e5d462e4803877456c569ca78cd3d3477eb5580`; frontend `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c`. This is a source snapshot, not a verified release candidate.
 
 ### Changes made directly on main in this execution
 
@@ -113,17 +113,18 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 - Backend `8f1b982fafe1e6f6585c90dfe625ccaee6e231d7`: added a PostgreSQL Daily Care → accepted LCR correction → new-session Care Assistant retrieval assertion. The test checks that the Assistant returns the corrected value without model inference.
 - Backend `a522f0550e5521a164bceed118ac3d31d0b17888` and `5782e4ccc69c5670c8b8ed19ca2d5914141f6b9a`: corrected Companion history recall so a caregiver-approved assertion's current value takes precedence over the original source text. The preserved source text remains available for provenance and topic matching; it must not override the current reviewed value in a current-state answer.
 - Backend `2f56e6a4a33f3ddaf48f9f034713a7e4fb7314c3` and `9a5bf29455a9786ae0dbaed34bc2608811e8235a`: cancelled document-intake jobs without saved analysis are now exposed as retryable failures, and deleted documents are excluded from the processing list. PostgreSQL regression coverage now checks both completed-without-analysis and cancelled-without-analysis states.
+- Backend `3e5d462e4803877456c569ca78cd3d3477eb5580`: the new PostgreSQL document-status fixtures now create explicit active caregiver access grants, so the endpoint tests exercise the real permission gate rather than failing at fixture authorization.
 - Frontend `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c`: repaired a malformed literal `\\n` in the caregiver UI language scanner that had swallowed the excluded-file declaration into a line comment. The scanner now has an actual newline before `const excludedFiles`.
 
 ### Current verification state
 
-The following workflows were triggered for backend `9a5bf29455a9786ae0dbaed34bc2608811e8235a` and were pending/queued at last inspection:
+The following workflows were triggered for backend `3e5d462e4803877456c569ca78cd3d3477eb5580` and were pending/queued at last inspection:
 
-- Backend tests — main validation: `45015809416`
-- Backend validation: `45015809407`
-- PostgreSQL migration validation: `45015809408`
-- Document lifecycle PostgreSQL integration: `45015809430`
-- Backup and recovery verification: `45015809440`
+- Backend tests — main validation: `45015877223`
+- Backend validation: `45015877216`
+- PostgreSQL migration validation: `45015877350`
+- Document lifecycle PostgreSQL integration: `45015877308`
+- Backup and recovery verification: `45015877255`
 
 Frontend workflows for `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c` remained queued:
 
@@ -144,7 +145,7 @@ No pending, queued, cancelled, or skipped workflow is counted as passing. The ne
 - Production deploy logs were inspected read-only. At 2026-11-22 11:00 UTC, the deployed process logged `ORM schema drift count=31`. The drift list includes JSONList/JSON type differences, missing secondary indexes across evidence/handoff/notification tables, and nullability/length differences. This confirms the deployed database does not meet the full current ORM contract.
 - The deployed `4744994` readiness implementation explicitly logs ORM drift as a warning and returns `migration_verified_with_orm_drift`; it does not fail readiness for those differences. Current `main` instead returns HTTP 503 whenever `database_schema_differences` is non-empty. Therefore Railway's current `Online` state is not evidence of zero drift, and deploying the current strict readiness code before reconciling production would risk taking the service out of readiness.
 - A direct external request to the production `/ready` URL could not be retrieved through the available web access. Railway's service health overview is not a substitute for a successful authenticated readiness/schema check.
-- Current verified candidate: **none**. Backend source `9a5bf29455a9786ae0dbaed34bc2608811e8235a` is not yet CI-verified. Do not remove the pin or deploy until the candidate's full tests, migration validation, backup/recovery and production schema checks pass and David explicitly authorizes deployment.
+- Current verified candidate: **none**. Backend source `3e5d462e4803877456c569ca78cd3d3477eb5580` is not yet CI-verified. Do not remove the pin or deploy until the candidate's full tests, migration validation, backup/recovery and production schema checks pass and David explicitly authorizes deployment.
 
 ### Reassessment notes
 
