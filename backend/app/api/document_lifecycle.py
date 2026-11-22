@@ -762,8 +762,17 @@ def _response(analysis: CaptureAnalysis) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
     intelligence = details.get("document_intelligence")
     intelligence = intelligence if isinstance(intelligence, dict) else {}
-    observations = intelligence.get("observations")
-    observations = observations if isinstance(observations, list) else []
+    stored_observations = intelligence.get("observations")
+    stored_observations = stored_observations if isinstance(stored_observations, list) else []
+    source_text = analysis.source_text or ""
+    extraction_complete = (
+        analysis.extraction_status == "available"
+        and not _unprocessed_page_numbers(source_text)
+        and not _unreadable_page_numbers(source_text)
+    )
+    # Match the document-intelligence response contract: candidates from an
+    # earlier successful pass are hidden while the current OCR is incomplete.
+    observations = stored_observations if extraction_complete else []
     return {
         "analysis_id": analysis.id,
         "source_evidence_id": analysis.source_evidence_id,
@@ -790,8 +799,9 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_text_sha256": hashlib.sha256((analysis.source_text or "").strip().encode("utf-8")).hexdigest(),
         "extracted_char_count": len(analysis.source_text or ""),
         "candidate_count": len(observations),
+        "interpretation_blocked": not extraction_complete,
         "intelligence_status": intelligence.get("status") or "not_run",
-        "review_required": any(
+        "review_required": extraction_complete and any(
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
