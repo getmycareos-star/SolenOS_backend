@@ -1093,3 +1093,84 @@ def test_action_idempotency_key_rejects_changed_payload_and_replays_identical_pa
     actions = current.json()["loop"]["action_evidence"]
     assert len(actions) == 1
     assert actions[0]["text"] == first_payload["text"]
+
+
+
+def test_response_outcome_and_update_retries_reject_changed_payloads():
+    client = TestClient(app)
+    _, headers = session(client, "Care recipient")
+
+    response_loop = create_loop(client, headers, "awaiting_response")
+    response_key = "response-key-payload-integrity"
+    response_payload = {
+        "text": "The clinic confirmed the callback time.",
+        "evidence": [{"kind": "caregiver_report", "text": "Clinic called back."}],
+        "idempotency_key": response_key,
+    }
+    first_response = client.post(
+        f"/api/v1/open-loops/{response_loop['id']}/responses",
+        headers=headers,
+        json=response_payload,
+    )
+    same_response = client.post(
+        f"/api/v1/open-loops/{response_loop['id']}/responses",
+        headers=headers,
+        json=response_payload,
+    )
+    changed_response = client.post(
+        f"/api/v1/open-loops/{response_loop['id']}/responses",
+        headers=headers,
+        json={**response_payload, "text": "A different callback was reported."},
+    )
+    assert first_response.status_code == 200, first_response.text
+    assert same_response.status_code == 200, same_response.text
+    assert len(same_response.json()["response_evidence"]) == 1
+    assert changed_response.status_code == 409, changed_response.text
+
+    outcome_loop = create_loop(client, headers, "pending_action")
+    outcome_key = "outcome-key-payload-integrity"
+    outcome_payload = {
+        "text": "Caregiver reported the action was completed.",
+        "evidence": [{"kind": "caregiver_report", "text": "The visit took place."}],
+        "idempotency_key": outcome_key,
+    }
+    first_outcome = client.post(
+        f"/api/v1/open-loops/{outcome_loop['id']}/outcomes",
+        headers=headers,
+        json=outcome_payload,
+    )
+    same_outcome = client.post(
+        f"/api/v1/open-loops/{outcome_loop['id']}/outcomes",
+        headers=headers,
+        json=outcome_payload,
+    )
+    changed_outcome = client.post(
+        f"/api/v1/open-loops/{outcome_loop['id']}/outcomes",
+        headers=headers,
+        json={**outcome_payload, "evidence": [{"kind": "caregiver_report", "text": "A different event."}]},
+    )
+    assert first_outcome.status_code == 200, first_outcome.text
+    assert same_outcome.status_code == 200, same_outcome.text
+    assert len(same_outcome.json()["outcome_evidence"]) == 1
+    assert changed_outcome.status_code == 409, changed_outcome.text
+
+    update_loop_record = create_loop(client, headers, "pending_action")
+    update_key = "update-key-payload-integrity"
+    first_update = client.patch(
+        f"/api/v1/open-loops/{update_loop_record['id']}",
+        headers=headers,
+        json={"title": "Updated title", "idempotency_key": update_key},
+    )
+    same_update = client.patch(
+        f"/api/v1/open-loops/{update_loop_record['id']}",
+        headers=headers,
+        json={"title": "Updated title", "idempotency_key": update_key},
+    )
+    changed_update = client.patch(
+        f"/api/v1/open-loops/{update_loop_record['id']}",
+        headers=headers,
+        json={"title": "A different title", "idempotency_key": update_key},
+    )
+    assert first_update.status_code == 200, first_update.text
+    assert same_update.status_code == 200, same_update.text
+    assert changed_update.status_code == 409, changed_update.text
