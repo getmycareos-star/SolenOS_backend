@@ -24,7 +24,7 @@ from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun
 from app.models.collaboration import EvidenceUpload
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput, QwenSafetyEvaluation
 import app.api.daily_care_intelligence as daily_care_intelligence
 import app.api.collaboration as collaboration
 import app.services.qwen_background_worker as qwen_background_worker
@@ -593,4 +593,113 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             )
     finally:
         app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
+
+def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
+    """A crashed worker's processing lease is reclaimed and its result is durable in PostgreSQL."""
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    suffix = uuid.uuid4().hex
+    person_id = f"qwen-restart-person-{suffix}"
+    caregiver_id = f"qwen-restart-caregiver-{suffix}"
+    job_id = None
+    monkeypatch.setattr(qwen_background_worker, "SessionLocal", SessionLocal)
+
+    try:
+        now = datetime.now(timezone.utc)
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Worker restart test recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Worker restart test caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            job = QwenBackgroundJob(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Please summarize the supplied appointment note.",
+                context_text="Appointment date: not supplied.",
+                status="processing",
+                attempt_count=1,
+                locked_at=now - timedelta(minutes=20),
+                available_at=now - timedelta(minutes=20),
+            )
+            db.add(job)
+            db.commit()
+            job_id = job.id
+
+        async def classify(*args, **kwargs):
+            return "appointment"
+
+        async def complete_assist(payload, request, db):
+            assert payload.workflow == "appointment"
+            assert request.state.scoped_person_id == person_id
+            return {
+                "workflow": "appointment",
+                "reply": "The appointment date was not supplied.",
+                "ai_generated": True,
+                "provider_status": "available",
+                "model": "qwen3.5:4b",
+                "source_event_ids": [],
+                "source_evidence_ids": [],
+                "source_appointment_ids": ["appointment-record-restart-test"],
+                "source_handoff_ids": [],
+                "source_notification_ids": [],
+                "source_freshness_assessment_ids": [],
+                "source_freshness_status": "available",
+                "claim_provenance": {
+                    "version": "claim-provenance-v1",
+                    "claims": [{
+                        "claim_id": "statement-1",
+                        "text": "The appointment date was not supplied.",
+                        "support_status": "not_matched_to_saved_wording",
+                        "source_references": [],
+                    }],
+                },
+            }
+
+        monkeypatch.setattr(qwen_background_worker, "_classify_task", classify)
+        monkeypatch.setattr(collaboration, "qwen_support_assist", complete_assist)
+
+        assert asyncio.run(qwen_background_worker.process_one_qwen_job()) is True
+
+        with SessionLocal() as db:
+            job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert job.status == "completed"
+            assert job.workflow == "appointment"
+            assert job.attempt_count == 2
+            assert job.result_text is None
+            assert job.completed_at is not None
+            assert job.locked_at is None
+
+            output = db.query(QwenModelOutput).filter_by(job_id=job_id).one()
+            assert output.output_text == "The appointment date was not supplied."
+            assert output.review_status == "pending_review"
+            assert output.review_required is True
+            assert output.written_to_lcr is False
+            assert output.output_metadata["live_inference_confirmed"] is True
+            assert output.output_metadata["source_appointment_ids"] == ["appointment-record-restart-test"]
+
+            safety = db.query(QwenSafetyEvaluation).filter_by(output_id=output.id).one()
+            assert safety.decision == "review_required"
+            assert safety.human_review_required is True
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id, event_type="job_claimed"
+            ).count() == 1
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id, event_type="job_completed"
+            ).count() == 1
+    finally:
+        if job_id:
+            with SessionLocal() as db:
+                db.query(QwenSafetyEvaluation).filter_by(job_id=job_id).delete(synchronize_session=False)
+                db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
+                db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+                db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+                db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+                db.commit()
         engine.dispose()
