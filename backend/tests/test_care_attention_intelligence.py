@@ -50,6 +50,24 @@ def test_completed_critical_loop_is_never_immediate():
     assert result["needs_attention_now"] == []
 
 
+def test_unknown_open_loop_significance_stays_in_needs_clarification():
+    result = build_care_attention_assessment(
+        records=[], open_loops=[
+            {"id": "unknown-1", "source": "open_loop_records", "title": "Clinic callback",
+             "recorded_status": "open", "uncertainty": "unknown", "priority": "medium"},
+            {"id": "unknown-2", "source": "open_loop_records", "title": "Medication question",
+             "recorded_status": "open", "uncertainty": "unverified", "priority": "normal"},
+        ],
+        uncertainties=[], missing_information=[], as_of=NOW,
+    )
+    clarification = {item["record_id"]: item for item in result["needs_clarification"]}
+    assert set(clarification) == {"unknown-1", "unknown-2"}
+    assert result["needs_attention_now"] == []
+    assert result["important_to_address"] == []
+    assert result["can_wait_with_documented_basis"] == []
+    assert all("care significance" in item["priority_basis"][0] for item in clarification.values())
+
+
 def test_unexplained_high_priority_is_not_automatically_urgent():
     result = build_care_attention_assessment(
         records=[], open_loops=[{

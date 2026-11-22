@@ -3100,6 +3100,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 "due_at": item.get("due_at") or item.get("deadline_at"),
                 "recorded_status": status or "not_recorded",
                 "status_confidence": "explicitly_recorded" if status in open_statuses else "unresolved_source_record_status_not_explicit",
+                "uncertainty": item.get("uncertainty") if source == "open_loop_records" else None,
                 "priority": item.get("priority") if source == "open_loop_records" else None,
                 "priority_reasons": item.get("priority_reasons") if source == "open_loop_records" else None,
                 "deferred_reason": item.get("deferred_reason") if source == "open_loop_records" else None,
