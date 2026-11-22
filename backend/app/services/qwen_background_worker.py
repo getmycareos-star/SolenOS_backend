@@ -349,7 +349,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
     if event.status in {"invalidated", "deleted"} or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
         current = db.query(QwenBackgroundJob).filter_by(
             id=job_id, person_id=person_id, caregiver_id=caregiver_id
-        ).populate_existing().with_for_update().first()
+        ).populate_existing().populate_existing().with_for_update().first()
         if current is not None:
             current.status = "cancelled"
             current.error_code = "daily_capture_source_unavailable"
@@ -386,7 +386,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         QwenBackgroundJob.id == job_id,
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if current is None or current.status != "processing":
         db.rollback()
         return True
@@ -394,7 +394,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         CaptureAnalysis.id == analysis.id,
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.caregiver_id == caregiver_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if analysis is None:
         raise RuntimeError("daily_capture_delta_analysis_disappeared")
 
@@ -697,7 +697,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         QwenBackgroundJob.id == job_id,
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if current_job is None or current_job.status == "cancelled":
         db.rollback()
         return True
@@ -715,7 +715,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
         Evidence.uploaded_by_caregiver_id == caregiver_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if event is None or evidence is None or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
         current_job.status = "cancelled"
         current_job.error_code = "daily_capture_source_deleted"
@@ -763,7 +763,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             QwenBackgroundJob.id == job_id,
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.caregiver_id == caregiver_id,
-        ).populate_existing().with_for_update().first()
+        ).populate_existing().populate_existing().with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
             return True
@@ -807,7 +807,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         CaptureAnalysis.caregiver_id == caregiver_id,
         CaptureAnalysis.source_event_id == event_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if analysis is None:
         raise RuntimeError("daily_capture_analysis_disappeared_before_reconciliation")
     analysis.candidates = candidates
@@ -974,7 +974,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.caregiver_id == caregiver_id,
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if analysis is None:
         raise RuntimeError("daily_capture_analysis_disappeared")
     analysis.candidates = candidates
@@ -1255,7 +1255,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     raise ValueError("document_intake_evidence_id_invalid")
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
-                ).populate_existing().with_for_update().first()
+                ).populate_existing().populate_existing().with_for_update().first()
                 if current_job is None or current_job.status == "cancelled":
                     db.rollback()
                     return True
@@ -1270,7 +1270,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 # requeue the deleted document after the processing call returns.
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
-                ).populate_existing().with_for_update().first()
+                ).populate_existing().populate_existing().with_for_update().first()
                 if current_job is None or current_job.status == "cancelled":
                     db.rollback()
                     return True
@@ -1431,7 +1431,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         # cancelled job must never persist a derived answer after that deletion.
         current_job = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.id == job.id
-        ).populate_existing().with_for_update().first()
+        ).populate_existing().populate_existing().with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
             return True
