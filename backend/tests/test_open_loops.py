@@ -1063,3 +1063,33 @@ def test_persisted_change_can_be_linked_to_person_scoped_follow_up():
     isolated = client.get("/api/v1/open-loops?limit=100", headers=second_headers)
     assert isolated.status_code == 200, isolated.text
     assert isolated.json()["items"] == []
+
+
+def test_action_idempotency_key_rejects_changed_payload_and_replays_identical_payload():
+    client = TestClient(app)
+    _, headers = session(client, "Care recipient")
+    loop = create_loop(client, headers, "pending_action")
+    key = "action-key-payload-integrity"
+    first_payload = {
+        "text": "Caregiver recorded a completed call",
+        "evidence": [{"kind": "caregiver_report", "text": "Call completed"}],
+        "idempotency_key": key,
+    }
+    first = client.post(f"/api/v1/open-loops/{loop['id']}/actions", headers=headers, json=first_payload)
+    retry = client.post(f"/api/v1/open-loops/{loop['id']}/actions", headers=headers, json=first_payload)
+    assert first.status_code == 200, first.text
+    assert retry.status_code == 200, retry.text
+    assert len(retry.json()["action_evidence"]) == 1
+
+    changed_payload = {
+        "text": "Different action must not be accepted as a retry",
+        "evidence": [{"kind": "caregiver_report", "text": "Different action"}],
+        "idempotency_key": key,
+    }
+    conflict = client.post(f"/api/v1/open-loops/{loop['id']}/actions", headers=headers, json=changed_payload)
+    assert conflict.status_code == 409, conflict.text
+    current = client.get(f"/api/v1/open-loops/{loop['id']}", headers=headers)
+    assert current.status_code == 200, current.text
+    actions = current.json()["loop"]["action_evidence"]
+    assert len(actions) == 1
+    assert actions[0]["text"] == first_payload["text"]
