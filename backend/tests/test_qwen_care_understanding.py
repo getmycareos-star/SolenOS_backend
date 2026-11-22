@@ -51,6 +51,36 @@ def test_care_understanding_returns_source_grounded_review_only_proposal(monkeyp
     assert result["review_required"] is True
 
 
+
+def test_care_understanding_discards_unverifiable_fragments_and_links(monkeypatch):
+    _allow(monkeypatch)
+    model_output = {
+        "observations": [{
+            "description": "Invented event",
+            "approximate_time": None,
+            "confidence": "high",
+            "raw_fragment": "not present in the original source",
+        }],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [
+            {"text": "Her daughter called the clinic.", "causation_claimed": False},
+            {"text": "The fall caused the call.", "causation_claimed": False},
+        ],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
+
+    assert result["understanding"]["observations"] == []
+    assert result["understanding"]["possible_links"] == [
+        {"text": "Her daughter called the clinic.", "causation_claimed": False}
+    ]
+
+
 def test_care_understanding_rejects_unauthorized_request_before_qwen(monkeypatch):
     monkeypatch.setattr(collaboration, "_scope", lambda *_args: (_ for _ in ()).throw(HTTPException(status_code=403)))
     called = False
