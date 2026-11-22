@@ -744,3 +744,132 @@ def test_temporal_retrieval_keeps_delayed_entries_when_either_event_or_recording
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+def test_lcr_context_includes_person_scoped_care_revisions_and_prior_change_analyses():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    metadata = MetaData()
+    revisions = Table(
+        "care_state_revisions", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("target_type", String),
+        Column("target_id", String),
+        Column("revision_number", Integer),
+        Column("change_kind", String),
+        Column("before_state", String),
+        Column("after_state", String),
+        Column("evidence_ids", String),
+        Column("changed_by_caregiver_id", String),
+        Column("changed_at", DateTime),
+    )
+    analyses = Table(
+        "care_delta_runs", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("source", String),
+        Column("event_date", DateTime),
+        Column("source_event_id", String),
+        Column("evidence_ids", String),
+        Column("delta_json", String),
+        Column("model_name", String),
+        Column("created_by_caregiver_id", String),
+        Column("created_at", DateTime),
+    )
+    metadata.create_all(engine)
+    now = datetime(2026, 11, 22, tzinfo=timezone.utc)
+    try:
+        with engine.begin() as connection:
+            connection.execute(revisions.insert(), [
+                {
+                    "id": "sleep-revision-person-a",
+                    "person_id": "person-a",
+                    "target_type": "care_assertions",
+                    "target_id": "sleep-assertion-a",
+                    "revision_number": 2,
+                    "change_kind": "updated",
+                    "before_state": json.dumps({"field": "sleep", "asserted_value": "Poor sleep was reported."}),
+                    "after_state": json.dumps({"field": "sleep", "asserted_value": "Caregiver corrected the report to say waking occurred twice."}),
+                    "evidence_ids": json.dumps(["sleep-evidence-a"]),
+                    "changed_by_caregiver_id": "caregiver-a",
+                    "changed_at": now,
+                },
+                {
+                    "id": "sleep-revision-person-b",
+                    "person_id": "person-b",
+                    "target_type": "care_assertions",
+                    "target_id": "sleep-assertion-b",
+                    "revision_number": 2,
+                    "change_kind": "updated",
+                    "before_state": json.dumps({"field": "sleep", "asserted_value": "Private other-person detail."}),
+                    "after_state": json.dumps({"field": "sleep", "asserted_value": "Must never cross care-recipient scope."}),
+                    "evidence_ids": json.dumps(["sleep-evidence-b"]),
+                    "changed_by_caregiver_id": "caregiver-b",
+                    "changed_at": now,
+                },
+            ])
+            connection.execute(analyses.insert(), [
+                {
+                    "id": "sleep-analysis-person-a",
+                    "person_id": "person-a",
+                    "source": "daily_care",
+                    "event_date": now - timedelta(days=2),
+                    "source_event_id": "sleep-event-a",
+                    "evidence_ids": json.dumps(["sleep-evidence-a"]),
+                    "delta_json": json.dumps({
+                        "topic": "sleep",
+                        "summary": "Two caregiver reports describe waking overnight.",
+                        "interpretation_limit": "This is a recorded comparison, not a clinical finding.",
+                    }),
+                    "model_name": "qwen-test",
+                    "created_by_caregiver_id": "caregiver-a",
+                    "created_at": now,
+                },
+                {
+                    "id": "sleep-analysis-person-b",
+                    "person_id": "person-b",
+                    "source": "daily_care",
+                    "event_date": now - timedelta(days=2),
+                    "source_event_id": "sleep-event-b",
+                    "evidence_ids": json.dumps(["sleep-evidence-b"]),
+                    "delta_json": json.dumps({"summary": "Private other-person analysis."}),
+                    "model_name": "qwen-test",
+                    "created_by_caregiver_id": "caregiver-b",
+                    "created_at": now,
+                },
+            ])
+        with Session(engine) as db:
+            context = build_lcr_context(
+                db, "person-a", limit_per_source=10, query="sleep",
+            )
+
+        revision_source = context["sources"]["care_state_revisions"]
+        assert revision_source["status"] == "available"
+        assert revision_source["candidate_scan_complete"] is True
+        assert [item["id"] for item in revision_source["items"]] == ["sleep-revision-person-a"]
+        revision = revision_source["items"][0]
+        assert revision["information_status"] == "care_state_revision_history"
+        assert revision["before_state"]["asserted_value"] == "Poor sleep was reported."
+        assert revision["after_state"]["asserted_value"] == "Caregiver corrected the report to say waking occurred twice."
+        assert revision["evidence_ids"] == ["sleep-evidence-a"]
+
+        analysis_source = context["sources"]["change_analyses"]
+        assert analysis_source["status"] == "available"
+        assert analysis_source["candidate_scan_complete"] is True
+        assert [item["id"] for item in analysis_source["items"]] == ["sleep-analysis-person-a"]
+        analysis = analysis_source["items"][0]
+        assert analysis["information_status"] == "recorded_change_analysis"
+        assert analysis["delta_json"]["interpretation_limit"] == "This is a recorded comparison, not a clinical finding."
+        assert analysis["model_name"] == "qwen-test"
+        assert analysis["source_event_id"] == "sleep-event-a"
+
+        prompt = format_lcr_context_for_prompt(context, max_chars=12000)
+        assert "[care_state_revisions;" in prompt
+        assert "[change_analyses;" in prompt
+        assert "not that the person's real-world condition changed" in prompt
+        assert "not an independently verified fact or diagnosis" in prompt
+        assert "Private other-person" not in prompt
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
