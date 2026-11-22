@@ -1574,7 +1574,8 @@ async def generate_lcr_orientation(
     held_care_rows = sum(
         max(0, int((source or {}).get("returned_count", 0) or 0))
         for name, source in sources.items()
-        if name != "living_record" and isinstance(source, dict)
+        if name not in {"living_record", "care_state_revisions", "change_analyses"}
+        and isinstance(source, dict)
     )
     missing_core_sources = set(lcr_context.get("missing_required_sources", [])).intersection(
         {"events", "evidence", "facts", "assertions"}
