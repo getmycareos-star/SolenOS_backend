@@ -4848,8 +4848,12 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     "This is a caregiver-reported record, not independent clinical verification."
                 )
             else:
+                occurred_at = event.occurred_at.isoformat() if event.occurred_at else "not recorded"
+                recorded_at = event.recorded_at.isoformat() if event.recorded_at else "not recorded"
                 context_lines.append(
-                    f"Recorded care event [{event.id}]: {event.title} — {event.description or 'No additional detail'}"
+                    f"Recorded care event [{event.id}]: title={event.title}; status={event.status}; "
+                    f"event_time={occurred_at}; recorded_time={recorded_at}; "
+                    f"caregiver_reported_detail={event.description or 'No additional detail'}"
                 )
             source_event_ids.append(str(event.id))
 
@@ -5250,6 +5254,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 appointment_status_guidance += (
                     " Scheduled does not mean confirmed; do not say the appointment is confirmed."
                 )
+        appointment_status_guidance += (
+            " If the caregiver asks to prepare using saved care history, include the most relevant "
+            "recorded Daily Care detail from the supplied context. Preserve its caregiver-reported "
+            "status and timing. Do not omit a relevant sleep, eating, drinking, mobility or behaviour "
+            "observation merely because appointment details are also available. If no relevant event "
+            "was retrieved, say that the requested history was not found in the supplied context."
+        )
         elif recorded_statuses:
             appointment_status_guidance = (
                 " Multiple appointment statuses are recorded. Keep them separate and do not imply a single shared status."
