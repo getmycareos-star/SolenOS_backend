@@ -31,6 +31,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.main import app
 import app.main as main_module
 import app.api.document_lifecycle as lifecycle_module
+import app.api.collaboration as collaboration_module
 from app.api.collaboration import upload_evidence
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 from app.api.document_intelligence import (
@@ -375,6 +376,37 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             if item["source_collection"] == "assertions" and item["id"] == assertion_id
         )
         assert current_document_assertion["source_context"]["document_candidate"]["source_attribution"] == "patient_reported"
+
+        # Companion must retrieve the accepted document assertion through the
+        # authoritative LCR context. Force inference unavailable so this proves
+        # the exact-source fallback, not a model-generated guess.
+        monkeypatch.setattr(
+            collaboration_module,
+            "_ollama_url",
+            lambda: ("http://ollama.test", "qwen-test"),
+        )
+        def unavailable_companion_model(*args, **kwargs):
+            raise ConnectionError("PostgreSQL document Companion test has no live model")
+        monkeypatch.setattr(
+            collaboration_module,
+            "_ollama_chat",
+            unavailable_companion_model,
+        )
+        document_answer = api_client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": "Bearer " + token},
+            json={
+                "person_id": person_id,
+                "text": "What does the uploaded document say about walking?",
+                "client_turn_id": "document-lcr-companion-readback-0001",
+            },
+        )
+        assert document_answer.status_code == 200, document_answer.text
+        document_answer_body = document_answer.json()
+        assert quote_one in document_answer_body["reply"]
+        assert document_answer_body["ai_generated"] is False
+        assert document_answer_body["written_to_lcr"] is False
+        assert evidence_id in document_answer_body["source_evidence_ids"]
 
         summary = api_client.get("/api/v1/care-continuity/summary", headers={"Authorization": "Bearer " + token})
         assert summary.status_code == 200, summary.text
