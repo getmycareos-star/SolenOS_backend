@@ -709,6 +709,14 @@ def build_lcr_context(
             # next fingerprint makes every read look stale and every retry
             # create another assessment.
             statement = statement.where(table.c.source != "situation_understanding_assessment")
+        if source_name == "care_state_revisions" and "target_type" in table.c:
+            # Identity and caregiver-profile revisions are audit metadata, not
+            # care-history entries for Companion retrieval.
+            statement = statement.where(
+                table.c.target_type.notin_(
+                    ("persons", "caregivers", "caregiver_profiles", "caregiver_roles", "caregiver_responsibilities")
+                )
+            )
         if source_name == "assertions" and "assertion_status" in table.c:
             # Keep caregiver-attributed historical assertions so corrections and
             # rejections remain explainable. Model-only proposals without
