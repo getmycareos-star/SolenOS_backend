@@ -760,6 +760,10 @@ jobs:
           engine.dispose()
           PY
 
+      - name: Verify clarification review receipt persistence through PostgreSQL HTTP APIs
+        working-directory: backend
+        run: python -m pytest tests/test_uncertainty_review_postgres.py -q -vv
+
       - name: Verify conflict resolution history trigger rejects direct SQL mutation
         working-directory: backend
         run: |
