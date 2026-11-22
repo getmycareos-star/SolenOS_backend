@@ -701,6 +701,11 @@ def list_document_intelligence(
         items.append(_response(analysis))
         if len(items) >= limit:
             break
+    # A completed worker job is not proof that document extraction was
+    # persisted. Keep that distinction visible to the caregiver: if the
+    # completed job has no corresponding saved analysis, surface it as a
+    # retryable failure instead of silently dropping it from the queue view.
+    analyzed_evidence_ids = set(seen_evidence_ids)
     processing_jobs = []
     seen_evidence_ids = set()
     jobs = []
@@ -708,7 +713,7 @@ def list_document_intelligence(
         jobs = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.workflow == "document_intake",
-            QwenBackgroundJob.status.in_(["queued", "processing", "failed"]),
+            QwenBackgroundJob.status.in_(["queued", "processing", "failed", "completed"]),
         ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
     for job in jobs:
         try:
@@ -730,12 +735,17 @@ def list_document_intelligence(
             ).first()
             if owned is None:
                 continue
+            if job.status == "completed" and evidence_id in analyzed_evidence_ids:
+                continue
+            completed_without_analysis = job.status == "completed"
             processing_jobs.append({
                 "evidence_id": evidence_id,
                 "job_id": job.id,
-                "status": job.status,
+                "status": "failed" if completed_without_analysis else job.status,
                 "attempt_count": job.attempt_count,
-                "error_code": job.error_code,
+                "error_code": job.error_code or (
+                    "completed_without_analysis" if completed_without_analysis else None
+                ),
             })
     return {
         "items": items,
