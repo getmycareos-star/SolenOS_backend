@@ -1098,9 +1098,9 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             if authority or negation_status:
                 source_caveats.append({
                     "source_type": source_name,
-                    "source_id": item.get("id"),
-                    "authority": authority,
-                    "negation_status": negation_status,
+                    "source_id": str(item.get("id") or "")[:120],
+                    "authority": str(authority)[:120] if authority is not None else None,
+                    "negation_status": str(negation_status)[:60] if negation_status is not None else None,
                 })
     header = (
         "LCR context metadata: "
@@ -1115,7 +1115,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 "status": "not_assessed",
                 "interpretation_limit": "No source-lineage assessment was supplied.",
             }),
-            "source_caveats": source_caveats[:100],
+            "source_caveats": source_caveats[:20],
         }, ensure_ascii=False, separators=(",", ":"))
     )
 
