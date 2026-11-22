@@ -102,6 +102,45 @@ def test_worker_does_not_requeue_cancelled_job_when_inference_raises(tmp_path, m
     db.close()
 
 
+def test_worker_discards_result_when_caregiver_access_is_revoked_during_inference(tmp_path, monkeypatch):
+    from app.models.qwen_background_job import QwenModelOutput
+
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+    caller_thread_id = threading.get_ident()
+    access_revoked = False
+
+    def require_permission(db, person_id, caregiver_id, permission):
+        assert permission == "view_lcr"
+        if access_revoked:
+            raise HTTPException(status_code=403, detail="Caregiver access has been revoked.")
+        return object()
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    def revoke_during_assist(payload, request, inference_db):
+        nonlocal access_revoked
+        assert threading.get_ident() != caller_thread_id
+        assert access_revoked is False
+        access_revoked = True
+        return {}
+
+    monkeypatch.setattr(worker, "require_caregiver_permission", require_permission)
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", revoke_during_assist)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    cancelled = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "caregiver_access_revoked"
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_cancelled").count() == 1
+    db.close()
+
+
 @pytest.mark.parametrize(("expected", "task"), [
     ("daily_capture", "I want to record today's observation."),
     ("add_record", "Help draft a care record correction; the date is missing."),
@@ -197,6 +236,7 @@ def _isolated_job_store(tmp_path, monkeypatch):
     QwenSafetyEvaluation.__table__.create(bind=engine)
     sessions = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     monkeypatch.setattr(worker, "SessionLocal", sessions)
+    monkeypatch.setattr(worker, "require_caregiver_permission", lambda *args, **kwargs: object())
     return sessions
 
 
