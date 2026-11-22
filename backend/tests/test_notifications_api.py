@@ -255,7 +255,7 @@ def test_browser_push_is_disabled_and_in_app_notifications_remain_available(monk
         assert reminder_delivery.deliver_pending_web_pushes(db=db, now=now) == 0
         db.refresh(subscription)
         db.refresh(delivery)
-        assert subscription.revoked_at == now
+        assert subscription.revoked_at is not None and subscription.revoked_at.replace(tzinfo=timezone.utc) == now
         assert delivery.status == "cancelled"
         assert delivery.last_error_code == "in_app_only_policy"
         assert delivery.attempt_count == 0
