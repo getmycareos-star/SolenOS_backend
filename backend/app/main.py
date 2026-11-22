@@ -2290,6 +2290,7 @@ def readiness_check(db: Session = Depends(get_db)):
                 "authorization_decisions",
                 "failed_access_attempts",
                 "care_notifications",
+                "qwen_job_events",
                 "care_notification_preferences",
                 "notification_delivery_attempts",
                 "notification_delivery_receipts",
@@ -2322,7 +2323,8 @@ def readiness_check(db: Session = Depends(get_db)):
                 FROM pg_trigger
                 WHERE tgrelid IN (
                     'privacy_incident_events'::regclass,
-                    'audit_log_events'::regclass
+                    'audit_log_events'::regclass,
+                    'qwen_job_events'::regclass
                 )
                   AND NOT tgisinternal
             """)).scalars().all()
@@ -2330,6 +2332,7 @@ def readiness_check(db: Session = Depends(get_db)):
             required_integrity_triggers = {
                 "trg_privacy_incident_events_append_only",
                 "trg_audit_log_events_append_only",
+                "trg_qwen_job_events_no_update",
             }
             missing_integrity_triggers = sorted(
                 required_integrity_triggers - set(operational_integrity_triggers)
