@@ -205,130 +205,61 @@ def test_notification_feed_exposes_failed_push_delivery_truthfully(monkeypatch):
         teardown()
 
 
-def test_web_push_provider_failure_is_never_recorded_as_accepted(monkeypatch):
-    import base64
+def test_browser_push_is_disabled_and_in_app_notifications_remain_available(monkeypatch):
     import hashlib
-    import json
-    import sys
-    from datetime import timedelta
-    from types import SimpleNamespace
-
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.fernet import Fernet
     from app.services import reminder_delivery
 
-    client, first, _second = setup_client(monkeypatch)
+    client, first, _ = setup_client(monkeypatch)
+    headers = {"Authorization": f"Bearer {first['access_token']}"}
+    endpoint = "https://fcm.googleapis.com/fcm/send/legacy-notification-test"
+    now = datetime.now(timezone.utc)
+    db = TestSession()
     try:
-        person_id = first["person"]["id"]
-        caregiver_id = first["caregiver"]["id"]
-        secret = "test-secret-for-web-push-delivery"
-        settings = SimpleNamespace(
-            secret_key=secret,
-            vapid_private_key=base64.urlsafe_b64encode((1).to_bytes(32, "big")).decode("ascii").rstrip("="),
-            vapid_subject="mailto:tests@example.invalid",
+        notification = CareNotification(
+            person_id=first["person"]["id"],
+            caregiver_id=first["caregiver"]["id"],
+            title="Care update",
+            body="A new care update is ready to review.",
+            category="care_update",
+            status="active",
         )
-        monkeypatch.setattr(reminder_delivery, "get_settings", lambda: settings)
-        monkeypatch.setattr(reminder_delivery, "vapid_configuration_error", lambda _settings: None)
-
-        class ProviderRejected(Exception):
-            response = None
-
-        def reject_delivery(**kwargs):
-            encoded_key = kwargs.get("vapid_private_key")
-            assert isinstance(encoded_key, str), "py_vapid requires a base64url-encoded DER private key"
-            padded_key = encoded_key + ("=" * (-len(encoded_key) % 4))
-            decoded_key = base64.urlsafe_b64decode(padded_key)
-            parsed_key = serialization.load_der_private_key(decoded_key, password=None)
-            assert parsed_key.curve.name == "secp256r1"
-            raise ProviderRejected("simulated provider outage")
-
-        monkeypatch.setitem(
-            sys.modules,
-            "pywebpush",
-            SimpleNamespace(WebPushException=ProviderRejected, webpush=reject_delivery),
+        subscription = CarePushSubscription(
+            person_id=first["person"]["id"],
+            caregiver_id=first["caregiver"]["id"],
+            endpoint_hash=hashlib.sha256(endpoint.encode("utf-8")).hexdigest(),
+            encrypted_subscription="legacy-encrypted-subscription",
         )
-
-        cipher_key = base64.urlsafe_b64encode(
-            hashlib.sha256((secret + ":solenos-web-push-subscriptions:v1").encode("utf-8")).digest()
+        db.add_all([notification, subscription])
+        db.flush()
+        delivery = CarePushDelivery(
+            notification_id=notification.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=now,
         )
-        encrypted = Fernet(cipher_key).encrypt(
-            json.dumps({
-                "endpoint": "https://push.example.invalid/subscription",
-                "keys": {"p256dh": "test-p256dh", "auth": "test-auth"},
-            }).encode("utf-8")
-        ).decode("ascii")
+        db.add(delivery)
+        db.commit()
 
-        now = datetime.now(timezone.utc) + timedelta(minutes=1)
-        db = TestSession()
-        try:
-            subscription = CarePushSubscription(
-                id="provider-failure-subscription",
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                endpoint_hash="p" * 64,
-                encrypted_subscription=encrypted,
-                created_at=now - timedelta(minutes=2),
-            )
-            notification = CareNotification(
-                id="provider-failure-notification",
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                title="Call the clinic",
-                body="Ask about the appointment.",
-                category="reminder_due",
-                priority="normal",
-                status="active",
-                created_at=now - timedelta(minutes=1),
-            )
-            db.add_all([subscription, notification])
-            db.flush()
-            delivery = CarePushDelivery(
-                id="provider-failure-delivery",
-                notification_id=notification.id,
-                subscription_id=subscription.id,
-                status="pending",
-                attempt_count=0,
-                next_attempt_at=now,
-            )
-            db.add(delivery)
-            db.commit()
+        capability = client.get("/api/v1/notifications/push/public-key", headers=headers)
+        assert capability.status_code == 200, capability.text
+        assert capability.json() == {"available": False, "public_key": None, "reason": "in_app_only"}
 
-            current = now
-            for delay in (0, 60, 300, 1800, 7200):
-                current = now + timedelta(seconds=delay) if delay == 0 else current + timedelta(seconds=delay)
-                accepted = reminder_delivery.deliver_pending_web_pushes(db=db, now=current)
-                assert accepted == 0
-                db.refresh(delivery)
+        registration = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers=headers,
+            json={"endpoint": endpoint, "keys": {"p256dh": "unused", "auth": "unused"}},
+        )
+        assert registration.status_code == 410, registration.text
 
-            assert delivery.status == "failed"
-            assert delivery.attempt_count == 5
-            assert delivery.provider_accepted_at is None
-            assert delivery.last_error_code == "provider_error"
-            assert delivery.last_error_message == "Push provider rejected the request"
-            from app.models.notifications import DeliveryFailureEvent
-            failures = db.query(DeliveryFailureEvent).filter_by(
-                delivery_id=delivery.id,
-                delivery_type="web_push",
-            ).order_by(DeliveryFailureEvent.occurred_at.asc()).all()
-            assert len(failures) == 5
-            assert all(item.failure_code == "provider_error" for item in failures)
-            assert [item.retryable for item in failures] == [True, True, True, True, False]
-            assert all(item.resolved_at is None for item in failures)
-
-            from app.models.notifications import NotificationDeliveryAttempt
-            attempts = db.query(NotificationDeliveryAttempt).filter_by(
-                notification_id=notification.id,
-                channel="web_push",
-            ).order_by(NotificationDeliveryAttempt.attempt_number.asc()).all()
-            assert len(attempts) == 5
-            assert [item.attempt_number for item in attempts] == [1, 2, 3, 4, 5]
-            assert [item.result for item in attempts] == [
-                "retry_scheduled", "retry_scheduled", "retry_scheduled",
-                "retry_scheduled", "failed",
-            ]
-            assert all(item.failure_code == "provider_error" for item in attempts)
-            assert all(item.record_metadata["provider_accepted"] is False for item in attempts)
-        finally:
-            db.close()
+        assert reminder_delivery.deliver_pending_web_pushes(db=db, now=now) == 0
+        db.refresh(subscription)
+        db.refresh(delivery)
+        assert subscription.revoked_at == now
+        assert delivery.status == "cancelled"
+        assert delivery.last_error_code == "in_app_only_policy"
+        assert delivery.attempt_count == 0
+        assert delivery.provider_accepted_at is None
     finally:
+        db.close()
         teardown()
