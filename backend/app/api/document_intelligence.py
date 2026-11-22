@@ -680,23 +680,38 @@ def list_document_intelligence(
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
     ).order_by(CaptureAnalysis.created_at.desc()).limit(500).all()
-    items = []
-    seen_evidence_ids = set()
-    analyzed_evidence_ids = set()
+    document_analyses = []
+    candidate_evidence_ids = set()
     for analysis in rows:
         metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
         if metadata.get("kind") != "document_extraction_v1":
             continue
         evidence_id = str(analysis.source_evidence_id or "")
-        if not evidence_id or evidence_id in seen_evidence_ids:
+        if not evidence_id:
             continue
-        evidence = db.query(Evidence).filter(
-            Evidence.id == analysis.source_evidence_id,
-            Evidence.person_id == person_id,
-            Evidence.type == "document",
-            (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
-        ).first()
-        if evidence is None:
+        document_analyses.append((analysis, evidence_id))
+        candidate_evidence_ids.add(evidence_id)
+
+    # Check ownership in one query rather than issuing one query per analysis.
+    # This also lets us account for saved analyses beyond the visible page limit
+    # without turning the list endpoint into an N+1 query.
+    valid_evidence_ids = set()
+    if candidate_evidence_ids:
+        valid_evidence_ids = {
+            str(row[0])
+            for row in db.query(Evidence.id).filter(
+                Evidence.id.in_(candidate_evidence_ids),
+                Evidence.person_id == person_id,
+                Evidence.type == "document",
+                (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
+            ).all()
+        }
+
+    items = []
+    seen_evidence_ids = set()
+    analyzed_evidence_ids = set()
+    for analysis, evidence_id in document_analyses:
+        if evidence_id not in valid_evidence_ids:
             continue
         analyzed_evidence_ids.add(evidence_id)
         if evidence_id in seen_evidence_ids:
