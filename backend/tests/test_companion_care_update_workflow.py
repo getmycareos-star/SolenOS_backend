@@ -660,6 +660,12 @@ def test_two_week_review_decisions_are_scoped_and_append_only(monkeypatch):
 
         first_headers = {"Authorization": "Bearer " + first["access_token"]}
         second_headers = {"Authorization": "Bearer " + second["access_token"]}
+        proposal_blocked = client.post(
+            f"/api/v1/assistant/jobs/{job_id}/proposal",
+            headers=first_headers,
+            json={},
+        )
+        assert proposal_blocked.status_code == 409, proposal_blocked.text
         denied = client.post(
             f"/api/v1/assistant/jobs/{job_id}/review",
             headers=second_headers,
