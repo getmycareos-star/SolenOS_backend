@@ -1529,17 +1529,22 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 if current is not None:
                     previous_status = current.status
                     current.locked_at = None
-                    current.error_code = _qwen_exception_error_code(exc)
-                    permanent_http_error = _is_permanent_qwen_http_error(exc)
-                    if (
-                        isinstance(exc, ValueError) and str(exc) == "community_disabled"
-                    ) or permanent_http_error:
-                        current.status = "failed"
-                    elif current.attempt_count < 3:
-                        current.status = "queued"
-                        current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
+                    access_revoked = getattr(exc, "status_code", None) in {401, 403}
+                    if access_revoked:
+                        current.status = "cancelled"
+                        current.error_code = "caregiver_access_revoked"
                     else:
-                        current.status = "failed"
+                        current.error_code = _qwen_exception_error_code(exc)
+                        permanent_http_error = _is_permanent_qwen_http_error(exc)
+                        if (
+                            isinstance(exc, ValueError) and str(exc) == "community_disabled"
+                        ) or permanent_http_error:
+                            current.status = "failed"
+                        elif current.attempt_count < 3:
+                            current.status = "queued"
+                            current.available_at = datetime.now(timezone.utc) + timedelta(seconds=15 * current.attempt_count)
+                        else:
+                            current.status = "failed"
                     if current.workflow == "daily_capture_extraction":
                         from app.models.capture_analysis import CaptureAnalysis
                         try:
@@ -1552,7 +1557,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                             CaptureAnalysis.source_event_id.in_(source_event_ids or ["__none__"]),
                         ).order_by(CaptureAnalysis.created_at.desc()).first()
                         if analysis is not None:
-                            terminal_failure = current.status == "failed"
+                            terminal_failure = current.status in {"failed", "cancelled"}
                             prior_status = dict(analysis.execution_status or {})
                             prior_extraction = prior_status.get("extraction", "processing")
                             prior_assessment = prior_status.get("assessment", "pending")
@@ -1593,7 +1598,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                             CaptureAnalysis.source_event_id.in_(source_event_ids or ["__none__"]),
                         ).order_by(CaptureAnalysis.created_at.desc()).first()
                         if analysis is not None:
-                            terminal_failure = current.status == "failed"
+                            terminal_failure = current.status in {"failed", "cancelled"}
                             analysis.execution_status = {
                                 **(analysis.execution_status or {}),
                                 "delta_reconciliation": "failed" if terminal_failure else "retrying",
@@ -1607,7 +1612,20 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                                 "longitudinal_processing_status": "failed" if terminal_failure else "retrying",
                                 "longitudinal_processing_error": current.error_code,
                             })
-                    db.add(QwenJobEvent(job_id=current.id, person_id=current.person_id, caregiver_id=current.caregiver_id, event_type="job_failed_or_requeued", from_status=previous_status, to_status=current.status, error_code=current.error_code, metadata_json={"attempt": current.attempt_count, "error_type": type(exc).__name__}))
+                    db.add(QwenJobEvent(
+                        job_id=current.id,
+                        person_id=current.person_id,
+                        caregiver_id=current.caregiver_id,
+                        event_type="job_cancelled" if current.status == "cancelled" else "job_failed_or_requeued",
+                        from_status=previous_status,
+                        to_status=current.status,
+                        error_code=current.error_code,
+                        metadata_json={
+                            "attempt": current.attempt_count,
+                            "error_type": type(exc).__name__,
+                            "reason": "caregiver_access_revoked" if current.status == "cancelled" else None,
+                        },
+                    ))
                     db.commit()
             except Exception:
                 db.rollback()
