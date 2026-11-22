@@ -14,6 +14,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.capture_review import review_capture_candidate
+from app.api.daily_care_intelligence import _history_bundle
 from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent, Caregiver, Evidence, Person
@@ -21,6 +22,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion
+from app.models.qwen_background_job import QwenBackgroundJob
 from app.schemas.capture_review import CaptureCandidateReview
 from app.services.lcr_context import build_lcr_context
 
@@ -242,5 +244,79 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres():
                 denied = exc.status_code == 404
             assert denied, "another care recipient must not read or review this analysis"
             assert db.query(CareAssertion).filter_by(person_id=other_person_id).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_completed_daily_capture_job_without_analysis_is_not_reported_as_queued_postgres():
+    """A completed worker with no saved analysis must remain visibly incomplete."""
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    suffix = uuid.uuid4().hex
+    person_id = f"daily-missing-analysis-person-{suffix}"
+    caregiver_id = f"daily-missing-analysis-caregiver-{suffix}"
+    event_id = f"daily-missing-analysis-event-{suffix}"
+    job_id = f"daily-missing-analysis-job-{suffix}"
+    now = datetime.now(UTC)
+
+    try:
+        with Session(engine) as db:
+            db.add(Person(id=person_id, name="Daily Care missing analysis fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Daily Care caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                role="primary",
+                access_scope="full_record",
+                status="active",
+                can_manage_members=True,
+                granted_by_caregiver_id=caregiver_id,
+            ))
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="daily_care_entry",
+                status="recorded",
+                occurred_at=now,
+                title="Daily care entry",
+                description=json.dumps({
+                    "capture_idempotency_key": "missing-analysis-case",
+                    "general_notes": "Caregiver report remains saved.",
+                }),
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="server_recorded_at",
+            ))
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                status="completed",
+                task_text="Extract the saved Daily Care report",
+                context_text="",
+                evidence_ids_json="[]",
+                workflow="daily_capture_extraction",
+                source_event_ids_json=json.dumps([event_id]),
+                source_evidence_ids_json="[]",
+                completed_at=now,
+            ))
+            db.commit()
+
+            history = _history_bundle(db, person_id, caregiver_id)
+            record = next(
+                item for item in history["records"]
+                if item.get("source_type") == "care_event" and item.get("source_id") == event_id
+            )
+            processing = record["capture_processing"]
+            assert processing["job_status"] == "completed"
+            assert processing["extraction_status"] == "unavailable"
+            assert processing["review_required"] is False
+            assert "could not be organized" in processing["message"]
     finally:
         engine.dispose()
