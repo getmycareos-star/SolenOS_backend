@@ -236,7 +236,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                         headers={"Authorization": f"Bearer {fresh_token}"},
                         json={
                             "person_id": person_id,
-                            "text": "What did I report about sleep?",
+                            "text": "What have I told you about sleep?",
                             "client_turn_id": f"daily-care-assistant-readback-{suffix}",
                         },
                     )
