@@ -807,7 +807,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         ),
         "written_to_lcr": any(
             isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
-            for item in observations
+            for item in stored_observations
         ),
     }
 
