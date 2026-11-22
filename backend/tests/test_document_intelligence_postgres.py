@@ -43,6 +43,7 @@ from app.api.document_intelligence import (
     _existing_assertion_for_exact_document_duplicate,
 )
 from app.models.care import Caregiver, Person, Evidence
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob
