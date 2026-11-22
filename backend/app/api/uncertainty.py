@@ -416,7 +416,6 @@ def review_question_answer(
     )
     execution = None
     try:
-        engine.db.add(event)
         if review.decision in {"rejected", "needs_clarification"}:
             # A rejected or incomplete answer is not a resolved care question.
             # Preserve the answer event and review event, but return the question
@@ -440,9 +439,10 @@ def review_question_answer(
                 ) from exc
         if execution is not None:
             execution["stages"]["reconciliation"] = "committed"
-            # Persist the execution receipt in the same transaction as the
-            # append-only reviewer decision and accepted assertion.
+            # Finalize the immutable receipt before the event is first flushed.
             event.care_continuity_execution = execution
+        # Persist the review event once, with its complete immutable payload.
+        engine.db.add(event)
         engine.db.commit()
         engine.db.refresh(event)
         return event
