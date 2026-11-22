@@ -210,6 +210,11 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             ])
             db.commit()
             SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+            monkeypatch.setattr(main_module, "SessionLocal", SessionFactory)
+            model_calls = []
+            monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+            monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: model_calls.append(args))
+
             def override_db():
                 request_db = SessionFactory()
                 try:
