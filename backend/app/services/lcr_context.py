@@ -1085,6 +1085,23 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     loops are represented. Any records omitted by the prompt budget are disclosed.
     """
     max_chars = max(256, int(max_chars))
+    source_caveats = []
+    for source_name, source in context.get("sources", {}).items():
+        for item in source.get("items", []):
+            source_context = item.get("source_context")
+            if not isinstance(source_context, dict):
+                continue
+            candidate = source_context.get("document_candidate")
+            candidate = candidate if isinstance(candidate, dict) else {}
+            authority = source_context.get("authority")
+            negation_status = candidate.get("negation_status")
+            if authority or negation_status:
+                source_caveats.append({
+                    "source_type": source_name,
+                    "source_id": item.get("id"),
+                    "authority": authority,
+                    "negation_status": negation_status,
+                })
     header = (
         "LCR context metadata: "
         + json.dumps({
@@ -1098,6 +1115,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 "status": "not_assessed",
                 "interpretation_limit": "No source-lineage assessment was supplied.",
             }),
+            "source_caveats": source_caveats[:100],
         }, ensure_ascii=False, separators=(",", ":"))
     )
 
