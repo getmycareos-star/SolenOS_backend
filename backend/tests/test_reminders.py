@@ -739,7 +739,7 @@ def test_browser_push_worker_revokes_legacy_subscriptions_and_cancels_deliveries
 
         db.refresh(subscription)
         db.refresh(delivery)
-        assert subscription.revoked_at == now
+        assert subscription.revoked_at is not None and subscription.revoked_at.replace(tzinfo=timezone.utc) == now
         assert delivery.status == "cancelled"
         assert delivery.last_error_code == "in_app_only_policy"
         assert delivery.attempt_count == 0
