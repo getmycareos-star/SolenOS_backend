@@ -682,6 +682,7 @@ def list_document_intelligence(
     ).order_by(CaptureAnalysis.created_at.desc()).limit(500).all()
     items = []
     seen_evidence_ids = set()
+    analyzed_evidence_ids = set()
     for analysis in rows:
         metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
         if metadata.get("kind") != "document_extraction_v1":
@@ -697,15 +698,16 @@ def list_document_intelligence(
         ).first()
         if evidence is None:
             continue
+        analyzed_evidence_ids.add(evidence_id)
+        if evidence_id in seen_evidence_ids:
+            continue
         seen_evidence_ids.add(evidence_id)
-        items.append(_response(analysis))
-        if len(items) >= limit:
-            break
+        if len(items) < limit:
+            items.append(_response(analysis))
     # A completed worker job is not proof that document extraction was
     # persisted. Keep that distinction visible to the caregiver: if the
     # completed job has no corresponding saved analysis, surface it as a
     # retryable failure instead of silently dropping it from the queue view.
-    analyzed_evidence_ids = set(seen_evidence_ids)
     processing_jobs = []
     seen_evidence_ids = set()
     jobs = []
