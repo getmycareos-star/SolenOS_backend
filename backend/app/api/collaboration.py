@@ -781,6 +781,28 @@ class QwenAssistRequest(BaseModel):
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
+class QwenClaimExtractionRequest(BaseModel):
+    evidence_id: str = Field(min_length=1, max_length=128)
+    raw_text: str = Field(min_length=1, max_length=8000)
+
+
+class QwenCareUnderstandingRequest(BaseModel):
+    evidence_id: str = Field(min_length=1, max_length=128)
+    raw_text: str = Field(min_length=1, max_length=8000)
+
+
+def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, evidence_id: str, raw_text: str) -> None:
+    evidence = db.query(EvidenceModel).filter(
+        EvidenceModel.id == evidence_id,
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.uploaded_by_caregiver_id == caregiver_id,
+    ).first()
+    if evidence is None:
+        raise HTTPException(status_code=404, detail="Saved source could not be found.")
+    if evidence.source_text != raw_text:
+        raise HTTPException(status_code=409, detail="The source text does not match the saved record. No extraction was run.")
+
+
 def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
     # Resolve the bearer capability and re-check the current membership grant
     # on every request, including when middleware has already populated identity.
@@ -4642,6 +4664,122 @@ def review_two_week_output(
         "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
         "idempotent_replay": False,
     }
+
+
+
+@router.post("/assistant/claim-extraction")
+def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request, db: Session = Depends(get_db)):
+    """Two separate read-only Qwen extraction passes over caregiver-owned saved evidence."""
+    person_id, caregiver_id = _scope(request, db)
+    source = payload.raw_text
+    if not source.strip():
+        raise HTTPException(status_code=422, detail="Source text is required")
+    _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
+    system = (
+        "Extract only discrete claims explicitly supported by the supplied source. Return JSON only: "
+        '{"claims":[{"claim_text":"string","entity_type":"person|place|institution|object|symptom|behavior|medication|event|unknown",'
+        '"event_type":"string","confidence_tag":"confirmed|reported|inferred|unknown|contradictory",'
+        '"source_span":{"start_offset":0,"end_offset":1,"text":"exact substring"} }]} . '
+        "Maximum 20 claims. Each claim_text must be at most 1000 characters, event_type at most 200. "
+        "source_span may be null only if exact offsets cannot be established. Preserve attribution, negation, "
+        "time wording and uncertainty. Prefer precision over recall. Never diagnose, recommend treatment, "
+        "invent details, or convert uncertainty into certainty."
+    )
+    def extract_once(label: str) -> dict:
+        raw = qwen_chat(
+            [{"role": "system", "content": system + f" This is independent extraction run {label}."},
+             {"role": "user", "content": "Original source text:\\n" + source}],
+            response_format="json",
+            options={"temperature": 0, "num_predict": 1200},
+        )
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Qwen returned invalid claim data. No claims were accepted.") from exc
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("claims"), list):
+            raise HTTPException(status_code=503, detail="Qwen returned an invalid claim structure.")
+        claims = []
+        for item in parsed["claims"][:20]:
+            if not isinstance(item, dict):
+                continue
+            text_value, entity, event, confidence = (item.get("claim_text"), item.get("entity_type"), item.get("event_type"), item.get("confidence_tag"))
+            if not isinstance(text_value, str) or not text_value.strip() or len(text_value) > 1000:
+                continue
+            if entity not in {"person", "place", "institution", "object", "symptom", "behavior", "medication", "event", "unknown"}:
+                continue
+            if not isinstance(event, str) or not event.strip() or len(event) > 200:
+                continue
+            if confidence not in {"confirmed", "reported", "inferred", "unknown", "contradictory"}:
+                continue
+            span = item.get("source_span")
+            if span is not None:
+                if not isinstance(span, dict):
+                    span = None
+                else:
+                    start, end, quote = span.get("start_offset"), span.get("end_offset"), span.get("text")
+                    if (not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool)
+                        or not isinstance(quote, str) or start < 0 or end <= start or end > len(source) or source[start:end] != quote):
+                        span = None
+                    else:
+                        span = {"start_offset": start, "end_offset": end, "text": quote}
+            claims.append({"claim_text": text_value.strip(), "entity_type": entity, "event_type": event.strip(),
+                           "confidence_tag": confidence, "source_span": span})
+        return {"claims": claims}
+    run_a = extract_once("A")
+    run_b = extract_once("B")
+    return {"evidence_id": payload.evidence_id, "run_a": run_a, "run_b": run_b,
+            "provider": "private_ollama_qwen", "written_to_lcr": False, "review_required": True}
+
+
+@router.post("/assistant/care-understanding")
+def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Request, db: Session = Depends(get_db)):
+    """Source-grounded understanding proposal; no LCR write."""
+    person_id, caregiver_id = _scope(request, db)
+    source = payload.raw_text
+    if not source.strip():
+        raise HTTPException(status_code=422, detail="Source text is required")
+    _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
+    system = (
+        "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
+        "Match these exact structures: observations [{description,approximate_time:null|string,confidence:low|medium|high,raw_fragment}]; "
+        "events [{description,time:null|string,participants:string[],raw_fragment}]; "
+        "decisions [{description,who:string[],why:null|string,reason_unknown:boolean,status:active|completed|changed|reversed|uncertain|needs_review|pending,raw_fragment}]; "
+        "outcomes [{description,status:observed|pending|uncertain|ongoing|resolved|changed,raw_fragment}]; "
+        "unknowns [{question,status:open|answered|declined|no_longer_relevant,raw_fragment}]; "
+        "non_care_facts [{layer:contributor_load|disagreement_perspective,text,raw_fragment}]; "
+        "possible_links [{text,causation_claimed:false}]. "
+        "Limits: 20 observations, 10 per other section. Descriptions and questions max 500 characters. "
+        "Every raw_fragment must be an exact substring of the original source. Preserve who said/observed it, negation, "
+        "uncertainty and time. Never diagnose, advise, infer cause, or invent missing details. Empty arrays when unsupported."
+    )
+    raw = qwen_chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": "Original source text:\\n" + source}],
+        response_format="json", options={"temperature": 0, "num_predict": 1600},
+    )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Qwen returned invalid care-understanding data. No result was accepted.") from exc
+    limits = {"observations": 20, "events": 10, "decisions": 10, "outcomes": 10, "unknowns": 10, "non_care_facts": 10, "possible_links": 10}
+    if not isinstance(parsed, dict) or any(not isinstance(parsed.get(k, []), list) for k in limits):
+        raise HTTPException(status_code=503, detail="Qwen returned an invalid care-understanding structure.")
+    result = {k: [] for k in limits}
+    for key, limit in limits.items():
+        for item in parsed.get(key, [])[:limit]:
+            if not isinstance(item, dict):
+                continue
+            if key == "possible_links":
+                if isinstance(item.get("text"), str) and item["text"].strip():
+                    result[key].append({"text": item["text"][:500], "causation_claimed": False})
+                continue
+            fragment = item.get("raw_fragment")
+            if not isinstance(fragment, str) or not fragment or fragment not in source:
+                continue
+            cleaned = dict(item)
+            cleaned["raw_fragment"] = fragment
+            result[key].append(cleaned)
+    return {"evidence_id": payload.evidence_id, "understanding": result, "provider": "private_ollama_qwen",
+            "written_to_lcr": False, "review_required": True}
 
 
 @router.post("/assistant/assist")
