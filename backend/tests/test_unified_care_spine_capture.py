@@ -461,7 +461,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 headers=headers,
                 json={
                     "person_id": person_id,
-                    "text": "What was recorded about confusion and lunch?",
+                    "text": "What was recorded about Mum being unusually confused and refusing lunch?",
                     "client_turn_id": str(uuid.uuid4()),
                 },
             )
