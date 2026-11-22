@@ -7713,8 +7713,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             elif trend_fallback:
                 deterministic_reply = trend_fallback
             elif document_question_for_fallback:
+                # The exact uploaded source is already server-verified and
+                # person-scoped. Keep it available to the outage fallback even
+                # when prompt-budget selection omits it from model context.
+                document_fallback_context = list(dict.fromkeys([
+                    *included_model_context_lines,
+                    *verified_document_context_lines,
+                ]))
                 deterministic_reply = _document_extractive_answer(
-                    user_text, included_model_context_lines
+                    user_text, document_fallback_context
                 )
             elif not emergency:
                 deterministic_reply = _care_history_extractive_answer(
@@ -7793,13 +7800,41 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
                 ) from exc
         validation_source = user_text + "\n" + "\n".join(bounded_context)
+        document_fallback_context = list(dict.fromkeys([
+            *included_model_context_lines,
+            *verified_document_context_lines,
+        ]))
         document_extractive_answer = _document_extractive_answer(
             user_text,
-            included_model_context_lines,
+            document_fallback_context,
         ) if document_question_for_fallback else None
         # Direct questions about what an uploaded document says are answered
         # from the integrity-verified extraction itself, not model paraphrase.
         document_extractive_fallback_used = bool(document_extractive_answer)
+        if document_extractive_fallback_used:
+            quoted = re.search(r"“(.*?)”", document_extractive_answer, re.DOTALL)
+            quoted_sentences = [
+                sentence.strip()
+                for sentence in re.split(r"(?<=[.!?])\s+", quoted.group(1) if quoted else "")
+                if sentence.strip()
+            ]
+            for document_line in verified_document_context_lines:
+                try:
+                    document_payload = json.loads(document_line[document_line.index("{"):])
+                    document_record = document_payload.get("record") if isinstance(document_payload.get("record"), dict) else {}
+                    source_text = document_record.get("source_text") or ""
+                    if not quoted_sentences or not any(sentence in source_text for sentence in quoted_sentences):
+                        continue
+                    document_id = document_payload.get("source_id")
+                    evidence_id = document_record.get("source_evidence_id")
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    continue
+                if document_id:
+                    source_document_analysis_ids.append(str(document_id))
+                if evidence_id:
+                    source_evidence_ids.append(str(evidence_id))
+            source_document_analysis_ids = list(dict.fromkeys(source_document_analysis_ids))
+            source_evidence_ids = list(dict.fromkeys(source_evidence_ids))
         # Resolve deterministic safety and uncertainty overrides before any
         # extractive fallback consults them. This ordering keeps every fallback
         # decision based on the same already-computed guard results.
