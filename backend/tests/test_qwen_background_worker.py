@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -34,6 +35,40 @@ def test_background_classifier_rejects_malformed_output(monkeypatch):
     with pytest.raises(ValueError, match="workflow_classification_invalid"):
         asyncio.run(worker._classify_task("Help with care notes", ""))
 
+
+
+def test_worker_does_not_persist_assistance_if_job_is_cancelled_during_inference(tmp_path, monkeypatch):
+    from app.models.qwen_background_job import QwenModelOutput
+
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+    caller_thread_id = threading.get_ident()
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    def cancel_assist(payload, request, inference_db):
+        assert threading.get_ident() != caller_thread_id
+        assert payload.workflow == "appointment"
+        current = inference_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        assert current.status == "processing"
+        current.status = "cancelled"
+        current.error_code = "document_deleted"
+        inference_db.commit()
+        return {}
+
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", cancel_assist)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    cancelled = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "document_deleted"
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_completed").count() == 0
+    db.close()
 
 
 @pytest.mark.parametrize(("expected", "task"), [
@@ -160,7 +195,7 @@ def test_background_job_retries_and_fails_closed_after_bounded_attempts(tmp_path
     async def classify(*args, **kwargs):
         return "appointment"
 
-    async def fail_assist(*args, **kwargs):
+    def fail_assist(*args, **kwargs):
         raise HTTPException(status_code=503, detail="grounded response unavailable")
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -201,7 +236,7 @@ def test_worker_handles_structured_qwen_failures_without_sticking_jobs(
     async def classify(*args, **kwargs):
         return "appointment"
 
-    async def fail_assist(*args, **kwargs):
+    def fail_assist(*args, **kwargs):
         raise HTTPException(status_code=503, detail=detail)
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -265,13 +300,15 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
 
 def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
+    caller_thread_id = threading.get_ident()
     stale_lock = datetime.now(timezone.utc) - timedelta(minutes=20)
     job_id = _seed_job(sessions, status="processing", locked_at=stale_lock)
 
     async def classify(*args, **kwargs):
         return "appointment"
 
-    async def complete_assist(payload, request, db):
+    def complete_assist(payload, request, db):
+        assert threading.get_ident() != caller_thread_id
         assert payload.workflow == "appointment"
         assert request.state.scoped_person_id == "person-test"
         return {
