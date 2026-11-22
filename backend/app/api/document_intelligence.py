@@ -1551,7 +1551,6 @@ def review_document_candidate(
             not isinstance(quote, str)
             or not quote
             or quote not in (analysis.source_text or "")
-            or subject.casefold() not in quote.casefold()
             or observation != quote
         ):
             raise HTTPException(
