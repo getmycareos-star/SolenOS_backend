@@ -31,24 +31,6 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else No
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
 
 
-def _redact_test_audit_events(db, person_id: str) -> None:
-    """Use the approved privacy-erasure path; audit history is never deleted by test cleanup."""
-    db.execute(text("SET LOCAL solenos.privacy_erasure = 'on'"))
-    db.execute(
-        text("""
-            UPDATE audit_log_events
-            SET actor_id = NULL,
-                subject_id = NULL,
-                person_id = NULL,
-                caregiver_id = NULL,
-                target_id = NULL,
-                metadata = json_build_object('redacted_for_privacy_erasure', true)
-            WHERE person_id = :person_id
-        """),
-        {"person_id": person_id},
-    )
-
-
 def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_existing_session():
     suffix = uuid.uuid4().hex[:10]
     invite_email = f"invited-{suffix}@example.test"
@@ -322,33 +304,11 @@ def test_postgres_invited_caregiver_is_isolated_and_revocation_invalidates_exist
             assert recovered_session.revoked_at is not None
             assert stored_session.expires_at > datetime.now(timezone.utc)
     finally:
-        if Session and (person_id or foreign_person_id):
-            with Session() as db:
-                if invitation_id:
-                    db.query(CaregiverInvitation).filter_by(id=invitation_id).delete(synchronize_session=False)
-                db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
-                if foreign_person_id:
-                    db.query(CareStateRevision).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    db.query(CaregiverProfile).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    db.query(LearningEvent).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    _redact_test_audit_events(db, foreign_person_id)
-                    db.query(AnonymousSession).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    db.query(Caregiver).filter_by(person_id=foreign_person_id).delete(synchronize_session=False)
-                    db.query(Person).filter_by(id=foreign_person_id).delete(synchronize_session=False)
-                if person_id:
-                    db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
-                    db.query(LearningEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
-                    db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
-                db.commit()
+        # This PostgreSQL database is disposable and each test uses unique
+        # synthetic identities. Preserve append-only care, learning and audit
+        # history; the CI database is discarded after the job.
         if engine:
             engine.dispose()
-
-
-
 def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution_and_shared_reads():
     suffix = uuid.uuid4().hex[:10]
     invite_email = f"concurrent-{suffix}@example.test"
@@ -448,25 +408,11 @@ def test_postgres_two_caregivers_concurrent_evidence_writes_preserve_attribution
                 invited_caregiver_id,
             }
     finally:
-        if Session and person_id:
-            with Session() as db:
-                db.query(CareDeltaRun).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
-                _redact_test_audit_events(db, person_id)
-                db.query(EvidenceObservation).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(EvidenceSourceRelationship).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Evidence).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
-                db.commit()
-
-
-
+        # This PostgreSQL database is disposable and each test uses unique
+        # synthetic identities. Preserve append-only care, learning and audit
+        # history; the CI database is discarded after the job.
+        if engine:
+            engine.dispose()
 def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_history():
     suffix = uuid.uuid4().hex[:10]
     invite_email = f"responsibility-{suffix}@example.test"
@@ -607,21 +553,8 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
                 assert stored_handoff.to_caregiver_id == primary_body["caregiver"]["profile_id"]
                 assert stored_handoff.is_completed is False
     finally:
-        if Session and person_id:
-            with Session() as db:
-                db.query(CaregiverResponsibilityTransfer).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverHandoff).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverResponsibility).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(OpenLoopOccurrence).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(OpenLoopEvent).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(OpenLoopRecord).filter_by(person_id=person_id).delete(synchronize_session=False)
-                _redact_test_audit_events(db, person_id)
-                db.query(CaregiverInvitation).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverAccessGrant).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(AnonymousSession).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverAccount).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(CaregiverProfile).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Caregiver).filter_by(person_id=person_id).delete(synchronize_session=False)
-                db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
-                db.commit()
+        # This PostgreSQL database is disposable and each test uses unique
+        # synthetic identities. Preserve append-only care, learning and audit
+        # history; the CI database is discarded after the job.
+        if engine:
+            engine.dispose()
