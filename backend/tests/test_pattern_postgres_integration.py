@@ -849,19 +849,26 @@ def test_postgres_core_revision_writer_shares_orm_target_lock():
 def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analyses():
     """Companion's shared LCR projection reads revision and Delta history from PostgreSQL."""
     from app.models.care_continuity import CareDeltaRun
-    from app.services.lcr_context import build_lcr_context
+    from app.services.unified_lcr_retrieval import build_unified_lcr_context
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     suffix = uuid.uuid4().hex
     person_a_id = f"lcr-revision-person-a-{suffix}"
     person_b_id = f"lcr-revision-person-b-{suffix}"
+    caregiver_a_id = f"lcr-revision-caregiver-a-{suffix}"
+    caregiver_b_id = f"lcr-revision-caregiver-b-{suffix}"
     now = datetime.now(timezone.utc)
     try:
         with Session() as db:
             db.add_all([
                 Person(id=person_a_id, name="PostgreSQL LCR revision fixture A"),
                 Person(id=person_b_id, name="PostgreSQL LCR revision fixture B"),
+            ])
+            db.flush()
+            db.add_all([
+                Caregiver(id=caregiver_a_id, name="LCR revision caregiver A", relationship="family", person_id=person_a_id),
+                Caregiver(id=caregiver_b_id, name="LCR revision caregiver B", relationship="family", person_id=person_b_id),
             ])
             db.flush()
             db.add_all([
@@ -920,8 +927,8 @@ def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analys
 
         # A fresh PostgreSQL session proves retrieval is reading committed rows.
         with Session() as db:
-            context = build_lcr_context(
-                db, person_a_id, limit_per_source=10, query="sleep",
+            context = build_unified_lcr_context(
+                db, person_a_id, caregiver_a_id, limit_per_source=10, query="sleep",
             )
 
         revision_source = context["sources"]["care_state_revisions"]
@@ -945,6 +952,9 @@ def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analys
             ).delete(synchronize_session=False)
             db.query(CareStateRevision).filter(
                 CareStateRevision.person_id.in_([person_a_id, person_b_id])
+            ).delete(synchronize_session=False)
+            db.query(Caregiver).filter(
+                Caregiver.id.in_([caregiver_a_id, caregiver_b_id])
             ).delete(synchronize_session=False)
             db.query(Person).filter(
                 Person.id.in_([person_a_id, person_b_id])
