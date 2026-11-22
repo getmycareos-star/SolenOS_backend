@@ -1128,7 +1128,10 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     # each source so the bounded caveat list preserves the same record ordering
     # caregivers see in the underlying LCR projection.
     source_caveats.sort(
-        key=lambda caveat: caveat.get("source_type") != "assertions"
+        key=lambda caveat: (
+            caveat.get("source_type") != "assertions",
+            caveat.get("source_type") == "assertions" and not isinstance(caveat.get("page_number"), int),
+        )
     )
     header = (
         "LCR context metadata: "
