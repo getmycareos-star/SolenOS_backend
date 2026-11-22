@@ -22,7 +22,7 @@ DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABA
 pytestmark = pytest.mark.skipif(
     not DATABASE_URL
     or not DATABASE_URL.startswith("postgresql")
-    or "test" not in DATABASE_NAME,
+    or not any(token in DATABASE_NAME for token in ("test", "benchmark")),
     reason="requires a migrated, disposable PostgreSQL test database",
 )
 
