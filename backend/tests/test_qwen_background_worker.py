@@ -102,6 +102,32 @@ def test_worker_does_not_requeue_cancelled_job_when_inference_raises(tmp_path, m
     db.close()
 
 
+def test_worker_cancels_job_when_caregiver_access_is_revoked_before_inference(tmp_path, monkeypatch):
+    from app.models.qwen_background_job import QwenModelOutput
+
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    def revoked_assist(payload, request, inference_db):
+        raise HTTPException(status_code=403, detail="Caregiver access has been revoked.")
+
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", revoked_assist)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    cancelled = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "caregiver_access_revoked"
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_cancelled").count() == 1
+    db.close()
+
+
 def test_worker_discards_result_when_caregiver_access_is_revoked_during_inference(tmp_path, monkeypatch):
     from app.models.qwen_background_job import QwenModelOutput
 
