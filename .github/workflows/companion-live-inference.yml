@@ -128,6 +128,8 @@ jobs:
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
       - name: Run bounded Qwen startup retry regression tests
         run: python -m pytest backend/tests/test_qwen_retry_budget.py -q
+      - name: Run Qwen background worker restart, cancellation and persistence tests
+        run: python -m pytest backend/tests/test_qwen_background_worker.py -q
       - name: Start isolated Ollama runtime
         id: ollama
         run: |
