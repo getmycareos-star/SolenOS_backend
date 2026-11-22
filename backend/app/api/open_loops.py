@@ -295,7 +295,7 @@ def _get_scoped(db, person_id, caregiver_id, loop_id, *, for_update=False):
     # evidence arrays. PostgreSQL's row lock makes concurrent append operations
     # reload the latest committed record instead of overwriting one another.
     if for_update and db.bind is not None and db.bind.dialect.name == "postgresql":
-        query = query.with_for_update()
+        query = query.with_for_update().populate_existing()
     loop = query.first()
     if loop is None:
         raise HTTPException(status_code=404, detail="Open loop not found")
@@ -350,8 +350,9 @@ def _reassess(db, loop, *, now: datetime | None = None):
 
 
 def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
-                  event_type: str, idempotency_key: Optional[str]):
-    """Resolve committed mutation retries without appending duplicate evidence."""
+                  event_type: str, idempotency_key: Optional[str],
+                  payload: Optional[EvidenceAction] = None):
+    """Replay only an identical committed mutation; reject key reuse for changed content."""
     if not idempotency_key:
         return None
     event = db.query(OpenLoopEvent).filter(
@@ -362,6 +363,11 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
         return None
     if event.loop_id != loop_id or event.event_type != event_type:
         raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop event")
+    if payload is not None and event_type == "action_recorded":
+        saved_actions = (event.after_state or {}).get("action_evidence") or []
+        saved = saved_actions[-1] if saved_actions else None
+        if not saved or saved.get("text") != payload.text or saved.get("evidence", []) != payload.evidence:
+            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
     return _snapshot(_get_scoped(db, person_id, caregiver_id, loop_id))
 
 
@@ -727,7 +733,7 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     _validate_source_evidence_references(db, person_id, payload.evidence)
@@ -744,7 +750,7 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
         if payload.idempotency_key:
             replay = _replay_event(
                 db, person_id, caregiver_id, loop_id,
-                "action_recorded", payload.idempotency_key,
+                "action_recorded", payload.idempotency_key, payload,
             )
             if replay is not None:
                 return replay
