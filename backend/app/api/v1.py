@@ -13,6 +13,7 @@ from app.api.registered_actions import router as registered_actions_router
 from app.services.qwen_gateway import extract_review_candidates
 from app.services.capture_review import (
     persist_capture_analysis,
+    persist_source_grounded_daily_observations,
     persist_structured_daily_capture_observations,
 )
 from app.services.uncertainty import persist_source_clarification_questions
@@ -1216,13 +1217,30 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         if isinstance(qwen_candidates, dict)
         else []
     )
-    if natural_language_update and qwen_status == "available":
-        # Preserve the original caregiver report as the saved source. Model-
-        # extracted details remain candidates until the caregiver reviews them.
-        for candidate in observations:
-            if isinstance(candidate, dict):
-                candidate["review_status"] = "pending_review"
-        assessment_status = "available" if observations else "not_applicable"
+    if natural_language_update and qwen_status == "available" and evidence is not None:
+        try:
+            persisted_observation_count = persist_source_grounded_daily_observations(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                evidence_id=evidence.id,
+                source_event_id=event.id,
+                source_text=source_text,
+                candidates=qwen_candidates,
+                reported_at=event.recorded_at,
+            )
+            db.commit()
+            for candidate in observations:
+                if isinstance(candidate, dict):
+                    candidate["review_status"] = "pending_review"
+            assessment_status = "available" if persisted_observation_count else "not_applicable"
+        except Exception:
+            db.rollback()
+            assessment_status = "failed"
+            logger.exception(
+                "Could not preserve source-grounded Daily Care observations for event %s",
+                event.id,
+            )
     else:
         assessment_status = "pending" if qwen_status == "available" else "failed"
 
