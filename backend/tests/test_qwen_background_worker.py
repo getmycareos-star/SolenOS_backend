@@ -111,6 +111,8 @@ def test_worker_discards_result_when_caregiver_access_is_revoked_during_inferenc
     access_revoked = False
 
     def require_permission(db, person_id, caregiver_id, permission):
+        assert person_id == "person-test"
+        assert caregiver_id == "caregiver-test"
         assert permission == "view_lcr"
         if access_revoked:
             raise HTTPException(status_code=403, detail="Caregiver access has been revoked.")
