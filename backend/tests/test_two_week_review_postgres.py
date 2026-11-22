@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -203,6 +204,17 @@ def test_two_week_review_decisions_survive_new_login_and_remain_caregiver_scoped
         assert [event.to_status for event in events] == ["reviewed", "needs_follow_up"]
         assert all(event.caregiver_id == caregiver_id for event in events)
         assert all(event.metadata_json["written_to_lcr"] is False for event in events)
+        first_event_id = events[0].id
+        with pytest.raises(DBAPIError):
+            db.execute(
+                text("UPDATE qwen_job_events SET to_status = 'tampered' WHERE id = :event_id"),
+                {"event_id": first_event_id},
+            )
+        db.rollback()
+
+    with Session() as db:
+        unchanged_event = db.query(QwenJobEvent).filter_by(id=first_event_id).one()
+        assert unchanged_event.to_status == "reviewed"
         assert db.query(CareEvent).filter_by(id=event_id, person_id=person_id).count() == 1
         assert db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).count() == 1
 
