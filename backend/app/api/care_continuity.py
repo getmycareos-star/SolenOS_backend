@@ -2996,6 +2996,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     uncertainty_items = []
     missing_items = []
     open_loops = []
+    persisted_event_follow_up_sources = {
+        str(item.get("source_id"))
+        for item in all_items
+        if item.get("source") == "open_loop_records"
+        and item.get("source_type") == "events"
+        and item.get("source_id")
+        and str(item.get("status") or item.get("lifecycle_status") or "").lower() not in closed_statuses
+    }
     baseline_items = []
     open_loop_sources = {
         "conflicts": "conflict_review",
@@ -3114,15 +3122,18 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             })
         elif source == "events" and (item.get("attention_candidate") is True or item.get("follow_up_candidate") is True):
             attention_items.append(summary_item)
-            open_loops.append({
-                **summary_item,
-                "loop_type": "care_event_follow_up",
-                "description": str(item.get("description") or item.get("title") or "")[:1600],
-                "owner": item.get("owner") or item.get("assigned_to") or None,
-                "due_at": item.get("due_at"),
-                "recorded_status": status or "not_recorded",
-                "status_confidence": "explicit_follow_up_flag",
-            })
+            # Once a caregiver has created a saved follow-up for this event,
+            # show that saved item instead of a second, event-only copy.
+            if str(item.get("id") or "") not in persisted_event_follow_up_sources:
+                open_loops.append({
+                    **summary_item,
+                    "loop_type": "care_event_follow_up",
+                    "description": str(item.get("description") or item.get("title") or "")[:1600],
+                    "owner": item.get("owner") or item.get("assigned_to") or None,
+                    "due_at": item.get("due_at"),
+                    "recorded_status": status or "not_recorded",
+                    "status_confidence": "explicit_follow_up_flag",
+                })
         elif source == "follow_up_links" and status in open_statuses:
             attention_items.append(summary_item)
     # Observation coverage is distinct from event evidence: an unobserved interval
