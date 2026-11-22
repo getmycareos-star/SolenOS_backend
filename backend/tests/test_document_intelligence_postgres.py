@@ -66,6 +66,63 @@ def _request(person_id: str, caregiver_id: str) -> Request:
 
 
 
+def test_postgres_completed_document_job_without_saved_analysis_remains_visible_as_failed():
+    """A completed queue job without saved extraction must remain visible for retry."""
+    from app.api.document_intelligence import list_document_intelligence
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-completed-gap-person-{suffix}"
+    caregiver_id = f"doc-completed-gap-caregiver-{suffix}"
+    evidence_id = f"doc-completed-gap-evidence-{suffix}"
+    job_id = f"doc-completed-gap-job-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Completed document status fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Document status caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            db.add(Evidence(
+                id=evidence_id, person_id=person_id, type="document",
+                source_text="Original document text remains preserved.",
+                uploaded_by_caregiver_id=caregiver_id,
+            ))
+            db.add(QwenBackgroundJob(
+                id=job_id, person_id=person_id, caregiver_id=caregiver_id,
+                task_text="Process saved document for caregiver review.",
+                context_text="", evidence_ids_json=json.dumps([evidence_id]),
+                workflow="document_intake", status="completed",
+            ))
+            db.commit()
+
+        with Session() as db:
+            state = list_document_intelligence(_request(person_id, caregiver_id), 50, db)
+            matching = [
+                item for item in state["processing_jobs"]
+                if item["evidence_id"] == evidence_id
+            ]
+            assert matching == [{
+                "evidence_id": evidence_id,
+                "job_id": job_id,
+                "status": "failed",
+                "attempt_count": 0,
+                "error_code": "completed_without_analysis",
+            }]
+            assert not any(item.get("evidence_id") == evidence_id for item in state["items"])
+    finally:
+        with Session() as db:
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Evidence).filter_by(id=evidence_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
+
+
 def _restart_postgres_service_container(engine):
     """Restart the disposable CI PostgreSQL service and prove committed rows survive."""
     if os.getenv("SOLENOS_TEST_POSTGRES_RESTART") != "1":
