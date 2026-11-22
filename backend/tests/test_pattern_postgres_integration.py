@@ -885,6 +885,18 @@ def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analys
                     changed_at=now,
                 ),
                 CareStateRevision(
+                    id=f"lcr-identity-revision-a-{suffix}",
+                    person_id=person_a_id,
+                    target_type="persons",
+                    target_id=f"lcr-person-profile-a-{suffix}",
+                    revision_number=1,
+                    change_kind="updated",
+                    before_state=json.dumps({"summary": "Old sleep profile metadata."}),
+                    after_state=json.dumps({"summary": "Updated sleep profile metadata."}),
+                    evidence_ids=[],
+                    changed_at=now - timedelta(minutes=1),
+                ),
+                CareStateRevision(
                     id=f"lcr-sleep-revision-b-{suffix}",
                     person_id=person_b_id,
                     target_type="care_assertions",
