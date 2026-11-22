@@ -349,7 +349,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
     if event.status in {"invalidated", "deleted"} or getattr(evidence, "evidence_status", None) == "deleted_by_caregiver":
         current = db.query(QwenBackgroundJob).filter_by(
             id=job_id, person_id=person_id, caregiver_id=caregiver_id
-        ).with_for_update().first()
+        ).populate_existing().with_for_update().first()
         if current is not None:
             current.status = "cancelled"
             current.error_code = "daily_capture_source_unavailable"
@@ -1178,6 +1178,17 @@ async def _maintain_qwen_job_lease(
             return
 
 
+def _run_qwen_support_assist(payload, request):
+    """Run the synchronous assistant in a worker thread with its own DB session."""
+    from app.api.collaboration import qwen_support_assist
+
+    inference_db = SessionLocal()
+    try:
+        return qwen_support_assist(payload, request, inference_db)
+    finally:
+        inference_db.close()
+
+
 async def process_one_qwen_job(job_id: str | None = None) -> bool:
     db = SessionLocal()
     job = None
@@ -1412,7 +1423,10 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         fake_request = SimpleNamespace(
             state=SimpleNamespace(scoped_person_id=job.person_id, scoped_caregiver_id=job.caregiver_id)
         )
-        result = await qwen_support_assist(payload, fake_request, db)
+        # qwen_support_assist is a synchronous FastAPI handler. Run it off the
+        # worker event loop and give it an isolated session so live inference
+        # cannot block lease renewal or share a SQLAlchemy Session across threads.
+        result = await asyncio.to_thread(_run_qwen_support_assist, payload, fake_request)
         # The source may have been deleted while inference was running. A
         # cancelled job must never persist a derived answer after that deletion.
         current_job = db.query(QwenBackgroundJob).filter(
