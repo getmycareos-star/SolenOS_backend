@@ -133,6 +133,17 @@ Frontend workflows for `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c` remained queue
 
 No pending, queued, cancelled, or skipped workflow is counted as passing. The new PostgreSQL tests and Companion retrieval correction are **Implemented—not verified** until the current-main workflows complete successfully. The frontend scanner syntax correction is also **Implemented—not verified** until frontend validation completes.
 
+### Read-only Railway production inspection (2026-11-22)
+
+- Railway project: `SolenOS`; production environment: `19bc2a98-71e5-467b-abdd-7d9eb7011c35`.
+- Backend service `SolenOS_backend` is online with 1/1 replicas and no active Railway warnings or critical alerts. Its latest live deployment is `c1396944-77a1-4d28-82f0-32d3c928454d`, created 2026-11-20, from backend commit `474499444aee362de818738367abe667180d96f8`.
+- The live service source is pinned to that exact commit. It is not following the current `main` tip.
+- Railway reports a staged environment patch `4cb3a568-545a-4f84-8044-8ebfa6df699f` with four service-source changes. The staged diff removes the pinned commit SHA while retaining the `main` branch/repository. It is still **STAGED**, not applied.
+- The PostgreSQL service is online. The `solenos-care-documents` object-storage bucket exists in Railway's environment inventory in region `sjc`; this does not prove application-level upload/download, object ownership, or retention.
+- No deployment, staged-patch acceptance, rollback, or production configuration change was performed.
+- A direct external request to the production `/ready` URL could not be retrieved through the available web access. Railway's service health overview is not a substitute for a successful authenticated readiness/schema check.
+- Current verified candidate: **none**. Backend source `5782e4ccc69c5670c8b8ed19ca2d5914141f6b9a` is not yet CI-verified. Do not remove the pin or deploy until the candidate's full tests, migration validation, backup/recovery and production schema checks pass and David explicitly authorizes deployment.
+
 ### Reassessment notes
 
 - The scanned-image review-status difference remains an intentional trust boundary: the backend preserves the client-submitted value separately and does not treat it as proof of caregiver review. No change was made to weaken that boundary.
