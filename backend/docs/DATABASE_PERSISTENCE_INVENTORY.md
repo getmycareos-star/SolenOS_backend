@@ -87,3 +87,15 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 10. Every category marked Partial, Blocked or Missing is closed or explicitly excluded from the active MVP surface.
 
 **Current release decision:** NOT VERIFIED. Production database access and the latest main-branch CI results are not yet available as passing evidence. No 9/10 reliability score is asserted.
+
+## Scanned-image review-status investigation (2026-11-22)
+
+**Finding: no OCR review-status persistence defect is established by the inspected path.** The apparent status mismatch is an intentional trust boundary, not a claim that OCR or a human review has completed:
+
+- The current frontend scan uploader (`SolenOS-landing/src/components/mvp-workspace/capture/extract-attached.ts`) submits `scan_review_status=not_reviewed` when saving an original scan. It does not claim that extracted text has been checked.
+- The backend upload route in `backend/app/api/collaboration.py` validates the submitted value, stores it separately as `client_submitted_scan_review_status`, sets `client_declared_review_status` to `not_provided`, and records `review_attestation=client_declared_not_server_verified`.
+- OCR extraction is performed later from the persisted original binary by `backend/app/api/document_lifecycle.py`; the original bytes and checksum remain authoritative.
+- Actual document-detail decisions use persisted review events in `DocumentReviewEvent` through `backend/app/api/document_intelligence.py`. A browser-supplied scan flag is not a substitute for that review event.
+- Regression coverage exists in `backend/tests/test_document_lifecycle.py::test_scanned_image_extraction_preserves_batch_page_number` and `backend/tests/test_frontend_contract_routes.py`; the former asserts the submitted value, server-side non-attestation and original binary preservation.
+
+**Decision:** retain this fail-closed distinction. Do not change the backend to accept a browser-declared `caregiver_reviewed` value as proof of review. The remaining verification is to run these tests on a stable current-main commit and verify the browser journey displays the original as saved, OCR as pending/available/partial, and review as pending until a persisted caregiver decision exists. This investigation is not a claim that the full document journey has passed current-main CI.
