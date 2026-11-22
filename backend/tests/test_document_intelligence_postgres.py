@@ -397,16 +397,31 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             headers={"Authorization": "Bearer " + token},
             json={
                 "person_id": person_id,
-                "text": "What does the uploaded document say about walking?",
+                "text": "What does the uploaded document say about eating lunch?",
                 "client_turn_id": "document-lcr-companion-readback-0001",
             },
         )
         assert document_answer.status_code == 200, document_answer.text
         document_answer_body = document_answer.json()
-        assert quote_one in document_answer_body["reply"]
+        assert quote_two in document_answer_body["reply"]
         assert document_answer_body["ai_generated"] is False
         assert document_answer_body["written_to_lcr"] is False
         assert evidence_id in document_answer_body["source_evidence_ids"]
+
+        missing_document_answer = api_client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": "Bearer " + token},
+            json={
+                "person_id": person_id,
+                "text": "What does the uploaded document say about medication dosage?",
+                "client_turn_id": "document-lcr-companion-missing-0001",
+            },
+        )
+        assert missing_document_answer.status_code == 200, missing_document_answer.text
+        missing_answer_body = missing_document_answer.json()
+        assert "does not clearly answer that question" in missing_answer_body["reply"]
+        assert missing_answer_body["ai_generated"] is False
+        assert missing_answer_body["written_to_lcr"] is False
 
         summary = api_client.get("/api/v1/care-continuity/summary", headers={"Authorization": "Bearer " + token})
         assert summary.status_code == 200, summary.text
