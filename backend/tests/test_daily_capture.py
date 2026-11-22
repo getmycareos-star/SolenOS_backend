@@ -2061,7 +2061,11 @@ def test_legacy_situation_capture_uses_durable_extraction_worker_for_raw_source(
             assert analysis.source_text == original_report
             assert analysis.extraction_status == "available"
             assert job.status == "completed"
-            assert json.loads(job.result_text)["capture_mode"] == "natural_language_update"
+            worker_result = json.loads(job.result_text or "{}")
+            assert worker_result["capture_mode"] == "natural_language_update"
+            assert worker_result["review_required"] is True
+            assert analysis.execution_status["review"] == "required"
+            assert all(item["review_status"] == "pending_review" for item in analysis.candidates["observations"])
             assert len(observations) == 2
             assert {item.source_passage for item in observations} == {original_report}
             status_by_observation = {item.value_text: item.epistemic_status for item in observations}
@@ -2135,6 +2139,8 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             assert worker_result.get("observation_count") == 2, worker_result
             assert worker_result.get("source_observations_expected") == 2, worker_result
             assert worker_result.get("source_observations_retrieved") == 2, worker_result
+            assert worker_result.get("review_required") is True, worker_result
+            assert analysis.execution_status["review"] == "required"
             assert analysis.execution_status["longitudinal_retrieval"] == "verified"
             assert worker_result.get("delta_reconciliation_status") == "completed", worker_result
             delta_run = db.query(CareDeltaRun).filter_by(
@@ -2173,7 +2179,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             assert all(row.extraction_method == "qwen_source_grounded" for row in observations)
             assert all(row.evidence_id == evidence.id for row in observations)
             assert all(row.created_by_caregiver_id == "caregiver-daily-test" for row in observations)
-            assert all(item["review_status"] == "recorded_as_reported_observation" for item in analysis.candidates["observations"])
+            assert all(item["review_status"] == "pending_review" for item in analysis.candidates["observations"])
         finally:
             db.close()
 
