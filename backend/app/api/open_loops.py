@@ -256,7 +256,10 @@ def _snapshot(loop):
     }
 
 
-def _audit(db, loop, event_type, before, evidence=None, key=None, actor="session_caregiver"):
+def _audit(
+    db, loop, event_type, before, evidence=None, key=None, actor="session_caregiver",
+    event_context: dict[str, Any] | None = None,
+):
     if key:
         existing = db.query(OpenLoopEvent).filter(
             OpenLoopEvent.person_id == loop.person_id,
@@ -270,9 +273,12 @@ def _audit(db, loop, event_type, before, evidence=None, key=None, actor="session
                 status_code=409,
                 detail="Idempotency key has already been used for this care record",
             )
+    after_state = _snapshot(loop)
+    if event_context:
+        after_state["event_context"] = event_context
     db.add(OpenLoopEvent(
         loop_id=loop.id, person_id=loop.person_id, caregiver_id=loop.caregiver_id,
-        event_type=event_type, before_state=before, after_state=_snapshot(loop),
+        event_type=event_type, before_state=before, after_state=after_state,
         evidence=evidence or [], idempotency_key=key, actor=actor,
     ))
     return None
@@ -367,6 +373,8 @@ def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
             return False
         if requested_status is not None and after.get("status") != requested_status:
             return False
+        if requested_status == "deferred" and reason:
+            changes["deferred_reason"] = reason
         for field, value in changes.items():
             if field in {"deadline_at", "review_at"}:
                 value = _utc(value).isoformat() if value is not None else None
@@ -408,7 +416,11 @@ def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
             return saved.get("verification_rule") == expected_rule
         return True
     if event_type == "closure_verified":
-        return after.get("closure_evidence", []) == evidence
+        event_context = after.get("event_context") or {}
+        return (
+            after.get("closure_evidence", []) == evidence
+            and event_context.get("closure_note") == payload.text
+        )
     if event_type == "cancelled":
         return after.get("cancellation_reason") == payload.text
     if event_type == "reopened":
@@ -1048,7 +1060,10 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
                 {"verified_closed_prerequisite_id": loop.id}
             ])
 
-    _audit(db, loop, "closure_verified", before, payload.evidence, payload.idempotency_key)
+    _audit(
+        db, loop, "closure_verified", before, payload.evidence, payload.idempotency_key,
+        event_context={"closure_note": payload.text},
+    )
     db.commit()
     db.refresh(loop)
     return {"accepted": True, "verification": "verified", "loop": _snapshot(loop)}
