@@ -502,7 +502,10 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     from app.models.care import CareEvent, Evidence
     from app.models.capture_analysis import CaptureAnalysis
     from app.models.care_continuity import EvidenceObservation
-    from app.services.capture_review import supplement_source_grounded_daily_observations
+    from app.services.capture_review import (
+        persist_source_grounded_daily_observations,
+        supplement_source_grounded_daily_observations,
+    )
     from app.services.uncertainty import persist_source_clarification_questions
     from app.services.care_continuity_execution import execute_care_continuity_reconciliation
     from app.services.lcr_context import build_lcr_context
@@ -731,11 +734,41 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         return True
 
     candidate_count = len(candidates["observations"])
-    # Keep the caregiver's original report in the LCR, but do not write AI-split
-    # observations as care-record entries before the caregiver reviews them.
-    # Accepted candidates are added through the existing capture-review endpoint.
-    observation_count = 0
-    if not natural_language_update:
+    if natural_language_update:
+        # Preserve only source-grounded caregiver reports as observations. They
+        # remain reported/uncertain evidence, not accepted care assertions. The
+        # extracted candidate still requires explicit caregiver review before
+        # it can become a reviewed assertion in the Care Record.
+        observation_count = persist_source_grounded_daily_observations(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            evidence_id=evidence_id,
+            source_event_id=event_id,
+            source_text=source_text,
+            candidates=candidates,
+            reported_at=event.recorded_at,
+        )
+        db.flush()
+        persisted_observation_count = db.query(EvidenceObservation.id).filter(
+            EvidenceObservation.person_id == person_id,
+            EvidenceObservation.evidence_id == evidence_id,
+            EvidenceObservation.extraction_run_id == event_id,
+        ).count()
+        if persisted_observation_count < observation_count:
+            raise RuntimeError("daily_capture_observation_persistence_not_verified")
+        observation_count = persisted_observation_count
+        db.commit()
+        current_job = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job_id,
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+        ).with_for_update().first()
+        if current_job is None or current_job.status == "cancelled":
+            db.rollback()
+            return True
+    else:
+        observation_count = 0
         questions = candidates.get("open_questions") or []
         if questions:
             persist_source_clarification_questions(
