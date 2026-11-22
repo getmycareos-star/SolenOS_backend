@@ -17,6 +17,7 @@ from fastapi import HTTPException
 from sqlalchemy import inspect, or_
 
 from app.core.database import SessionLocal
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
 from app.services.qwen_gateway import qwen_chat, extract_review_candidates
 from app.services.qwen_workflows import ENABLED_WORKFLOWS
@@ -1434,6 +1435,32 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         ).populate_existing().with_for_update().first()
         if current_job is None or current_job.status == "cancelled":
             db.rollback()
+            return True
+        try:
+            require_caregiver_permission(
+                db,
+                str(current_job.person_id),
+                str(current_job.caregiver_id),
+                "view_lcr",
+            )
+        except HTTPException as exc:
+            if exc.status_code not in {401, 403}:
+                raise
+            previous_status = current_job.status
+            current_job.status = "cancelled"
+            current_job.error_code = "caregiver_access_revoked"
+            current_job.locked_at = None
+            db.add(QwenJobEvent(
+                job_id=current_job.id,
+                person_id=current_job.person_id,
+                caregiver_id=current_job.caregiver_id,
+                event_type="job_cancelled",
+                from_status=previous_status,
+                to_status="cancelled",
+                error_code="caregiver_access_revoked",
+                metadata_json={"reason": "caregiver_access_revoked", "written_to_lcr": False},
+            ))
+            db.commit()
             return True
         job = current_job
         if result.get("ai_generated") is not True or result.get("provider_status") != "available":
