@@ -157,7 +157,7 @@ def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live
 
 @pytest.fixture(scope="module")
 def live_qwen_context():
-    """Reuse one real PostgreSQL-backed client and source fixture across 39 model calls.
+    """Reuse one real PostgreSQL-backed client and source fixture across all live Qwen checks.
 
     Recreating TestClient for every workflow restarts the application lifespan,
     its background workers, and the database fixture setup 39 times. A single
