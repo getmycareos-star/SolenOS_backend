@@ -728,7 +728,7 @@ def list_document_intelligence(
         jobs = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.workflow == "document_intake",
-            QwenBackgroundJob.status.in_(["queued", "processing", "failed", "completed"]),
+            QwenBackgroundJob.status.in_(["queued", "processing", "failed", "cancelled", "completed"]),
         ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
     jobs_with_evidence = []
     job_evidence_ids = set()
@@ -772,19 +772,23 @@ def list_document_intelligence(
                 Evidence.id == evidence_id,
                 Evidence.person_id == person_id,
                 Evidence.type == "document",
+                (Evidence.evidence_status.is_(None)) | (Evidence.evidence_status != "deleted_by_caregiver"),
             ).first()
             if owned is None:
                 continue
             if job.status == "completed" and evidence_id in analyzed_evidence_ids:
                 continue
             completed_without_analysis = job.status == "completed"
+            cancelled_job = job.status == "cancelled"
             processing_jobs.append({
                 "evidence_id": evidence_id,
                 "job_id": job.id,
-                "status": "failed" if completed_without_analysis else job.status,
+                "status": "failed" if completed_without_analysis or cancelled_job else job.status,
                 "attempt_count": job.attempt_count,
                 "error_code": job.error_code or (
-                    "completed_without_analysis" if completed_without_analysis else None
+                    "completed_without_analysis" if completed_without_analysis
+                    else "cancelled" if cancelled_job
+                    else None
                 ),
             })
     return {
