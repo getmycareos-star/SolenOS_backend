@@ -1992,7 +1992,7 @@ async def post_situation(
                         "evidence": "verified",
                         "extraction": "queued",
                         "assessment": "pending",
-                        "review": "not_required" if natural_language_update else "required",
+                        "review": "pending" if natural_language_update else "required",
                         "reconciliation": "pending",
                         "longitudinal_retrieval": "not_verified",
                     }
