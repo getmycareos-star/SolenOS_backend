@@ -2973,7 +2973,7 @@ def _humanize_model_context_line(line: str) -> str:
         }
         qualifiers = []
         for field, value in qualifier_messages:
-            if (source_context.get(field) if field != "negation_status" and field != "modality" and field != "conditionality" and field != "temporal_context" and field != "statement_kind" else candidate.get(field)) == value:
+            if candidate.get(field) == value:
                 qualifiers.append(qualifier_messages[(field, value)])
         if qualifiers:
             parts.append("source wording limits: " + "; ".join(qualifiers[:6]))
