@@ -6,7 +6,6 @@ is isolated in the CI PostgreSQL database.
 """
 from __future__ import annotations
 
-import json
 import os
 import re
 import uuid
@@ -188,20 +187,16 @@ def live_qwen_context():
             session,
             care_understanding_report,
         )
-        # Daily Capture persists the caregiver's submitted fields as a
-        # canonical JSON source record. Pass that exact saved text to the
-        # Qwen endpoints so their evidence-ownership check is exercised too.
-        care_understanding_source = json.dumps(
-            {
-                "original_capture": {
-                    "observation": care_understanding_report,
-                    "source": "live_qwen_workflow_acceptance",
-                }
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
+        evidence_response = client.get(
+            f"/api/v1/evidence/{session['person']['id']}",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            params={"ids": care_understanding_evidence_ids[0]},
         )
+        assert evidence_response.status_code == 200, evidence_response.text
+        saved_evidence = evidence_response.json()
+        assert len(saved_evidence) == 1, saved_evidence
+        care_understanding_source = saved_evidence[0]["source_text"]
+        assert care_understanding_report in care_understanding_source
         yield {
             "client": client,
             "session": session,
