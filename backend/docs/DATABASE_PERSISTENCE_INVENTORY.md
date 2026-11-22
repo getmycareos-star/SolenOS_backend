@@ -99,3 +99,42 @@ No new table was added. The implementation reuses the authoritative `persons`, `
 - Regression coverage exists in `backend/tests/test_document_lifecycle.py::test_scanned_image_extraction_preserves_batch_page_number` and `backend/tests/test_frontend_contract_routes.py`; the former asserts the submitted value, server-side non-attestation and original binary preservation.
 
 **Decision:** retain this fail-closed distinction. Do not change the backend to accept a browser-declared `caregiver_reviewed` value as proof of review. The remaining verification is to run these tests on a stable current-main commit and verify the browser journey displays the original as saved, OCR as pending/available/partial, and review as pending until a persisted caregiver decision exists. This investigation is not a claim that the full document journey has passed current-main CI.
+
+
+## Current-main revalidation delta — 2026-11-22
+
+**Inspected source snapshot:** backend `5782e4ccc69c5670c8b8ed19ca2d5914141f6b9a`; frontend `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c`. This is a source snapshot, not a verified release candidate.
+
+### Changes made directly on main in this execution
+
+- Backend `576573402a0dc0ad45f3e5f4fef86c7334e98ed8`: completed document-intake jobs without a matching saved document extraction are now exposed as failed/retryable instead of disappearing from the caregiver's processing list.
+- Backend `456c6e6fdf3f4f68b8035a65e8e224daef2b7822` and `017479f3cfb2dd9bb07830fd62d51f3567131de8`: completed-job status is matched against saved analyses by the exact evidence IDs in the returned jobs, independently of the visible analysis page limit; ownership checks for the visible analysis list are batched rather than issuing one query per row.
+- Backend `871e8d52eefa615135fca7b9f715df393061757d` and `5d485aeb88bede723f4a966b970eb46394fab69f`: PostgreSQL regression coverage for a completed job with no saved extraction and for a completed analysis outside the visible page limit.
+- Backend `8f1b982fafe1e6f6585c90dfe625ccaee6e231d7`: added a PostgreSQL Daily Care → accepted LCR correction → new-session Care Assistant retrieval assertion. The test checks that the Assistant returns the corrected value without model inference.
+- Backend `a522f0550e5521a164bceed118ac3d31d0b17888` and `5782e4ccc69c5670c8b8ed19ca2d5914141f6b9a`: corrected Companion history recall so a caregiver-approved assertion's current value takes precedence over the original source text. The preserved source text remains available for provenance and topic matching; it must not override the current reviewed value in a current-state answer.
+- Frontend `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c`: repaired a malformed literal `\\n` in the caregiver UI language scanner that had swallowed the excluded-file declaration into a line comment. The scanner now has an actual newline before `const excludedFiles`.
+
+### Current verification state
+
+The following workflows were triggered for backend `5782e4ccc69c5670c8b8ed19ca2d5914141f6b9a` and were pending/queued at last inspection:
+
+- Backend tests — main validation: `45015573056`
+- Backend validation: `45015573055`
+- PostgreSQL migration validation: `45015573059`
+- Document lifecycle PostgreSQL integration: `45015573050`
+- Backup and recovery verification: `45015573067`
+- Companion live Qwen inference evaluation: `45015573110`
+
+Frontend workflows for `cb18bd81d1a7ec0dbdc9b3e05d6c25b81300728c` remained queued:
+
+- Frontend checks: `45015183298`
+- Frontend main validation: `45015183196`
+- Frontend validation: `45015183268`
+
+No pending, queued, cancelled, or skipped workflow is counted as passing. The new PostgreSQL tests and Companion retrieval correction are **Implemented—not verified** until the current-main workflows complete successfully. The frontend scanner syntax correction is also **Implemented—not verified** until frontend validation completes.
+
+### Reassessment notes
+
+- The scanned-image review-status difference remains an intentional trust boundary: the backend preserves the client-submitted value separately and does not treat it as proof of caregiver review. No change was made to weaken that boundary.
+- The prior inventory's historical Verified labels refer to their cited earlier workflow runs and source snapshot. They do not establish that this newer source snapshot has passed current-main CI.
+- No Railway or Netlify deployment was performed. Production database reconciliation, production object-provider read/write, backup restoration against production data, and deployed-versus-candidate comparison remain separate release gates.
