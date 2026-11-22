@@ -2972,9 +2972,9 @@ def _humanize_model_context_line(line: str) -> str:
             ("statement_kind", "recommendation"): "the source contains a recommendation; it does not establish that the recommendation was followed",
         }
         qualifiers = []
-        for field, value in qualifier_messages:
+        for (field, value), message in qualifier_messages.items():
             if candidate.get(field) == value:
-                qualifiers.append(qualifier_messages[(field, value)])
+                qualifiers.append(message)
         if qualifiers:
             parts.append("source wording limits: " + "; ".join(qualifiers[:6]))
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
