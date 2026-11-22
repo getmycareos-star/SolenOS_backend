@@ -22,7 +22,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, CareDeltaRun
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput, QwenSafetyEvaluation
 import app.api.daily_care_intelligence as daily_care_intelligence
@@ -699,6 +699,7 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
                 db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
                 db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
                 db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+                db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
                 db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
                 db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
