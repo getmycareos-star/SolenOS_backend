@@ -168,6 +168,21 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
                    "correction_text", "evidence_ids", "created_by_caregiver_id", "created_at"],
         "order": ["created_at"],
     },
+    "care_state_revisions": {
+        "table": "care_state_revisions",
+        "required": False,
+        "fields": ["id", "target_type", "target_id", "revision_number", "change_kind",
+                   "before_state", "after_state", "evidence_ids",
+                   "changed_by_caregiver_id", "changed_at"],
+        "order": ["changed_at"],
+    },
+    "change_analyses": {
+        "table": "care_delta_runs",
+        "required": False,
+        "fields": ["id", "source", "event_date", "source_event_id", "evidence_ids",
+                   "delta_json", "model_name", "created_by_caregiver_id", "created_at"],
+        "order": ["created_at"],
+    },
     "open_loop_events": {
         "table": "open_loop_events",
         "required": False,
@@ -364,6 +379,8 @@ SEARCH_FIELDS = {
     "decisions": ["title", "decision_text", "context", "decision_status"],
     "decision_outcomes": ["outcome_status", "description"],
     "action_outcomes": ["action_type", "outcome_status", "notes", "correction_text"],
+    "care_state_revisions": ["target_type", "change_kind", "before_state", "after_state"],
+    "change_analyses": ["source", "delta_json", "model_name"],
     "open_loop_events": ["event_type", "actor"],
     "open_loop_occurrences": ["source_type", "source_id"],
     "handoffs": ["responsibility_type", "scope", "context", "acceptance_status", "acceptance_evidence", "completion_evidence", "provenance"],
@@ -413,13 +430,14 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
-    "notes", "correction_text",
+    "notes", "correction_text", "before_state", "after_state", "delta_json",
     "closed_reason", "necessity_rationale", "intended_answerer_label", "rationale", "topic", "perspective_text",
     "notes", "reason", "review_notes", "resolution",
 }
 MAX_TEXT_CHARS = 2400
 JSON_TEXT_FIELDS = {
     "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
+    "before_state", "after_state", "delta_json",
     "source_assertion_ids", "matching_candidate_ids",
     "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
 }
@@ -534,6 +552,16 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         return (
             f"evidence_completeness_{status}",
             f"Completeness describes linked-field coverage only; semantic sufficiency is {sufficiency}. Do not treat linked-field coverage as proof that a care decision is adequately supported.",
+        )
+    if source_name == "care_state_revisions":
+        return (
+            "care_state_revision_history",
+            "This is a saved change to a care-record entry. It shows how the record changed, not that the person's real-world condition changed. Preserve the before-and-after details, change time, and linked evidence.",
+        )
+    if source_name == "change_analyses":
+        return (
+            "recorded_change_analysis",
+            "This is a previously saved analysis of care information, not an independently verified fact or diagnosis. Preserve its source event, supporting evidence, and model label; do not treat it as proof that a real-world change occurred.",
         )
     if source_name == "facts" and item.get("superseded_by_fact_id"):
         return (
@@ -723,6 +751,8 @@ def build_lcr_context(
                 "evidence_completeness_policies": ("created_at",),
                 "decisions": ("decided_at", "created_at"),
                 "decision_outcomes": ("observed_at", "created_at"),
+                "care_state_revisions": ("changed_at",),
+                "change_analyses": ("event_date", "created_at"),
                 "timeline": ("occurred_at", "created_at"),
                 "caregiver_observations": ("observed_at", "recorded_at"),
                 "caregiver_contexts": ("recorded_at",),
