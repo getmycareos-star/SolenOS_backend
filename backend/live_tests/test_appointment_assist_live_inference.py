@@ -255,7 +255,7 @@ def test_after_appointment_organizes_clinician_note_and_preserves_source_without
         reply = data.get("reply", "")
         assert "sleep diary" in reply.casefold(), reply
         assert "six weeks" in reply.casefold(), reply
-        assert any(term in reply.casefold() for term in ("call the clinic", "contact the clinic", "call clinic")), reply
+        assert "call if sleep worsens significantly" in reply.casefold(), reply
         assert not __import__("re").search(
             r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
             reply,
