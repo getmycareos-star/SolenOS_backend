@@ -922,6 +922,18 @@ def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analys
                     model_name="postgres-integration-fixture",
                     created_at=now,
                 ),
+                CareDeltaRun(
+                    id=f"lcr-situation-snapshot-a-{suffix}",
+                    person_id=person_a_id,
+                    source="situation_understanding_assessment",
+                    event_date=now,
+                    evidence_ids=[],
+                    delta_json=json.dumps({
+                        "summary": "Derived situation assessment about sleep; not source change history.",
+                    }),
+                    model_name="postgres-integration-fixture",
+                    created_at=now,
+                ),
             ])
             db.commit()
 
