@@ -122,7 +122,10 @@ def test_legacy_browser_push_is_disabled_and_existing_deliveries_are_cancelled()
                 last_error_code="http_503",
                 last_error_message="Legacy provider retry must be cancelled.",
             )
-            db.add_all([notification, subscription, delivery])
+            db.add_all([notification, subscription])
+            db.flush()
+            assert db.query(CarePushSubscription).filter_by(id=subscription_id).one()
+            db.add(delivery)
             db.commit()
 
         with Session() as db:
