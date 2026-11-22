@@ -845,6 +845,27 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
+        caregiver_label = "Meal intake"
+        assert caregiver_label.casefold() not in quote_correct.casefold()
+        corrected_valid = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "correct",
+                "corrected_subject": caregiver_label,
+                "corrected_observation": quote_correct,
+                "rationale": "Used a clear caregiver label while keeping the document wording unchanged.",
+            },
+        )
+        assert corrected_valid.status_code == 200, corrected_valid.text
+        assert corrected_valid.json()["written_to_lcr"] is False
+        assert corrected_valid.json()["candidate"]["review_status"] == "corrected_pending_approval"
+        assert corrected_valid.json()["candidate"]["subject"] == caregiver_label
+        assert corrected_valid.json()["candidate"]["observation"] == quote_correct
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # Accepting the exact extracted statement creates the sole source-linked assertion.
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
@@ -899,7 +920,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert assertion.evidence_ids == [evidence_id]
             assert assertion.source_text == quote_correct
             assert assertion.asserted_value.startswith(
-                f"Subject: Patient\nStatement: {quote_correct}\n"
+                f"Subject: Meal intake\nStatement: {quote_correct}\n"
                 "Event date: Not stated or unresolved\n"
                 "Source-recorded date: Not stated in document"
             )
