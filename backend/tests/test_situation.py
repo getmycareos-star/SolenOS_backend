@@ -12,7 +12,7 @@ from app.core.database import Base, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.care import Person, Caregiver, Evidence, CareEvent
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.care_continuity import EvidenceObservation, CareAssertion
+from app.models.care_continuity import EvidenceObservation, CareAssertion, CareStateRevision
 from app.models.change import Situation, Change, Baseline
 from app.models.uncertainty import OpenQuestion, Contradiction, InformationGap
 from app.core.change_enums import SituationType, SituationState, ChangeType, ChangeDirection, SignificanceVerdict
@@ -1764,11 +1764,40 @@ def test_situation_freshness_includes_persisted_delta_engine_changes():
         assert initial.status_code == 200, initial.text
         assert initial.json()["status"] == "created"
 
+        import json
+        from sqlalchemy import text
+        with TestingSessionLocal() as db:
+            revisions_before = [
+                (row.target_type, row.target_id, row.revision_number)
+                for row in db.query(CareStateRevision).filter_by(person_id=person_id).all()
+            ]
+            stored_raw = db.execute(
+                text("SELECT delta_json FROM care_delta_runs WHERE person_id = :person_id AND source = 'situation_understanding_assessment' ORDER BY created_at DESC LIMIT 1"),
+                {"person_id": person_id},
+            ).scalar_one()
+            stored_assessment = json.loads(stored_raw)
         current_before = client.get(
             "/api/v1/care-continuity/situation-understanding",
             headers=headers,
         )
         assert current_before.status_code == 200, current_before.text
+        with TestingSessionLocal() as db:
+            revisions_after = [
+                (row.target_type, row.target_id, row.revision_number)
+                for row in db.query(CareStateRevision).filter_by(person_id=person_id).all()
+            ]
+            from app.api import care_continuity as care_continuity_api
+            current_assessment = care_continuity_api._build_situation_understanding_assessment(db, person_id)
+        print("SITUATION_FRESHNESS_DIAGNOSTIC", json.dumps({
+            "stored_fingerprint": stored_assessment.get("source_state_fingerprint"),
+            "current_fingerprint": current_assessment.get("source_state_fingerprint"),
+            "stored_revision_state": stored_assessment.get("current_care_reality", {}).get("revision_tracking_state"),
+            "current_revision_state": current_assessment.get("current_care_reality", {}).get("revision_tracking_state"),
+            "new_revisions_on_read": [row for row in revisions_after if row not in revisions_before],
+            "stored_source_coverage": stored_assessment.get("source_coverage"),
+            "current_source_coverage": current_assessment.get("source_coverage"),
+            "returned_freshness": current_before.json().get("source_freshness"),
+        }, sort_keys=True, default=str))
         assert current_before.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
 
         with TestingSessionLocal() as db:
