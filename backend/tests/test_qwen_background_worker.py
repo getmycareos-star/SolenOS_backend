@@ -71,6 +71,37 @@ def test_worker_does_not_persist_assistance_if_job_is_cancelled_during_inference
     db.close()
 
 
+def test_worker_does_not_requeue_cancelled_job_when_inference_raises(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+    caller_thread_id = threading.get_ident()
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    def cancel_then_fail(payload, request, inference_db):
+        assert threading.get_ident() != caller_thread_id
+        current = inference_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        current.status = "cancelled"
+        current.error_code = "caregiver_cancelled"
+        inference_db.commit()
+        raise HTTPException(status_code=503, detail="temporary provider failure")
+
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", cancel_then_fail)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+    db = sessions()
+    cancelled = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert cancelled.status == "cancelled"
+    assert cancelled.error_code == "caregiver_cancelled"
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_failed_or_requeued").count() == 0
+    db.close()
+
+
 @pytest.mark.parametrize(("expected", "task"), [
     ("daily_capture", "I want to record today's observation."),
     ("add_record", "Help draft a care record correction; the date is missing."),
