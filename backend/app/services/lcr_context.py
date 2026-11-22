@@ -450,7 +450,7 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
         return {str(k): _safe_value(v, str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_safe_value(v, key) for v in value]
-    if isinstance(value, str) and key in JSON_TEXT_FIELDS and value.lstrip().startswith(("[", "{")):
+    if isinstance(value, str) and key in JSON_TEXT_FIELDS and len(value) <= MAX_TEXT_CHARS and value.lstrip().startswith(("[", "{")):
         try:
             parsed = json.loads(value)
             if isinstance(parsed, (list, dict)):
