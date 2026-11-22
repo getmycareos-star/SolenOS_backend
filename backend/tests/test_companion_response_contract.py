@@ -3291,3 +3291,38 @@ def test_companion_retrieves_another_authorized_caregivers_lcr_evidence(monkeypa
         assert "shared-companion-evidence" not in serialized_prompt
     finally:
         teardown()
+
+
+
+def test_companion_prompt_preserves_document_source_caveats_in_plain_language():
+    line = "Shared LCR context (source-attributed; bounded subset): " + json.dumps({
+        "source_type": "assertions",
+        "source_id": "assertion-source-caveat",
+        "record": {
+            "field": "mobility",
+            "asserted_value": "Caregiver reported that walking may be difficult unless using support.",
+            "source_context": {
+                "authority": "caregiver_reviewed_report_not_independently_verified",
+                "document_candidate": {
+                    "source_attribution": "caregiver_reported",
+                    "negation_status": "explicitly_negated",
+                    "modality": "tentative",
+                    "conditionality": "conditional",
+                    "temporal_context": "historical",
+                    "statement_kind": "recommendation",
+                },
+            },
+        },
+    }, ensure_ascii=False)
+
+    rendered = collaboration._humanize_model_context_line(line)
+
+    assert "caregiver-reviewed report; not independently verified" in rendered
+    assert "caregiver report" in rendered
+    assert "explicitly negative" in rendered
+    assert "tentative" in rendered
+    assert "conditional" in rendered
+    assert "historical" in rendered
+    assert "recommendation" in rendered
+    assert "explicitly_negated" not in rendered
+    assert "caregiver_reviewed_report_not_independently_verified" not in rendered
