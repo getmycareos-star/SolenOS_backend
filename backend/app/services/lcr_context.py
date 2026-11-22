@@ -1106,6 +1106,16 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 if isinstance(page_number, int) and not isinstance(page_number, bool) and page_number > 0:
                     caveat["page_number"] = page_number
                 source_caveats.append(caveat)
+    # Preserve source-page and authority details for accepted care assertions
+    # before less decision-relevant source notes. Otherwise a large evidence-review
+    # history can consume the bounded caveat list and hide the page of the very
+    # document claim the Companion is being asked to explain.
+    source_caveats.sort(
+        key=lambda caveat: (
+            caveat.get("source_type") != "assertions",
+            caveat.get("source_id") or "",
+        )
+    )
     header = (
         "LCR context metadata: "
         + json.dumps({
