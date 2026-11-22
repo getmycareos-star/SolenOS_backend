@@ -709,11 +709,9 @@ def list_document_intelligence(
 
     items = []
     seen_evidence_ids = set()
-    analyzed_evidence_ids = set()
     for analysis, evidence_id in document_analyses:
         if evidence_id not in valid_evidence_ids:
             continue
-        analyzed_evidence_ids.add(evidence_id)
         if evidence_id in seen_evidence_ids:
             continue
         seen_evidence_ids.add(evidence_id)
@@ -732,6 +730,8 @@ def list_document_intelligence(
             QwenBackgroundJob.workflow == "document_intake",
             QwenBackgroundJob.status.in_(["queued", "processing", "failed", "completed"]),
         ).order_by(QwenBackgroundJob.created_at.desc()).limit(500).all()
+    jobs_with_evidence = []
+    job_evidence_ids = set()
     for job in jobs:
         try:
             evidence_ids = json.loads(job.evidence_ids_json or "[]")
@@ -739,6 +739,29 @@ def list_document_intelligence(
             continue
         if not isinstance(evidence_ids, list):
             continue
+        owned_ids = [value for value in evidence_ids if isinstance(value, str)]
+        jobs_with_evidence.append((job, owned_ids))
+        job_evidence_ids.update(owned_ids)
+
+    # Match completed jobs to persisted document analyses independently of
+    # the visible analysis page and its bounded recent-history query.
+    analyzed_evidence_ids = set()
+    if job_evidence_ids:
+        analysis_rows = db.query(
+            CaptureAnalysis.source_evidence_id, CaptureAnalysis.candidates
+        ).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id.in_(job_evidence_ids),
+        ).all()
+        analyzed_evidence_ids = {
+            str(source_evidence_id)
+            for source_evidence_id, candidates in analysis_rows
+            if source_evidence_id
+            and isinstance(candidates, dict)
+            and candidates.get("kind") == "document_extraction_v1"
+        }
+
+    for job, evidence_ids in jobs_with_evidence:
         for evidence_id in evidence_ids:
             if not isinstance(evidence_id, str) or evidence_id in seen_evidence_ids:
                 continue
