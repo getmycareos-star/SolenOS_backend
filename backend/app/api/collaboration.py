@@ -5254,6 +5254,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 appointment_status_guidance += (
                     " Scheduled does not mean confirmed; do not say the appointment is confirmed."
                 )
+        elif recorded_statuses:
+            appointment_status_guidance = (
+                " Multiple appointment statuses are recorded. Keep them separate and do not imply a single shared status."
+            )
         appointment_status_guidance += (
             " If the caregiver asks to prepare using saved care history, include the most relevant "
             "recorded Daily Care detail from the supplied context. Preserve its caregiver-reported "
@@ -5261,10 +5265,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "observation merely because appointment details are also available. If no relevant event "
             "was retrieved, say that the requested history was not found in the supplied context."
         )
-        elif recorded_statuses:
-            appointment_status_guidance = (
-                " Multiple appointment statuses are recorded. Keep them separate and do not imply a single shared status."
-            )
     empty_context_emergency_readiness = payload.workflow == "emergency_readiness" and not context_lines
     max_predict = 40 if empty_context_emergency_readiness else 96
     empty_context_output_constraint = (
