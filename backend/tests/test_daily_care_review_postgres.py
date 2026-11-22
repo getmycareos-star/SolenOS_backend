@@ -14,6 +14,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.capture_review import review_capture_candidate
+from app.api import collaboration
+import app.main as main_module
 from app.api.daily_care_intelligence import _history_bundle
 from app.core.database import get_db
 from app.main import app
@@ -43,7 +45,7 @@ def _request(person_id, caregiver_id):
     ))
 
 
-def test_daily_care_correction_acceptance_rejection_and_isolation_postgres():
+def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monkeypatch):
     engine = create_engine(_postgres_url(), pool_pre_ping=True)
     suffix = uuid.uuid4().hex
     person_id = f"daily-person-{suffix}"
