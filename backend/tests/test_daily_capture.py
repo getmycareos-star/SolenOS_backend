@@ -2192,6 +2192,27 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
             "seemed more unsettled this morning",
         }
 
+        # The source-grounded report remains visible as a caregiver report, but
+        # an extracted detail becomes a reviewed LCR assertion only after an
+        # explicit caregiver decision.
+        accepted = client.post(
+            f"/api/v1/capture/analyses/{analysis.id}/review",
+            headers=headers,
+            json={"candidate_index": 0, "decision": "accept"},
+        )
+        assert accepted.status_code == 200, accepted.text
+        accepted_body = accepted.json()
+        assert accepted_body["written_to_lcr"] is True
+        assert accepted_body["candidate"]["review_status"] == "accepted_by_caregiver"
+        assert accepted_body["longitudinal_retrieval_status"] == "verified"
+
+        persisted_review = client.get(
+            f"/api/v1/capture/analyses/{analysis.id}",
+            headers=headers,
+        )
+        assert persisted_review.status_code == 200, persisted_review.text
+        assert persisted_review.json()["candidates"]["observations"][0]["review_status"] == "accepted_by_caregiver"
+
         replay = client.post("/api/v1/daily-care/entries", headers=headers, json=payload)
         assert replay.status_code == 200, replay.text
         assert replay.json()["id"] == receipt["id"]
