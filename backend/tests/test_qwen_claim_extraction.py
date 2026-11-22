@@ -46,8 +46,8 @@ def test_claim_extraction_runs_two_distinct_qwen_passes_and_keeps_review_boundar
     result = collaboration.qwen_claim_extraction(_request(), request=None, db=None)
 
     assert len(calls) == 2
-    assert "run A" in calls[0][0][0]["content"]
-    assert "run B" in calls[1][0][0]["content"]
+    assert "First independent pass" in calls[0][0][0]["content"]
+    assert "Second independent pass" in calls[1][0][0]["content"]
     assert result["run_a"]["claims"][0]["source_span"]["text"] == "Mom fell yesterday"
     assert result["run_b"]["claims"][0]["source_span"]["text"] == "She seemed tired"
     assert result["provider"] == "private_ollama_qwen"
