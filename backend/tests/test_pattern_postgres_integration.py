@@ -844,3 +844,110 @@ def test_postgres_core_revision_writer_shares_orm_target_lock():
             db.commit()
         engine.dispose()
 
+
+
+def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analyses():
+    """Companion's shared LCR projection reads revision and Delta history from PostgreSQL."""
+    from app.models.care_continuity import CareDeltaRun
+    from app.services.lcr_context import build_lcr_context
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_a_id = f"lcr-revision-person-a-{suffix}"
+    person_b_id = f"lcr-revision-person-b-{suffix}"
+    now = datetime.now(timezone.utc)
+    try:
+        with Session() as db:
+            db.add_all([
+                Person(id=person_a_id, name="PostgreSQL LCR revision fixture A"),
+                Person(id=person_b_id, name="PostgreSQL LCR revision fixture B"),
+            ])
+            db.flush()
+            db.add_all([
+                CareStateRevision(
+                    id=f"lcr-sleep-revision-a-{suffix}",
+                    person_id=person_a_id,
+                    target_type="care_assertions",
+                    target_id=f"sleep-assertion-a-{suffix}",
+                    revision_number=2,
+                    change_kind="updated",
+                    before_state=json.dumps({"field": "sleep", "asserted_value": "Poor sleep was reported."}),
+                    after_state=json.dumps({"field": "sleep", "asserted_value": "Caregiver corrected the report to say waking occurred twice."}),
+                    evidence_ids=[f"sleep-evidence-a-{suffix}"],
+                    changed_at=now,
+                ),
+                CareStateRevision(
+                    id=f"lcr-sleep-revision-b-{suffix}",
+                    person_id=person_b_id,
+                    target_type="care_assertions",
+                    target_id=f"sleep-assertion-b-{suffix}",
+                    revision_number=2,
+                    change_kind="updated",
+                    before_state=json.dumps({"field": "sleep", "asserted_value": "Private other-person detail."}),
+                    after_state=json.dumps({"field": "sleep", "asserted_value": "Must not cross recipient scope."}),
+                    evidence_ids=[f"sleep-evidence-b-{suffix}"],
+                    changed_at=now,
+                ),
+            ])
+            db.add_all([
+                CareDeltaRun(
+                    id=f"lcr-sleep-analysis-a-{suffix}",
+                    person_id=person_a_id,
+                    source="daily_care",
+                    event_date=now - timedelta(days=2),
+                    evidence_ids=[f"sleep-evidence-a-{suffix}"],
+                    delta_json=json.dumps({
+                        "topic": "sleep",
+                        "summary": "Two caregiver reports describe waking overnight.",
+                        "interpretation_limit": "This is a recorded comparison, not a clinical finding.",
+                    }),
+                    model_name="postgres-integration-fixture",
+                    created_at=now,
+                ),
+                CareDeltaRun(
+                    id=f"lcr-sleep-analysis-b-{suffix}",
+                    person_id=person_b_id,
+                    source="daily_care",
+                    event_date=now - timedelta(days=2),
+                    evidence_ids=[f"sleep-evidence-b-{suffix}"],
+                    delta_json=json.dumps({"summary": "Private other-person analysis."}),
+                    model_name="postgres-integration-fixture",
+                    created_at=now,
+                ),
+            ])
+            db.commit()
+
+        # A fresh PostgreSQL session proves retrieval is reading committed rows.
+        with Session() as db:
+            context = build_lcr_context(
+                db, person_a_id, limit_per_source=10, query="sleep",
+            )
+
+        revision_source = context["sources"]["care_state_revisions"]
+        assert [item["id"] for item in revision_source["items"]] == [f"lcr-sleep-revision-a-{suffix}"]
+        revision = revision_source["items"][0]
+        assert revision["information_status"] == "care_state_revision_history"
+        assert revision["before_state"]["asserted_value"] == "Poor sleep was reported."
+        assert revision["after_state"]["asserted_value"] == "Caregiver corrected the report to say waking occurred twice."
+
+        analysis_source = context["sources"]["change_analyses"]
+        assert [item["id"] for item in analysis_source["items"]] == [f"lcr-sleep-analysis-a-{suffix}"]
+        analysis = analysis_source["items"][0]
+        assert analysis["information_status"] == "recorded_change_analysis"
+        assert analysis["delta_json"]["interpretation_limit"] == "This is a recorded comparison, not a clinical finding."
+        assert analysis["model_name"] == "postgres-integration-fixture"
+    finally:
+        with Session() as db:
+            db.rollback()
+            db.query(CareDeltaRun).filter(
+                CareDeltaRun.person_id.in_([person_a_id, person_b_id])
+            ).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter(
+                CareStateRevision.person_id.in_([person_a_id, person_b_id])
+            ).delete(synchronize_session=False)
+            db.query(Person).filter(
+                Person.id.in_([person_a_id, person_b_id])
+            ).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
