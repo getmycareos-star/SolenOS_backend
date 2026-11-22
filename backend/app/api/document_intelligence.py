@@ -766,6 +766,21 @@ def queue_document_intake(evidence_id: str, request: Request, db: Session = Depe
             "idempotent_replay": True,
         }
 
+    if job is not None and job.status == "completed":
+        completed_analysis = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id == evidence_id,
+        ).order_by(CaptureAnalysis.created_at.desc(), CaptureAnalysis.id.desc()).first()
+        completed_metadata = completed_analysis.candidates if completed_analysis and isinstance(completed_analysis.candidates, dict) else {}
+        if completed_metadata.get("kind") == "document_extraction_v1":
+            return {
+                "job_id": job.id,
+                "evidence_id": evidence_id,
+                "status": "completed",
+                "analysis_available": True,
+                "idempotent_replay": True,
+            }
+
     previous_status = job.status if job is not None else None
     if job is None:
         job = QwenBackgroundJob(
