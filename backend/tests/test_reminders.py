@@ -601,46 +601,15 @@ def test_disabled_reminder_batch_does_not_starve_enabled_caregiver():
         db.close()
 
 
-def test_web_push_public_key_is_not_advertised_when_private_key_is_missing(monkeypatch):
-    from types import SimpleNamespace
-    from app.api import push_notifications
-
+def test_browser_push_is_never_advertised_under_in_app_only_policy():
     client = TestClient(app)
-    session = create_session(client, "Push configuration caregiver")
+    session = create_session(client, "In-app only notification caregiver")
     headers = {"Authorization": f"Bearer {session['access_token']}"}
-    monkeypatch.setattr(
-        push_notifications,
-        "get_settings",
-        lambda: SimpleNamespace(
-            vapid_public_key="public-key",
-            vapid_private_key="",
-            vapid_subject="mailto:support@solenosai.net",
-        ),
-    )
+
     response = client.get("/api/v1/notifications/push/public-key", headers=headers)
+
     assert response.status_code == 200, response.text
-    assert response.json() == {"available": False, "public_key": None, "reason": "not_configured"}
-
-
-def test_web_push_public_key_requires_valid_vapid_subject(monkeypatch):
-    from types import SimpleNamespace
-    from app.api import push_notifications
-
-    client = TestClient(app)
-    session = create_session(client, "Push subject caregiver")
-    headers = {"Authorization": f"Bearer {session['access_token']}"}
-    monkeypatch.setattr(
-        push_notifications,
-        "get_settings",
-        lambda: SimpleNamespace(
-            vapid_public_key="public-key",
-            vapid_private_key="private-key",
-            vapid_subject="support@solenosai.net",
-        ),
-    )
-    response = client.get("/api/v1/notifications/push/public-key", headers=headers)
-    assert response.status_code == 200, response.text
-    assert response.json() == {"available": False, "public_key": None, "reason": "not_configured"}
+    assert response.json() == {"available": False, "public_key": None, "reason": "in_app_only"}
 
 
 def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
@@ -701,63 +670,85 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
         db.close()
 
 
-def test_push_subscription_endpoint_cannot_be_claimed_by_another_care_record(monkeypatch):
-    import base64
-    from types import SimpleNamespace
-    from cryptography.hazmat.primitives.asymmetric import ec
-    from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat, PublicFormat
-    from app.api import push_notifications
-
-    private_key = ec.generate_private_key(ec.SECP256R1())
-    public_key = base64.urlsafe_b64encode(
-        private_key.public_key().public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
-    ).rstrip(b"=").decode("ascii")
-    private_pem = private_key.private_bytes(
-        Encoding.PEM, PrivateFormat.PKCS8, NoEncryption()
-    ).decode("ascii")
-    settings = SimpleNamespace(
-        vapid_public_key=public_key,
-        vapid_private_key=private_pem,
-        vapid_subject="mailto:support@solenosai.net",
-        secret_key="test-secret-key-for-push-subscription-isolation",
-    )
-    monkeypatch.setattr(push_notifications, "get_settings", lambda: settings)
+def test_browser_push_registration_is_rejected_for_every_care_record():
     client = TestClient(app)
-    first = create_session(client, "Push subscription owner")
-    second = create_session(client, "Push subscription attacker")
+    first = create_session(client, "First in-app-only caregiver")
+    second = create_session(client, "Second in-app-only caregiver")
     payload = {
         "endpoint": "https://fcm.googleapis.com/fcm/send/solenos-test-subscription",
         "keys": {"p256dh": "test-public-key", "auth": "test-auth-secret"},
     }
-    first_response = client.post(
-        "/api/v1/notifications/push/subscriptions",
-        headers={"Authorization": f"Bearer {first['access_token']}"},
-        json=payload,
+
+    for session in (first, second):
+        response = client.post(
+            "/api/v1/notifications/push/subscriptions",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json=payload,
+        )
+        assert response.status_code == 410, response.text
+
+
+def test_browser_push_worker_revokes_legacy_subscriptions_and_cancels_deliveries():
+    import hashlib
+    from datetime import datetime, timezone
+    from app.models.notifications import (
+        CareNotification,
+        CarePushDelivery,
+        CarePushSubscription,
+        DeliveryFailureEvent,
+        NotificationDeliveryAttempt,
     )
-    assert first_response.status_code == 201, first_response.text
-
-    cross_record = client.post(
-        "/api/v1/notifications/push/subscriptions",
-        headers={"Authorization": f"Bearer {second['access_token']}"},
-        json=payload,
-    )
-    assert cross_record.status_code == 409, cross_record.text
-
-
-def test_web_push_worker_does_not_attempt_delivery_with_incomplete_vapid_configuration(monkeypatch):
-    from types import SimpleNamespace
     import app.services.reminder_delivery as delivery_service
 
-    monkeypatch.setattr(
-        delivery_service,
-        "get_settings",
-        lambda: SimpleNamespace(
-            vapid_public_key="public-key",
-            vapid_private_key="",
-            vapid_subject="mailto:support@solenosai.net",
-        ),
-    )
-    assert delivery_service.deliver_pending_web_pushes(db=object()) == 0
+    client = TestClient(app)
+    session = create_session(client, "Legacy browser alert caregiver")
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    endpoint = "https://fcm.googleapis.com/fcm/send/legacy-solenos-subscription"
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        notification = CareNotification(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            title="Care reminder",
+            body="A follow-up is due.",
+            category="reminder_due",
+            status="active",
+        )
+        subscription = CarePushSubscription(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            endpoint_hash=hashlib.sha256(endpoint.encode("utf-8")).hexdigest(),
+            encrypted_subscription="legacy-encrypted-subscription",
+        )
+        db.add_all([notification, subscription])
+        db.flush()
+        delivery = CarePushDelivery(
+            notification_id=notification.id,
+            subscription_id=subscription.id,
+            status="pending",
+            attempt_count=0,
+            next_attempt_at=now,
+        )
+        db.add(delivery)
+        db.commit()
+        delivery_id = delivery.id
+
+        assert delivery_service.deliver_pending_web_pushes(db=db, now=now) == 0
+
+        db.refresh(subscription)
+        db.refresh(delivery)
+        assert subscription.revoked_at == now
+        assert delivery.status == "cancelled"
+        assert delivery.last_error_code == "in_app_only_policy"
+        assert delivery.attempt_count == 0
+        assert delivery.provider_accepted_at is None
+        assert db.query(NotificationDeliveryAttempt).filter_by(notification_id=notification.id).count() == 0
+        assert db.query(DeliveryFailureEvent).filter_by(delivery_id=delivery_id).count() == 0
+        assert db.query(CareNotification).filter_by(id=notification.id, status="active").count() == 1
+    finally:
+        db.close()
 
 
 def test_reminder_assignment_requires_active_member_and_preserves_actor_history():
