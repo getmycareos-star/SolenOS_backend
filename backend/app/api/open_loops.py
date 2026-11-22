@@ -349,9 +349,79 @@ def _reassess(db, loop, *, now: datetime | None = None):
     return reasons
 
 
+def _event_payload_matches(event, event_type: str, payload: BaseModel) -> bool:
+    """Compare a retry with the exact mutation represented by its audit event."""
+    after = event.after_state if isinstance(event.after_state, dict) else {}
+    saved_evidence = event.evidence if isinstance(event.evidence, list) else []
+
+    if isinstance(payload, LoopUpdate):
+        changes = payload.model_dump(exclude_unset=True)
+        changes.pop("idempotency_key", None)
+        evidence = changes.pop("evidence", []) or []
+        reason = changes.pop("reason", None)
+        requested_status = changes.pop("status", None)
+        expected_evidence = [*evidence]
+        if reason:
+            expected_evidence.append({"kind": "human_reason", "text": reason})
+        if saved_evidence != expected_evidence:
+            return False
+        if requested_status is not None and after.get("status") != requested_status:
+            return False
+        for field, value in changes.items():
+            if field in {"deadline_at", "review_at"}:
+                value = _utc(value).isoformat() if value is not None else None
+            if after.get(field) != value:
+                return False
+        return True
+
+    if not isinstance(payload, EvidenceAction):
+        return False
+    evidence = payload.evidence or []
+    if saved_evidence != evidence:
+        return False
+
+    if event_type == "response_recorded":
+        records = after.get("response_evidence") or []
+        saved = records[-1] if records else None
+        return bool(
+            saved
+            and saved.get("text") == payload.text
+            and saved.get("evidence", []) == evidence
+            and saved.get("response_outcome") == (payload.response_outcome or "response_received")
+        )
+    if event_type == "action_recorded":
+        records = after.get("action_evidence") or []
+        saved = records[-1] if records else None
+        return bool(saved and saved.get("text") == payload.text and saved.get("evidence", []) == evidence)
+    if event_type == "contradiction_reconciled":
+        records = after.get("outcome_evidence") or []
+        saved = records[-1] if records else None
+        return bool(saved and saved.get("kind") == "explicit_reconciliation"
+                    and saved.get("decision") == payload.text and saved.get("evidence", []) == evidence)
+    if event_type in {"outcome_reported", "outcome_attested", "outcome_corroborated"}:
+        records = after.get("outcome_evidence") or []
+        saved = records[-1] if records else None
+        if not saved or saved.get("text") != payload.text or saved.get("evidence", []) != evidence:
+            return False
+        if event_type in {"outcome_attested", "outcome_corroborated"}:
+            expected_rule = payload.verification_rule or (event.before_state or {}).get("verification_rule")
+            return saved.get("verification_rule") == expected_rule
+        return True
+    if event_type == "closure_verified":
+        return after.get("closure_evidence", []) == evidence
+    if event_type == "cancelled":
+        return after.get("cancellation_reason") == payload.text
+    if event_type == "reopened":
+        records = after.get("closure_evidence") or []
+        saved = records[-1] if records else None
+        return bool(saved and saved.get("reopen_reason") == payload.text
+                    and saved.get("evidence", []) == evidence)
+    return False
+
+
 def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
                   event_type: str, idempotency_key: Optional[str],
-                  payload: Optional[EvidenceAction] = None):
+                  payload: Optional[BaseModel] = None):
     """Replay only an identical committed mutation; reject key reuse for changed content."""
     if not idempotency_key:
         return None
@@ -363,11 +433,8 @@ def _replay_event(db: Session, person_id: str, caregiver_id: str, loop_id: str,
         return None
     if event.loop_id != loop_id or event.event_type != event_type:
         raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop event")
-    if payload is not None and event_type == "action_recorded":
-        saved_actions = (event.after_state or {}).get("action_evidence") or []
-        saved = saved_actions[-1] if saved_actions else None
-        if not saved or saved.get("text") != payload.text or saved.get("evidence", []) != payload.evidence:
-            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
+    if payload is not None and not _event_payload_matches(event, event_type, payload):
+        raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
     return _snapshot(_get_scoped(db, person_id, caregiver_id, loop_id))
 
 
@@ -614,7 +681,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     before = _snapshot(loop)
@@ -669,7 +736,7 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "response_recorded", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "response_recorded", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
@@ -767,7 +834,7 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "contradiction_reconciled", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "contradiction_reconciled", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     if loop.loop_type != "contradiction":
@@ -797,7 +864,7 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     _validate_source_evidence_references(db, person_id, payload.evidence)
@@ -815,7 +882,7 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     if not payload.evidence or not (loop.verification_rule or payload.verification_rule):
@@ -849,7 +916,7 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     if not payload.verification_rule and not loop.verification_rule:
@@ -893,7 +960,7 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
         db.commit()
     except IntegrityError:
         db.rollback()
-        replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key)
+        replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key, payload)
         if replay is not None:
             return replay
         raise HTTPException(status_code=409, detail="Concurrent outcome corroboration conflicted; retry with the same idempotency key")
@@ -906,7 +973,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key, payload)
     if replay is not None:
         return {"accepted": True, "verification": "verified", "loop": replay}
     if loop.status in TERMINAL_STATES:
@@ -992,7 +1059,7 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key, payload)
     if replay is not None:
         return {"accepted": True, "verification": "cancelled_not_resolved", "loop": replay}
     if loop.status in TERMINAL_STATES:
@@ -1014,7 +1081,7 @@ def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     person_id, caregiver_id = _scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "manage_responsibilities")
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
-    replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key)
+    replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key, payload)
     if replay is not None:
         return replay
     if loop.status not in TERMINAL_STATES:
