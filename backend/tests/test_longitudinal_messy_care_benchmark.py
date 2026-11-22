@@ -19,7 +19,7 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 import app.main as main_module
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.change import Change, Pattern, Baseline
 from app.models.observation_coverage import ObservationCoverage
 from app.models.care_continuity import CareAssertion
@@ -2329,3 +2329,98 @@ def test_persisted_misleading_delta_is_rejected_when_source_belongs_to_another_p
         assert evaluated["interpretation_status"] == "unsupported"
         assert evaluated["interpretation_caregiver_visible"] is False
         assert evaluated["interpretation_invalid_source_ids"] == [foreign_event.id]
+
+def test_situation_assessment_snapshot_survives_new_authorized_session_and_preserves_sources():
+    """A derived assessment is a durable, scoped snapshot—not browser-only state."""
+    from sqlalchemy import text
+
+    with TestingSessionLocal() as db:
+        person, caregiver = make_person(db, "situation-snapshot-retrieval")
+        evidence_id = "situation-evidence-" + hashlib.sha256(person.id.encode()).hexdigest()[:12]
+        db.add(Evidence(
+            id=evidence_id,
+            person_id=person.id,
+            type="caregiver_report",
+            source_text="The caregiver reported that night waking happened twice this week.",
+            uploaded_by_caregiver_id=caregiver.id,
+            reported_by_caregiver_id=caregiver.id,
+            epistemic_status="caregiver_reported",
+        ))
+        db.flush()
+        event = add_event(
+            db, person, caregiver, "night_waking", 2,
+            "Night waking reported by family", evidence_ids=[evidence_id],
+        )
+        first_token = issue_session(db, person, caregiver)
+        second_token = "benchmark-token-" + person.id + "-fresh"
+        db.add(AnonymousSession(
+            id="session-" + person.id + "-fresh",
+            person_id=person.id,
+            caregiver_id=caregiver.id,
+            token_hash=hashlib.sha256(second_token.encode()).hexdigest(),
+            expires_at=NOW + timedelta(days=1),
+        ))
+        other_person, other_caregiver = make_person(db, "situation-snapshot-other")
+        other_token = issue_session(db, other_person, other_caregiver)
+        db.commit()
+
+    with TestClient(app) as client:
+        first_headers = {"Authorization": f"Bearer {first_token}"}
+        fresh_headers = {"Authorization": f"Bearer {second_token}"}
+        other_headers = {"Authorization": f"Bearer {other_token}"}
+
+        created = client.post(
+            "/api/v1/care-continuity/situation-understanding/reassess",
+            headers=first_headers,
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["status"] == "created"
+        assessment_id = created.json()["assessment_id"]
+        assessment = created.json()["assessment"]
+        assert assessment["source_state_fingerprint"]
+        assert assessment["current_care_reality"]["records"]
+
+        fresh = client.get(
+            "/api/v1/care-continuity/situation-understanding",
+            headers=fresh_headers,
+        )
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["status"] == "available"
+        assert fresh.json()["assessment_id"] == assessment_id
+        assert fresh.json()["source_freshness"]["status"] == "current_for_bounded_source_view"
+        assert fresh.json()["assessment"]["source_state_fingerprint"] == assessment["source_state_fingerprint"]
+
+        history = client.get(
+            "/api/v1/care-continuity/situation-understanding/history",
+            headers=fresh_headers,
+        )
+        assert history.status_code == 200, history.text
+        assert history.json()["count"] == 1
+        assert history.json()["items"][0]["assessment_id"] == assessment_id
+
+        snapshot = client.get(
+            f"/api/v1/care-continuity/situation-understanding/history/{assessment_id}",
+            headers=fresh_headers,
+        )
+        assert snapshot.status_code == 200, snapshot.text
+        assert snapshot.json()["assessment"]["source_state_fingerprint"] == assessment["source_state_fingerprint"]
+
+        denied = client.get(
+            f"/api/v1/care-continuity/situation-understanding/history/{assessment_id}",
+            headers=other_headers,
+        )
+        assert denied.status_code == 404, denied.text
+
+    # Verify the snapshot row and its evidence references in a fresh DB session.
+    with TestingSessionLocal() as db:
+        rows = db.execute(text(
+            "SELECT id, person_id, created_by_caregiver_id, evidence_ids, delta_json "
+            "FROM care_delta_runs WHERE id = :id AND source = 'situation_understanding_assessment'"
+        ), {"id": assessment_id}).mappings().all()
+        assert len(rows) == 1
+        assert rows[0]["person_id"] == person.id
+        assert rows[0]["created_by_caregiver_id"] == caregiver.id
+        assert evidence_id in json.loads(rows[0]["evidence_ids"])
+        stored_assessment = json.loads(rows[0]["delta_json"])
+        assert stored_assessment["source_state_fingerprint"] == assessment["source_state_fingerprint"]
+        assert db.query(CareEvent).filter_by(id=event.id, person_id=person.id).count() == 1
