@@ -787,6 +787,10 @@ class QwenClaimExtractionRequest(BaseModel):
     raw_text: str = Field(min_length=1, max_length=8000)
 
 
+class QwenCareUnderstandingRequest(BaseModel):
+    raw_text: str = Field(min_length=1, max_length=8000)
+
+
 def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
     # Resolve the bearer capability and re-check the current membership grant
     # on every request, including when middleware has already populated identity.
@@ -4647,6 +4651,67 @@ def review_two_week_output(
         "written_to_lcr": False,
         "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
         "idempotent_replay": False,
+    }
+
+
+@router.post("/assistant/care-understanding")
+def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Request, db: Session = Depends(get_db)):
+    """Return a validated, source-grounded understanding proposal; never writes the LCR."""
+    _scope(request, db)
+    source = payload.raw_text
+    if not source.strip():
+        raise HTTPException(status_code=422, detail="Source text is required")
+    system = (
+        "You are the SolenOS care-understanding extraction layer. Return JSON only with exactly these keys: "
+        "observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
+        "observations: up to 20 objects {description, approximate_time|null, confidence: low|medium|high, raw_fragment}. "
+        "events: up to 10 {description, time|null, participants: string[], raw_fragment}. "
+        "decisions: up to 10 {description, who: string[], why|null, reason_unknown: boolean, "
+        "status: active|completed|changed|reversed|uncertain|needs_review|pending, raw_fragment}. "
+        "outcomes: up to 10 {description, status: observed|pending|uncertain|ongoing|resolved|changed, raw_fragment}. "
+        "unknowns: up to 10 {question, status: open|answered|declined|no_longer_relevant, raw_fragment}. "
+        "non_care_facts: up to 10 {layer: contributor_load|disagreement_perspective, text, raw_fragment}. "
+        "possible_links: up to 10 {text, causation_claimed:false}. "
+        "Every raw_fragment must be copied exactly from the source. Descriptions may summarize only what that fragment "
+        "explicitly says. Preserve who said or observed it, negation, uncertainty, and time. Do not infer diagnosis, "
+        "cause, treatment, advice, risk, or emotional reassurance. Never turn a possibility into a fact. "
+        "Use empty arrays when unsupported. Do not invent missing details."
+    )
+    raw = qwen_chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": "Original caregiver text:\\n" + source}],
+        response_format="json",
+        options={"temperature": 0, "num_predict": 1200},
+    )
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Qwen returned invalid care-understanding data. No result was accepted.") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=503, detail="Qwen returned an invalid care-understanding structure.")
+    limits = {"observations": 20, "events": 10, "decisions": 10, "outcomes": 10, "unknowns": 10, "non_care_facts": 10, "possible_links": 10}
+    if any(not isinstance(parsed.get(key, []), list) for key in limits):
+        raise HTTPException(status_code=503, detail="Qwen returned invalid care-understanding sections.")
+    result = {key: [] for key in limits}
+    for key, limit in limits.items():
+        for item in parsed.get(key, [])[:limit]:
+            if not isinstance(item, dict):
+                continue
+            fragment = item.get("raw_fragment")
+            if key == "possible_links":
+                text_value = item.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    result[key].append({"text": text_value.strip()[:500], "causation_claimed": False})
+                continue
+            if not isinstance(fragment, str) or not fragment.strip() or fragment not in source:
+                continue
+            cleaned = dict(item)
+            cleaned["raw_fragment"] = fragment
+            result[key].append(cleaned)
+    return {
+        "understanding": result,
+        "provider": "private_ollama_qwen",
+        "written_to_lcr": False,
+        "review_required": True,
     }
 
 
