@@ -469,6 +469,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             companion_daily_body = companion_daily.json()
             assert event_id in companion_daily_body.get("source_event_ids", [])
             assert evidence_id in companion_daily_body.get("source_evidence_ids", [])
+            assert review_body["assertion_id"] in companion_daily_body.get("source_assertion_ids", []), "Companion must retrieve the same caregiver-approved assertion from the shared LCR"
             assert companion_daily_body["written_to_lcr"] is False
             daily_prompt = "\\n".join(
                 str(message.get("content", "")) for message in captured_prompts[-1]
