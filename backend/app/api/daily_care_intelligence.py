@@ -199,7 +199,7 @@ def _history_bundle(
                     if extraction_status in {"failed", "unavailable"} or (job is not None and job.status in {"failed", "cancelled"})
                     else "SolenOS is organizing the details in the background."
                     if job is not None and job.status in {"queued", "processing"}
-                    else "Your original report is saved. Review the suggested details before they are added as reviewed care information."
+                    else "Your original note is saved. Check these details before adding them to your Care Record."
                     if review_required
                     else "Your structured check-in is saved. No AI extraction was needed."
                     if extraction_status == "not_applicable"
