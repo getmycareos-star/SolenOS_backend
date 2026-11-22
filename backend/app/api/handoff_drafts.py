@@ -1127,6 +1127,21 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     if any(str(value) not in known_documents for value in new_documents):
                         stale.append("new_records:documents")
         if stale:
+            stale_categories = sorted({
+                f"new_records:{item.split(':', 1)[1]}"
+                if item.startswith("new_records:")
+                else item.split(":", 1)[0]
+                for item in stale
+            })
+            # Log table-level diagnostics only. Never include care content,
+            # source identifiers, or caregiver/recipient identifiers.
+            logger.warning(
+                "Handoff draft source snapshot is stale: stale_source_count=%s "
+                "stale_categories=%s unknown_source_count=%s",
+                len(stale),
+                stale_categories,
+                len(unknown),
+            )
             return {"status": "stale", "stale_source_count": len(stale), "unknown_source_count": len(unknown)}
         if unknown:
             return {"status": "unknown", "stale_source_count": 0, "unknown_source_count": len(unknown)}
