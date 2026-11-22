@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import os
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,7 +15,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
+DATABASE_NAME = urlparse(DATABASE_URL).path.rsplit("/", 1)[-1].lower() if DATABASE_URL else ""
+pytestmark = pytest.mark.skipif(
+    not DATABASE_URL
+    or not any(token in DATABASE_NAME for token in ("test", "benchmark")),
+    reason="requires a disposable migrated PostgreSQL test database",
+)
 
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
@@ -479,9 +485,12 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
             assert responsibility.status_code == 200, responsibility.text
             source_id = responsibility.json()["id"]
 
+            # Responsibility transfers are administrative actions. The
+            # primary caregiver initiates this transfer after the recipient's
+            # responsibility and follow-up have been recorded.
             transfer = client.post(
                 "/api/v1/caregiver-access/responsibility-transfers",
-                headers=recipient_headers,
+                headers=primary_headers,
                 json={
                     "source_responsibility_id": source_id,
                     "to_caregiver_profile_id": primary_body["caregiver"]["profile_id"],
