@@ -781,6 +781,12 @@ class QwenAssistRequest(BaseModel):
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
+class QwenClaimExtractionRequest(BaseModel):
+    """Source text has already been persisted by the caller before inference."""
+    evidence_id: str = Field(min_length=1, max_length=128)
+    raw_text: str = Field(min_length=1, max_length=8000)
+
+
 def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
     # Resolve the bearer capability and re-check the current membership grant
     # on every request, including when middleware has already populated identity.
@@ -4641,6 +4647,92 @@ def review_two_week_output(
         "written_to_lcr": False,
         "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
         "idempotent_replay": False,
+    }
+
+
+@router.post("/assistant/claim-extraction")
+def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request, db: Session = Depends(get_db)):
+    """Run two independent, read-only Qwen claim extractions for persisted source text."""
+    _scope(request, db)
+    source = payload.raw_text.strip()
+    if not source:
+        raise HTTPException(status_code=422, detail="Source text is required")
+
+    system_prompt = (
+        "You are the SolenOS claim extraction layer. Extract discrete claims explicitly supported by "
+        "the caregiver's source text. Return JSON only with this exact shape: "
+        '{"claims":[{"claim_text":"string","entity_type":"person|place|institution|object|symptom|behavior|medication|event|unknown",'
+        '"event_type":"string","confidence_tag":"confirmed|reported|inferred|unknown|contradictory",'
+        '"source_span":{"start_offset":0,"end_offset":1,"text":"exact source substring"} }]} . '
+        "Every non-null source_span must use exact character offsets and exact text from the original source. "
+        "Use null only when an exact supporting span cannot be identified. Prefer precision over recall. "
+        "Never invent facts, diagnose, recommend treatment, merge unrelated claims, or convert uncertainty "
+        "into certainty. Preserve attribution, negation, time wording and uncertainty. Maximum 20 claims."
+    )
+
+    def extract_once(run_label: str) -> dict:
+        raw = qwen_chat(
+            [
+                {"role": "system", "content": system_prompt + f" This is independent extraction run {run_label}."},
+                {"role": "user", "content": "Original source text:\\n" + source},
+            ],
+            response_format="json",
+            options={"temperature": 0, "num_predict": 1024},
+        )
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail="Qwen returned invalid claim data. No claims were accepted.") from exc
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("claims"), list):
+            raise HTTPException(status_code=503, detail="Qwen returned an invalid claim structure. No claims were accepted.")
+        claims = []
+        for item in parsed["claims"][:20]:
+            if not isinstance(item, dict):
+                continue
+            claim_text = item.get("claim_text")
+            entity_type = item.get("entity_type")
+            event_type = item.get("event_type")
+            confidence = item.get("confidence_tag")
+            span = item.get("source_span")
+            if not isinstance(claim_text, str) or not claim_text.strip() or len(claim_text) > 1000:
+                continue
+            if entity_type not in {"person", "place", "institution", "object", "symptom", "behavior", "medication", "event", "unknown"}:
+                continue
+            if not isinstance(event_type, str) or not event_type.strip() or len(event_type) > 200:
+                continue
+            if confidence not in {"confirmed", "reported", "inferred", "unknown", "contradictory"}:
+                continue
+            if span is not None:
+                if not isinstance(span, dict):
+                    continue
+                start, end, span_text = span.get("start_offset"), span.get("end_offset"), span.get("text")
+                if (not isinstance(start, int) or isinstance(start, bool) or
+                    not isinstance(end, int) or isinstance(end, bool) or
+                    not isinstance(span_text, str) or start < 0 or end <= start or
+                    end > len(source) or source[start:end] != span_text):
+                    span = None
+                else:
+                    span = {"start_offset": start, "end_offset": end, "text": span_text}
+            claims.append({
+                "claim_text": claim_text.strip(),
+                "entity_type": entity_type,
+                "event_type": event_type.strip(),
+                "confidence_tag": confidence,
+                "source_span": span,
+            })
+        return {"claims": claims}
+
+    # Separate model calls are required: reconciliation must never compare a run with itself.
+    run_a = extract_once("A")
+    run_b = extract_once("B")
+    return {
+        "evidence_id": payload.evidence_id,
+        "run_a": run_a,
+        "run_b": run_b,
+        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+        "provider": "private_ollama_qwen",
+        "written_to_lcr": False,
+        "review_required": True,
     }
 
 
