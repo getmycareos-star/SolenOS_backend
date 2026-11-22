@@ -4444,6 +4444,10 @@ async def get_qwen_background_job(
             daily_capture_result = parsed_result if isinstance(parsed_result, dict) else None
         except (TypeError, ValueError):
             daily_capture_result = None
+    review_history = (
+        _two_week_review_history(db, job.id, person_id, caregiver_id)
+        if job.workflow == "two_week_review" else []
+    )
     return {
         "job_id": job.id,
         "status": job.status,
@@ -4451,6 +4455,7 @@ async def get_qwen_background_job(
         "reply": output.output_text if output else None,
         "output_id": output.id if output else None,
         "output_review_status": output.review_status if output else None,
+        "review_history": review_history,
         "written_to_lcr": bool(output.written_to_lcr) if output else False,
         "error": "We couldn’t complete that request. Your original Daily Care report remains saved." if job.status == "failed" and daily_capture_workflow else "We couldn’t complete that request. Please try again." if job.status == "failed" else None,
         "daily_capture": daily_capture_result,
@@ -4471,6 +4476,22 @@ async def get_qwen_background_job(
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
     }
+
+
+def _two_week_review_history(db: Session, job_id: str, person_id: str, caregiver_id: str) -> list[dict]:
+    rows = db.query(QwenJobEvent).filter(
+        QwenJobEvent.job_id == job_id,
+        QwenJobEvent.person_id == person_id,
+        QwenJobEvent.caregiver_id == caregiver_id,
+        QwenJobEvent.event_type == "caregiver_review_decision",
+    ).order_by(QwenJobEvent.created_at.asc(), QwenJobEvent.id.asc()).all()
+    return [
+        {
+            "decision": row.to_status,
+            "reviewed_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
 
 
 @router.post("/assistant/jobs/{job_id}/review")
@@ -4508,6 +4529,7 @@ def review_two_week_output(
             "review_status": output.review_status,
             "review_required": False,
             "written_to_lcr": False,
+            "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
             "idempotent_replay": True,
         }
     now = datetime.now(timezone.utc)
@@ -4536,6 +4558,7 @@ def review_two_week_output(
         "review_status": output.review_status,
         "review_required": bool(output.review_required),
         "written_to_lcr": False,
+        "review_history": _two_week_review_history(db, job.id, person_id, caregiver_id),
         "idempotent_replay": False,
     }
 
