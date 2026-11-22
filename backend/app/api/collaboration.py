@@ -2948,6 +2948,35 @@ def _humanize_model_context_line(line: str) -> str:
             parts.append(f"{label_text}: {str(value)[:500]}")
     if freshness_is_policy_only:
         parts.append("interpretation limit: this is a policy review status, not a truth judgment")
+
+    # Preserve source qualifiers in the actual Companion prompt. The raw
+    # source_context is intentionally not rendered as JSON because its enum
+    # values are internal vocabulary and easy to misread without explanation.
+    source_context = record.get("source_context")
+    if isinstance(source_context, dict):
+        authority = source_context.get("authority")
+        if authority == "caregiver_reviewed_report_not_independently_verified":
+            parts.append("source limitation: caregiver-reviewed report; not independently verified")
+        candidate = source_context.get("document_candidate")
+        candidate = candidate if isinstance(candidate, dict) else {}
+        qualifier_messages = {
+            ("source_attribution", "caregiver_reported"): "the passage attributes this to a caregiver report",
+            ("source_attribution", "patient_reported"): "the passage attributes this to a patient report",
+            ("source_attribution", "professional_observed"): "the passage says a professional observed this; SolenOS has not independently verified it",
+            ("source_attribution", "professional_documented"): "the passage says a professional documented this; SolenOS has not independently verified it",
+            ("negation_status", "explicitly_negated"): "the source wording is explicitly negative; preserve the negation and do not turn it into an affirmative statement",
+            ("modality", "tentative"): "the source wording is tentative; do not present it as established",
+            ("conditionality", "conditional"): "the source wording is conditional; retain the condition",
+            ("temporal_context", "historical"): "the source wording is historical; do not present it as the current care state without reconciliation",
+            ("temporal_context", "changed_over_time"): "the source describes a change over time; preserve both the earlier and later context",
+            ("statement_kind", "recommendation"): "the source contains a recommendation; it does not establish that the recommendation was followed",
+        }
+        qualifiers = []
+        for field, value in qualifier_messages:
+            if (source_context.get(field) if field != "negation_status" and field != "modality" and field != "conditionality" and field != "temporal_context" and field != "statement_kind" else candidate.get(field)) == value:
+                qualifiers.append(qualifier_messages[(field, value)])
+        if qualifiers:
+            parts.append("source wording limits: " + "; ".join(qualifiers[:6]))
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
 
 
