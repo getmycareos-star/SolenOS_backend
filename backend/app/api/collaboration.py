@@ -4773,8 +4773,11 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             if not isinstance(item, dict):
                 continue
             if key == "possible_links":
-                if isinstance(item.get("text"), str) and item["text"].strip():
-                    result[key].append({"text": item["text"][:500], "causation_claimed": False})
+                # A possible relationship is still a claim. Keep it only when
+                # the model points to wording that appears verbatim in source.
+                link_text = item.get("text")
+                if isinstance(link_text, str) and link_text.strip() and link_text in source:
+                    result[key].append({"text": link_text[:500], "causation_claimed": False})
                 continue
             fragment = item.get("raw_fragment")
             if not isinstance(fragment, str) or not fragment or fragment not in source:
