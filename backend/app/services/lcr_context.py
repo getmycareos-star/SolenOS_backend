@@ -703,6 +703,12 @@ def build_lcr_context(
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
         if source_name == "uncertainty_assessments" and "is_active" in table.c:
             statement = statement.where(table.c.is_active.is_(True))
+        if source_name == "change_analyses" and "source" in table.c:
+            # Situation-understanding snapshots are derived assessments, not
+            # source change history. Including the latest snapshot in its own
+            # next fingerprint makes every read look stale and every retry
+            # create another assessment.
+            statement = statement.where(table.c.source != "situation_understanding_assessment")
         if source_name == "assertions" and "assertion_status" in table.c:
             # Keep caregiver-attributed historical assertions so corrections and
             # rejections remain explainable. Model-only proposals without
@@ -1110,11 +1116,11 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
     # before less decision-relevant source notes. Otherwise a large evidence-review
     # history can consume the bounded caveat list and hide the page of the very
     # document claim the Companion is being asked to explain.
+    # Stable-sort by source priority only. Keep the retrieval order within
+    # each source so the bounded caveat list preserves the same record ordering
+    # caregivers see in the underlying LCR projection.
     source_caveats.sort(
-        key=lambda caveat: (
-            caveat.get("source_type") != "assertions",
-            caveat.get("source_id") or "",
-        )
+        key=lambda caveat: caveat.get("source_type") != "assertions"
     )
     header = (
         "LCR context metadata: "
