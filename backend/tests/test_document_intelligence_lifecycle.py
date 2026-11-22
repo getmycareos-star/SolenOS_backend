@@ -375,13 +375,14 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert qualifier_dropping_correction.status_code == 409, qualifier_dropping_correction.text
 
+        assert "meal intake" not in quotes[1].casefold()
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
             json={
                 "candidate_index": 1,
                 "decision": "correct",
-                "corrected_subject": "The patient",
+                "corrected_subject": "Meal intake",
                 "corrected_observation": quotes[1],
             },
         )
@@ -393,7 +394,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             json={
                 "candidate_index": 1,
                 "decision": "correct",
-                "corrected_subject": "The patient",
+                "corrected_subject": "Meal intake",
                 "corrected_observation": quotes[1],
             },
         )
@@ -424,7 +425,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
             json={
                 "candidate_index": 1,
                 "decision": "correct",
-                "corrected_subject": "The patient",
+                "corrected_subject": "Meal intake",
                 "corrected_observation": quotes[1],
             },
         )
