@@ -149,6 +149,7 @@ def test_postgres_completed_and_cancelled_document_jobs_without_analysis_remain_
             db.query(Evidence).filter(
                 Evidence.id.in_([completed_evidence_id, cancelled_evidence_id])
             ).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
@@ -223,6 +224,7 @@ def test_postgres_completed_document_analysis_outside_visible_limit_is_not_marke
             db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
             db.query(CaptureAnalysis).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Evidence).filter(Evidence.id.in_([visible_evidence_id, hidden_evidence_id])).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
