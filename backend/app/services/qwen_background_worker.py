@@ -1409,7 +1409,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.commit()
 
         # Import only after app initialization to avoid a router/worker import cycle.
-        from app.api.collaboration import QwenAssistRequest, qwen_support_assist
+        from app.api.collaboration import QwenAssistRequest
 
         text = job.task_text.strip()
         if (job.context_text or "").strip():
