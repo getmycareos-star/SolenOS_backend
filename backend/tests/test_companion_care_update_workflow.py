@@ -10,7 +10,7 @@ from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
 from app.models.care import CareEvent
-from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation, QwenJobEvent
 from app.models.collaboration import ConversationMessage
 
 main_module = importlib.import_module("app.main")
@@ -617,5 +617,107 @@ def test_companion_conversation_history_returns_source_message_ids_and_enforces_
             headers={"Authorization": f"Bearer {second['access_token']}"},
         )
         assert cross_record.status_code == 404
+    finally:
+        teardown()
+
+def test_two_week_review_decisions_are_scoped_and_append_only(monkeypatch):
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        first = create_session(client, "Review caregiver")
+        second = create_session(client, "Other caregiver")
+        db = TestingSessionLocal()
+        try:
+            job = QwenBackgroundJob(
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                task_text="Review care information from the past fourteen days.",
+                context_text="",
+                workflow="two_week_review",
+                status="completed",
+            )
+            db.add(job)
+            db.flush()
+            output = QwenModelOutput(
+                job_id=job.id,
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                workflow="two_week_review",
+                model_name="qwen-test",
+                output_text="A source-grounded two-week summary for testing.",
+                output_metadata={"live_inference_confirmed": True},
+                source_event_ids_json="[]",
+                source_evidence_ids_json="[]",
+                review_status="pending_review",
+                review_required=True,
+                written_to_lcr=False,
+            )
+            db.add(output)
+            db.commit()
+            job_id = job.id
+            output_id = output.id
+        finally:
+            db.close()
+
+        first_headers = {"Authorization": "Bearer " + first["access_token"]}
+        second_headers = {"Authorization": "Bearer " + second["access_token"]}
+        denied = client.post(
+            f"/api/v1/assistant/jobs/{job_id}/review",
+            headers=second_headers,
+            json={"decision": "reviewed"},
+        )
+        assert denied.status_code == 404
+
+        reviewed = client.post(
+            f"/api/v1/assistant/jobs/{job_id}/review",
+            headers=first_headers,
+            json={"decision": "reviewed"},
+        )
+        assert reviewed.status_code == 200, reviewed.text
+        assert reviewed.json()["review_status"] == "reviewed"
+        assert reviewed.json()["review_required"] is False
+        assert reviewed.json()["written_to_lcr"] is False
+        assert reviewed.json()["idempotent_replay"] is False
+
+        replay = client.post(
+            f"/api/v1/assistant/jobs/{job_id}/review",
+            headers=first_headers,
+            json={"decision": "reviewed"},
+        )
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["idempotent_replay"] is True
+
+        changed = client.post(
+            f"/api/v1/assistant/jobs/{job_id}/review",
+            headers=first_headers,
+            json={"decision": "needs_follow_up"},
+        )
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["review_status"] == "needs_follow_up"
+        assert changed.json()["written_to_lcr"] is False
+
+        status = client.get(
+            f"/api/v1/assistant/jobs/{job_id}",
+            headers=first_headers,
+        )
+        assert status.status_code == 200, status.text
+        assert status.json()["review_required"] is False
+        assert status.json()["output_review_status"] == "needs_follow_up"
+        assert status.json()["written_to_lcr"] is False
+
+        db = TestingSessionLocal()
+        try:
+            saved = db.query(QwenModelOutput).filter_by(id=output_id).one()
+            assert saved.review_status == "needs_follow_up"
+            assert saved.review_required is False
+            assert saved.written_to_lcr is False
+            events = db.query(QwenJobEvent).filter_by(
+                job_id=job_id,
+                event_type="caregiver_review_decision",
+            ).order_by(QwenJobEvent.created_at.asc()).all()
+            assert [event.to_status for event in events] == ["reviewed", "needs_follow_up"]
+            assert all(event.caregiver_id == first["caregiver"]["id"] for event in events)
+            assert all(event.metadata_json["written_to_lcr"] is False for event in events)
+        finally:
+            db.close()
     finally:
         teardown()
