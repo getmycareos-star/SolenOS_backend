@@ -237,7 +237,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                         json={
                             "person_id": person_id,
                             "text": "What have I told you about sleep?",
-                            "client_turn_id": f"daily-care-assistant-readback-{suffix}",
+                            "client_turn_id": str(uuid.uuid4()),
                         },
                     )
                     assert assistant_readback.status_code == 200, assistant_readback.text
