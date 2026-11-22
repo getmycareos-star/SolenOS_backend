@@ -920,3 +920,53 @@ def test_large_json_change_analysis_is_bounded_before_parsing():
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+
+def test_companion_source_caveats_are_bounded_and_visible_in_prompt_metadata():
+    context = {
+        "schema_status": "complete",
+        "history_coverage": "complete",
+        "retrieval_scan_complete": True,
+        "retrieval_projection_complete": True,
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "sources": {
+            "evidence": {
+                "status": "available",
+                "returned_count": 22,
+                "candidate_count": 22,
+                "candidate_scan_complete": True,
+                "has_more": False,
+                "items": [
+                    {
+                        "id": f"evidence-{index}",
+                        "source_context": {
+                            "authority": "A" * 5000,
+                            "document_candidate": {
+                                "negation_status": "N" * 5000,
+                            },
+                        },
+                    }
+                    for index in range(22)
+                ],
+            },
+        },
+    }
+
+    prompt = format_lcr_context_for_prompt(context, max_chars=12000)
+    metadata_line = prompt.splitlines()[0]
+    metadata = json.loads(metadata_line.removeprefix("LCR context metadata: "))
+
+    caveats = metadata["source_caveats"]
+    assert len(caveats) == 20
+    assert caveats[0] == {
+        "source_type": "evidence",
+        "source_id": "evidence-0",
+        "authority": "A" * 120,
+        "negation_status": "N" * 60,
+    }
+    assert caveats[-1]["source_id"] == "evidence-19"
+    assert len(caveats[-1]["authority"]) == 120
+    assert len(caveats[-1]["negation_status"]) == 60
+    assert "source_caveats" in metadata_line
