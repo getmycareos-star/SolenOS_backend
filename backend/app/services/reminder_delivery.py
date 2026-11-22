@@ -1,58 +1,27 @@
-"""Durable reminder and Web Push delivery workers.
+"""Durable in-app reminder notification worker and legacy browser-push cleanup.
 
 Quiet hours defer notification creation; they do not alter reminder due times.
-Provider acceptance is recorded separately from device presentation.
+All caregiver notifications remain inside the authenticated SolenOS inbox.
 """
 import asyncio
-import json
 import logging
-import re
-import uuid
 from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, case, cast, exists, literal, or_, String
 from sqlalchemy.exc import IntegrityError
 
-from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.hazmat.primitives.serialization import Encoding, NoEncryption, PrivateFormat
-import base64
-import hashlib
 
-from app.core.config import get_settings
 from app.core.database import SessionLocal
-from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription, DeliveryFailureEvent, NotificationDeliveryAttempt
+from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
 
 # All care notifications stay in the authenticated SolenOS inbox. No external channel is enabled.
-PUSH_NOTIFICATION_CATEGORIES = frozenset()
 from app.models.reminder import CareReminder
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.services.web_push_config import vapid_configuration_error
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 30
 BATCH_SIZE = 100
-
-
-def _vapid_private_key_der(value):
-    """Convert supported VAPID key configuration to py_vapid base64url-DER form."""
-    normalized = (value or "").replace("\\n", "\n").strip()
-    if normalized.startswith("-----BEGIN"):
-        private_key = serialization.load_pem_private_key(
-            normalized.encode("ascii"),
-            password=None,
-        )
-    else:
-        raw = base64.b64decode(normalized + ("=" * (-len(normalized) % 4)), altchars=b"-_", validate=True)
-        if len(raw) != 32:
-            raise ValueError(f"VAPID private key decoded to {len(raw)} bytes; expected a 32-byte base64url scalar or PEM")
-        private_key = ec.derive_private_key(int.from_bytes(raw, "big"), ec.SECP256R1())
-    if not isinstance(private_key, ec.EllipticCurvePrivateKey) or not isinstance(private_key.curve, ec.SECP256R1):
-        raise ValueError("VAPID private key must use the P-256 curve")
-    der_key = private_key.private_bytes(Encoding.DER, PrivateFormat.PKCS8, NoEncryption())
-    return base64.urlsafe_b64encode(der_key).decode("ascii").rstrip("=")
 
 
 def _notification_id(reminder):
@@ -137,7 +106,6 @@ def deliver_due_reminders(db=None, now=None):
             .join(CareNotification, CareNotification.id == CarePushDelivery.notification_id)
             .filter(
                 CarePushDelivery.status.in_(("pending", "retry_scheduled")),
-                CareNotification.category.notin_(PUSH_NOTIFICATION_CATEGORIES),
             )
             .all()
         )
@@ -226,53 +194,6 @@ def deliver_due_reminders(db=None, now=None):
 
 
 
-
-def _record_delivery_failure(session, delivery, notification, subscription, current, code, detail, retryable):
-    """Persist a redacted failure event separately from the mutable delivery cursor."""
-    session.add(DeliveryFailureEvent(
-        id=str(uuid.uuid4()),
-        person_id=notification.person_id,
-        caregiver_id=notification.caregiver_id,
-        delivery_type="web_push",
-        delivery_id=delivery.id,
-        recipient_id=subscription.caregiver_id,
-        failure_code=str(code)[:120],
-        failure_detail_redacted=str(detail)[:1000] if detail else None,
-        occurred_at=current,
-        retryable=bool(retryable),
-        record_metadata={"notification_id": notification.id, "attempt_number": delivery.attempt_count},
-    ))
-
-
-
-def _record_delivery_attempt(session, delivery, notification, subscription, current, result, failure_code=None):
-    """Append a provider-attempt receipt without mutating earlier attempt history."""
-    session.add(NotificationDeliveryAttempt(
-        id=str(uuid.uuid4()),
-        actor_id=notification.caregiver_id,
-        subject_id=notification.person_id,
-        person_id=notification.person_id,
-        caregiver_id=notification.caregiver_id,
-        notification_id=notification.id,
-        attempt_number=delivery.attempt_count,
-        channel="web_push",
-        attempted_at=current,
-        result=result,
-        failure_code=str(failure_code)[:120] if failure_code else None,
-        record_metadata={
-            "delivery_id": delivery.id,
-            "subscription_id": subscription.id,
-            "provider_accepted": result == "provider_accepted",
-        },
-    ))
-
-
-def _resolve_delivery_failures(session, delivery, current):
-    session.query(DeliveryFailureEvent).filter(
-        DeliveryFailureEvent.delivery_id == delivery.id,
-        DeliveryFailureEvent.delivery_type == "web_push",
-        DeliveryFailureEvent.resolved_at.is_(None),
-    ).update({"resolved_at": current, "updated_at": current}, synchronize_session=False)
 
 def deliver_pending_web_pushes(db=None, now=None):
     """Cancel legacy browser-push work and revoke subscriptions; never contact a provider."""
