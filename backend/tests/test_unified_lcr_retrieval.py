@@ -963,6 +963,31 @@ def test_numbered_multi_year_window_clamps_leap_day_and_rejects_unbounded_ranges
         _temporal_window("Show me the past 21 years", now=datetime(2026, 11, 6, 12, tzinfo=UTC))
 
 
+def test_long_relative_windows_are_not_silently_clamped_to_one_year():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    months = _temporal_window("What changed in the last 18 months?", now=now)
+    days = _temporal_window("What changed in the past 500 days?", now=now)
+    weeks = _temporal_window("What changed in the last 80 weeks?", now=now)
+
+    assert months is not None and months["start"] == "2025-05-15T00:00:00+00:00"
+    assert days is not None and days["start"] == "2025-07-04T00:00:00+00:00"
+    assert weeks is not None and weeks["start"] == "2025-05-08T00:00:00+00:00"
+
+
+def test_unsupported_long_relative_windows_fail_instead_of_silently_narrowing():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="between one day and twenty years"):
+        _temporal_window("What happened in the last 8000 days?", now=now)
+    with pytest.raises(ValueError, match="between one week and twenty years"):
+        _temporal_window("What happened in the last 1100 weeks?", now=now)
+    with pytest.raises(ValueError, match="between one month and twenty years"):
+        _temporal_window("What happened in the last 241 months?", now=now)
+    with pytest.raises(ValueError, match="between one and twenty years"):
+        _temporal_window("What happened in the past 100 years?", now=now)
+
+
 def test_past_year_clamps_leap_day_when_prior_year_is_not_leap():
     window = _temporal_window(
         "Show me the past year",
