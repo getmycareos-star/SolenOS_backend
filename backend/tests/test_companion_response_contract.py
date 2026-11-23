@@ -2341,6 +2341,11 @@ def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
         "I'm sorry this is hard. We can pause here; nothing else needs to be handled right now.",
     )
 
+    assert collaboration._caregiver_response_needs_revision(
+        "I'm sad",
+        "I'm here for you. Everything will be okay.",
+    )
+
 
 def test_caregiver_interaction_guidance_prioritizes_frustration_repair_over_defense():
     guidance = collaboration._caregiver_interaction_guidance(
