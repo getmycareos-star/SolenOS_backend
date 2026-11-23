@@ -781,6 +781,7 @@ class QwenAssistRequest(BaseModel):
     workflow: QwenWorkflow
     text: str = Field(min_length=1, max_length=8000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    source_event_id: Optional[str] = Field(default=None, max_length=128)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
