@@ -3417,6 +3417,11 @@ def test_companion_greeting_word_count_uses_shared_unicode_and_apostrophe_rules(
     assert collaboration._greeting_reply_needs_revision("You're welcome to SolenOS and the care record today.", 8)
 
 
+def test_companion_hard_maximum_matches_whitespace_word_count_contract():
+    assert not collaboration._companion_message_needs_revision("well-being caregiver's today's record", 4)
+    assert collaboration._companion_message_needs_revision("well-being caregiver's today's record today", 4)
+
+
 def test_companion_direct_source_answers_still_obey_response_length_contract():
     assert not collaboration._companion_message_needs_revision("Source-supported care fact. " * 40, 250)
     assert collaboration._companion_message_needs_revision("Source-supported care fact. " * 90, 250)
