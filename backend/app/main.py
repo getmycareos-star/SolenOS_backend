@@ -1717,7 +1717,7 @@ async def generate_lcr_orientation(
                 base,
                 model,
                 messages,
-                {"temperature": 0.1 if attempt else 0.2, "num_predict": response_length_policy.token_budget if attempt == 0 else min(response_length_policy.token_budget, 256)},
+                {"temperature": 0.1 if attempt else 0.2, "num_predict": response_length_policy.token_budget if attempt == 0 else response_length_policy.token_budget},
             )
             reply = validate_reply(candidate)
             if reply:
