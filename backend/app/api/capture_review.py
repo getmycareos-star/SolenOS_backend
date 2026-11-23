@@ -119,6 +119,25 @@ def review_capture_candidate(
     if not isinstance(candidate, dict):
         raise HTTPException(status_code=422, detail="Candidate data is invalid")
 
+    # New clients bind the decision to the exact candidate snapshot displayed.
+    # Keep legacy requests readable during the transition, but never accept a
+    # partially supplied snapshot or a stale source/subject pair.
+    snapshot_supplied = (
+        payload.expected_source_quote is not None
+        or payload.expected_subject is not None
+    )
+    if snapshot_supplied:
+        if payload.expected_source_quote is None or payload.expected_subject is None:
+            raise HTTPException(status_code=422, detail="A complete candidate snapshot is required")
+        if (
+            candidate.get("source_quote") != payload.expected_source_quote
+            or candidate.get("subject") != payload.expected_subject
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="This Daily Care suggestion changed after it was displayed. Refresh the saved care entry before deciding.",
+            )
+
     prior_status = candidate.get("review_status", "pending_review")
     reviewable_statuses = {"pending_review", "corrected_pending_approval", "corrected_by_caregiver"}
     if prior_status not in reviewable_statuses:
