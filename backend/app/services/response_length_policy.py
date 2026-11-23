@@ -165,7 +165,7 @@ _WORKFLOW_INTENT_HINTS: dict[str, str | None] = {
     "care_situation_change": "change_pattern",
     "delta_engine": "change_pattern",
     "evidence_provenance": "explanation",
-    "uncertainty_contradictions": "explanation",
+    "uncertainty_contradictions": "complex_care_history",
     "returning_caregiver": "change_pattern",
     "appointment": "appointment_preparation",
     "after_appointment": "appointment_preparation",
