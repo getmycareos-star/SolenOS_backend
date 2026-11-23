@@ -602,6 +602,25 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
+    if source_name == "evidence":
+        evidence_status = str(item.get("evidence_status") or "").casefold()
+        epistemic_status = str(item.get("epistemic_status") or "").casefold()
+        if evidence_status in {"withdrawn", "superseded", "retracted", "archived", "historical", "historical_only"} or epistemic_status in {"withdrawn", "superseded"}:
+            return (
+                "historical_evidence",
+                "This source was withdrawn, superseded, or archived. Keep it only to explain the record history; do not treat it as current evidence.",
+            )
+    if source_name == "evidence_observations":
+        if item.get("superseded_by_observation_ids"):
+            return (
+                "historical_observation",
+                "A later structured observation superseded this version. Preserve the original wording and correction link, but do not present this version as current.",
+            )
+        if str(item.get("epistemic_status") or "").casefold() in {"withdrawn", "superseded"}:
+            return (
+                "historical_observation",
+                "This structured observation was withdrawn or superseded. Keep it only as part of the source history.",
+            )
     if source_name == "evidence_reviews":
         review_type = str(item.get("review_type") or "unknown").casefold()
         outcome = str(item.get("outcome") or "undetermined").casefold()
@@ -960,6 +979,15 @@ def build_lcr_context(
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if source_name == "evidence" and "evidence_status" in table.c:
+            # Caregiver deletion is a tombstone, not source material that may
+            # continue to appear in Companion context after the document is gone.
+            statement = statement.where(
+                or_(
+                    table.c.evidence_status.is_(None),
+                    func.lower(table.c.evidence_status) != "deleted_by_caregiver",
+                )
+            )
         if source_name == "uncertainty_assessments" and "is_active" in table.c:
             statement = statement.where(table.c.is_active.is_(True))
         if source_name == "change_analyses" and "source" in table.c:
@@ -1180,6 +1208,61 @@ def build_lcr_context(
                 "interpretation_limit": "This care-information source could not be fully retrieved. An incomplete result must not be treated as an empty or complete history.",
             }
             continue
+
+        if source_name == "evidence_observations" and items and "supersedes_observation_id" in table.c:
+            selected_ids = [
+                str(item["id"]) for item in items
+                if item.get("id") is not None
+            ]
+            if selected_ids:
+                try:
+                    with db.begin_nested():
+                        supersession_rows = db.execute(
+                            select(table.c.id, table.c.supersedes_observation_id).where(
+                                table.c.person_id == str(person_id),
+                                table.c.supersedes_observation_id.in_(selected_ids),
+                            )
+                        ).mappings().all()
+                    superseded_by: dict[str, list[str]] = {}
+                    for row in supersession_rows:
+                        target_id = str(row.get("supersedes_observation_id") or "")
+                        correction_id = str(row.get("id") or "")
+                        if target_id and correction_id:
+                            superseded_by.setdefault(target_id, []).append(correction_id)
+                    for item in items:
+                        correction_ids = superseded_by.get(str(item.get("id") or ""), [])
+                        if correction_ids:
+                            item["superseded_by_observation_ids"] = correction_ids
+                            item["information_status"], item["interpretation_limit"] = _information_status(
+                                source_name, item
+                            )
+                except SQLAlchemyError:
+                    for item in items:
+                        item["information_status"] = "observation_currentness_unknown"
+                        item["interpretation_limit"] = (
+                            "The correction history for this observation could not be checked. "
+                            "Do not assume this is the latest version."
+                        )
+                    sources[source_name] = {
+                        "status": "partial",
+                        "table": table_name,
+                        "items": items,
+                        "returned_count": len(items),
+                        "candidate_count": candidate_count,
+                        "candidate_scan_complete": False,
+                        "returned_history_complete": False,
+                        "has_more": True,
+                        "limit": limit,
+                        "offset": source_offset,
+                        "next_offset": source_offset + len(items),
+                        "error_code": "observation_supersession_lookup_failed",
+                        "selection": "incomplete_correction_history",
+                        "interpretation_limit": (
+                            "The observation correction history could not be checked. "
+                            "Retrieved observations must not be treated as current versions."
+                        ),
+                    }
+                    continue
 
         has_more = candidate_count > source_offset + len(items)
         next_offset = source_offset + len(items) if has_more else None
