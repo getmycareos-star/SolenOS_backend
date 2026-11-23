@@ -227,7 +227,7 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "Action was marked complete", "evidence": [{"kind": "action_note"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "Action was marked complete", "evidence": [{"kind": "action_note"}]},
     )
     assert closure.status_code == 409, closure.text
 
@@ -284,7 +284,7 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     premature_close = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "Closure reviewed", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "Closure reviewed", "evidence": [{"kind": "closure_review"}]},
     )
     assert premature_close.status_code == 409, premature_close.text
 
@@ -317,7 +317,7 @@ def test_action_loop_cannot_close_until_outcome_is_verified():
     closure = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "Closure reviewed", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "Closure reviewed", "evidence": [{"kind": "closure_review"}]},
     )
     assert closure.status_code == 200, closure.text
     assert closure.json()["verification"] == "verified"
@@ -354,7 +354,7 @@ def test_open_loop_create_and_update_reject_cross_person_source_ids():
     closed = client.post(
         f"/api/v1/open-loops/{own_loop['id']}/close",
         headers=headers_a,
-        json={"text": "Attempt closure with a foreign source", "evidence": [{"evidence_id": foreign_source_id}]},
+        json={"expected_version": current_loop_version(client, headers_a, own_loop["id"]), "text": "Attempt closure with a foreign source", "evidence": [{"evidence_id": foreign_source_id}]},
     )
     assert closed.status_code == 404, closed.text
 
@@ -415,7 +415,7 @@ def test_professional_input_requires_existing_person_scoped_source_evidence():
     closed = client.post(
         f"/api/v1/open-loops/{loop_a['id']}/close",
         headers=headers_a,
-        json={"text": "Source-backed response reviewed",
+        json={"expected_version": current_loop_version(client, headers_a, loop_a["id"]), "text": "Source-backed response reviewed",
               "evidence": [{"kind": "closure_review", "text": "Reviewed against source record"}]},
     )
     assert closed.status_code == 200, closed.text
@@ -633,7 +633,7 @@ def test_dependent_unblocks_only_after_verified_prerequisite_closure():
     closed = client.post(
         f"/api/v1/open-loops/{prerequisite['id']}/close",
         headers=headers,
-        json={"text": "Prerequisite closure reviewed", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, prerequisite["id"]), "text": "Prerequisite closure reviewed", "evidence": [{"kind": "closure_review"}]},
     )
     assert closed.status_code == 200, closed.text
 
@@ -652,7 +652,7 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     premature = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "Reviewed", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "Reviewed", "evidence": [{"kind": "closure_review"}]},
     )
     assert premature.status_code == 409, premature.text
 
@@ -684,7 +684,7 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     blocked_close = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "Reconciliation alone is not corroboration", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "Reconciliation alone is not corroboration", "evidence": [{"kind": "closure_review"}]},
     )
     assert blocked_close.status_code == 409, blocked_close.text
     create_independent_corroboration(client, headers, source_id, second_source_id)
@@ -701,7 +701,7 @@ def test_contradiction_closure_uses_persisted_reconciliation_not_magic_words():
     closed = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={"text": "The record was reviewed against the corroborated reconciliation.", "evidence": [{"kind": "closure_review"}]},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), "text": "The record was reviewed against the corroborated reconciliation.", "evidence": [{"kind": "closure_review"}]},
     )
     assert closed.status_code == 200, closed.text
     assert closed.json()["loop"]["status"] == "closed"
@@ -1215,17 +1215,17 @@ def test_closure_retry_rejects_changed_closure_note():
     first = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json=close_payload,
+        json={**close_payload, "expected_version": current_loop_version(client, headers, loop["id"])},
     )
     retry = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json=close_payload,
+        json={**close_payload, "expected_version": current_loop_version(client, headers, loop["id"])},
     )
     changed = client.post(
         f"/api/v1/open-loops/{loop['id']}/close",
         headers=headers,
-        json={**close_payload, "text": "A different closure note."},
+        json={"expected_version": current_loop_version(client, headers, loop["id"]), **close_payload, "text": "A different closure note."},
     )
 
     assert first.status_code == 200, first.text
@@ -1248,17 +1248,17 @@ def test_all_remaining_open_loop_retries_reject_changed_mutation_payloads():
     first_cancel = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
         headers=headers,
-        json=cancel_payload,
+        json={**cancel_payload, "expected_version": current_loop_version(client, headers, cancelled_loop["id"])},
     )
     same_cancel = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
         headers=headers,
-        json=cancel_payload,
+        json={**cancel_payload, "expected_version": current_loop_version(client, headers, cancelled_loop["id"])},
     )
     changed_cancel = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/cancel",
         headers=headers,
-        json={**cancel_payload, "text": "A different cancellation reason."},
+        json={"expected_version": current_loop_version(client, headers, cancelled_loop["id"]), **cancel_payload, "text": "A different cancellation reason."},
     )
     assert first_cancel.status_code == 200, first_cancel.text
     assert same_cancel.status_code == 200, same_cancel.text
@@ -1272,17 +1272,17 @@ def test_all_remaining_open_loop_retries_reject_changed_mutation_payloads():
     first_reopen = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
         headers=headers,
-        json=reopen_payload,
+        json={**reopen_payload, "expected_version": current_loop_version(client, headers, cancelled_loop["id"])},
     )
     same_reopen = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
         headers=headers,
-        json=reopen_payload,
+        json={**reopen_payload, "expected_version": current_loop_version(client, headers, cancelled_loop["id"])},
     )
     changed_reopen = client.post(
         f"/api/v1/open-loops/{cancelled_loop['id']}/reopen",
         headers=headers,
-        json={**reopen_payload, "text": "A different reason for reopening."},
+        json={"expected_version": current_loop_version(client, headers, cancelled_loop["id"]), **reopen_payload, "text": "A different reason for reopening."},
     )
     assert first_reopen.status_code == 200, first_reopen.text
     assert same_reopen.status_code == 200, same_reopen.text
