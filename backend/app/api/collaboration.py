@@ -140,6 +140,13 @@ def _should_fetch_full_lcr_context_pages(context: dict, care_journey_request: bo
     """
     if care_journey_request or context.get("temporal_window"):
         return True
+    retrieval_contract = context.get("retrieval_contract") if isinstance(context.get("retrieval_contract"), dict) else {}
+    lexical_scan = (
+        context.get("history_coverage") == "query_scanned_ranked_subset"
+        or retrieval_contract.get("retrieval_strategy") == "person_scoped_lexical_temporal"
+    )
+    if not lexical_scan:
+        return False
     sources = context.get("sources") if isinstance(context.get("sources"), dict) else {}
     return any(
         name != "companion_conversation"
