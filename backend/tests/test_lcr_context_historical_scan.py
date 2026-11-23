@@ -1133,6 +1133,20 @@ def test_unfiltered_full_history_uses_exact_count_and_ordered_page():
             limit_per_source=10,
             include_all_history=True,
         )
+        next_page = build_lcr_context(
+            db,
+            "person-a",
+            limit_per_source=10,
+            include_all_history=True,
+            source_offsets={"events": 10},
+        )
+        beyond_end = build_lcr_context(
+            db,
+            "person-a",
+            limit_per_source=10,
+            include_all_history=True,
+            source_offsets={"events": 999},
+        )
 
     source = context["sources"]["events"]
     assert source["candidate_count"] == 260
@@ -1142,3 +1156,17 @@ def test_unfiltered_full_history_uses_exact_count_and_ordered_page():
     assert source["selection"] == "full_history_exact_count_ordered_page"
     assert context["retrieval_strategy"] == "person_scoped_exact_count_ordered_history"
     assert source["items"][0]["id"] == "event-000"
+
+    second_page = next_page["sources"]["events"]
+    assert second_page["candidate_count"] == 260
+    assert second_page["returned_count"] == 10
+    assert [item["id"] for item in second_page["items"]] == [
+        f"event-{index:03d}" for index in range(10, 20)
+    ]
+    assert second_page["has_more"] is True
+
+    exhausted = beyond_end["sources"]["events"]
+    assert exhausted["candidate_count"] == 260
+    assert exhausted["returned_count"] == 0
+    assert exhausted["has_more"] is False
+    assert exhausted["candidate_scan_complete"] is True
