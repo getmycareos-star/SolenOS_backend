@@ -1115,7 +1115,8 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         assert "slept poorly last night" in prompt
         assert "Respond to the latest message, not to an imagined onboarding flow" in prompt
         assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in prompt
-        assert "GREETING LENGTH" in prompt
+        assert "RESPONSE LENGTH CONTRACT" in prompt
+        assert "target 30 words; hard maximum 55" in prompt
         assert "RETURNING CARE RECORD" in prompt
         after_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
         assert after_count == before_count
@@ -1449,7 +1450,8 @@ def test_lcr_orientation_recognizes_punctuated_greeting_variants(monkeypatch, gr
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
         response = client.post("/api/lcr/orientation", headers=headers, json={"raw_input": greeting})
         assert response.status_code == 200, response.text
-        assert "GREETING LENGTH" in captured["prompt"]
+        assert "RESPONSE LENGTH CONTRACT" in captured["prompt"]
+        assert "target 25 words; hard maximum 40" in captured["prompt"]
         assert len(response.json()["reply"].split()) <= 40
     finally:
         teardown_db()
