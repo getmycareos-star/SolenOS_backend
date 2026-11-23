@@ -21,6 +21,7 @@ def test_explicit_caregiver_distress_uses_low_capacity_response_budget():
         "I feel very lonely looking after her.",
         "I'm really angry and upset.",
         "I feel so frustrated with all of this.",
+        "I feel hopeless about how much care is needed.",
         "I've been crying all morning.",
         "I just want a break.",
     ):
