@@ -6671,7 +6671,21 @@ def _qualify_reply_for_incomplete_retrieval(
 
 
 def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) -> str:
-    """Prevent a bounded or incomplete LCR projection from being described as absence."""
+    """Prevent incomplete or unsearchable sources from being described as absent."""
+    source_limits = coverage.get("source_limits")
+    source_limit_instruction = ""
+    if isinstance(source_limits, list):
+        limits = []
+        for item in source_limits[:20]:
+            if not isinstance(item, dict):
+                continue
+            source_name = str(item.get("source_type") or "care information")[:80]
+            status = str(item.get("status") or "unknown")[:40]
+            explanation = str(item.get("interpretation_limit") or "").strip()[:400]
+            if explanation:
+                limits.append(f"{source_name} is {status}: {explanation}")
+        if limits:
+            source_limit_instruction = " Source availability limits: " + " ".join(limits) + " "
     retrieval_incomplete = (
         not bool(coverage.get("retrieval_projection_complete"))
         or bool(coverage.get("page_limit_reached"))
@@ -6679,13 +6693,15 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
     )
     if retrieval_incomplete:
         return (
-            "Retrieval is incomplete or the prompt had to omit records. If the supplied records do not answer, "
+            source_limit_instruction
+            + "Retrieval is incomplete or the prompt had to omit records. If the supplied records do not answer, "
             "say you cannot confirm from the records retrieved for this response; do not say the information is "
             "not recorded, absent, or never happened. Make clear that additional saved history may need checking. "
             "Never describe this result as the complete care journey. "
         )
     return (
-        "If the supplied records do not answer, say the information is not present in the retrieved care record; "
+        source_limit_instruction
+        + "If the supplied records do not answer, say the information is not present in the retrieved care record; "
         "do not infer that the event did not occur. "
     )
 
