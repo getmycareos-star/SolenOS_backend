@@ -274,7 +274,7 @@ Purpose: interpret event state transitions without erasing the audit trail.
 # documents are deliberately excluded so a quoted phrase cannot activate a mode.
 ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("lcr_retrieval", ("lcr context", "living care record context", "care history search", "retrieve care", "retrieved lcr", "companion context", "session-authorized records", "retrieved_history", "records are the sole authority", "supplied living care record")),
-    ("care_extraction", ("extract", "extraction", "candidate observation", "daily capture", "add record", "source quote", "daily care qwen support layer", "review-required candidate", "source text")),
+    ("care_extraction", ("extract", "extraction", "candidate observation", "daily capture", "add record", "source quote", "daily care qwen support layer", "review-required candidate", "source text", "proposals are not facts")),
     ("longitudinal_reasoning", ("longitudinal", "change intelligence", "what changed", "delta engine", "trend", "compare historical", "delta object", "event chronology")),
     ("reconciliation", ("contradiction", "uncertainty", "conflicting", "reconcile evidence", "information gap", "sources conflict", "preserve disagreements")),
     ("document_intelligence", ("document", "ocr", "discharge summary", "uploaded file", "source pages", "document text", "document extraction")),
@@ -287,7 +287,7 @@ ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 
 def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
-    """Select at most three task domains from workflow-owned system instructions."""
+    """Select at most four task domains from workflow-owned system instructions."""
     system_text = "\n".join(
         str(message.get("content") or "").casefold()
         for message in messages
@@ -303,7 +303,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
     # workflow prompt did not explicitly say "retrieve".
     if "companion" in selected and "lcr_retrieval" not in selected:
         selected.insert(0, "lcr_retrieval")
-    return tuple(selected[:3])
+    return tuple(selected[:4])
 
 
 def apply_specialized_intelligence(messages: list[dict]) -> list[dict]:
