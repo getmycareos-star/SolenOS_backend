@@ -11,9 +11,9 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
-from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
+from app.models.care_continuity import CareAssertion, CareRecordRelationship, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
@@ -96,6 +96,106 @@ def test_companion_does_not_keep_unenriched_duplicate_of_correction_aware_event(
     assert payload["event_id"] == "lineage-unavailable-event"
     assert payload["correction_lineage_status"] == "failed"
     assert payload["information_status"] == "event_currentness_unknown"
+
+
+def test_direct_care_history_recall_preserves_correction_lineage_and_never_answers_from_old_wording():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="history-lineage-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="history-lineage-caregiver", name="Family caregiver",
+            relationship="family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.flush()
+        original = CareEvent(
+            id="history-lineage-corrected-event", person_id=person.id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2025, 2, 3, 9, 0, tzinfo=timezone.utc),
+            title="Sleep report",
+            description="Caregiver reported that Mum slept poorly.",
+            evidence_ids=[], created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_reported",
+        )
+        pending = CareEvent(
+            id="history-lineage-pending-event", person_id=person.id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2025, 2, 4, 9, 0, tzinfo=timezone.utc),
+            title="Sleep report awaiting correction",
+            description="Caregiver reported that Mum slept through the night.",
+            evidence_ids=[], created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_reported",
+        )
+        current = CareEvent(
+            id="history-lineage-current-event", person_id=person.id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2025, 2, 5, 9, 0, tzinfo=timezone.utc),
+            title="Current sleep report",
+            description="Caregiver reported that Mum slept well.",
+            evidence_ids=[], created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([original, pending, current])
+        db.flush()
+        applied = Correction(
+            id="history-lineage-applied-correction", person_id=person.id,
+            target_type="care_event", target_id=original.id,
+            original_text="Mum slept poorly.",
+            corrected_text="Caregiver did not observe Mum sleeping poorly.",
+            reason="The earlier wording overstated what was observed.",
+            caregiver_id=caregiver.id,
+            processing_status="completed",
+            processing_attempts=1,
+        )
+        waiting = Correction(
+            id="history-lineage-pending-correction", person_id=person.id,
+            target_type="care_event", target_id=pending.id,
+            original_text="Mum slept through the night.",
+            corrected_text="Caregiver is unsure whether Mum slept through the night.",
+            reason="The caregiver is checking the overnight notes.",
+            caregiver_id=caregiver.id,
+            processing_status="pending",
+            processing_attempts=0,
+        )
+        db.add_all([applied, waiting])
+        db.add(CareRecordRelationship(
+            id="history-lineage-applied-link", person_id=person.id,
+            source_type="correction", source_id=applied.id,
+            relationship_type="corrects", target_type="care_event",
+            target_id=original.id,
+            provenance="Caregiver correction; original report retained.",
+            created_by_caregiver_id=caregiver.id,
+        ))
+        db.commit()
+
+        context = collaboration._care_history_recall_context_lines(
+            db, person.id, "What has the caregiver recorded about sleep?"
+        )
+        records = {
+            json.loads(line.partition(":")[2].strip())["event_id"]:
+            json.loads(line.partition(":")[2].strip())["record"]
+            for line in context["event_lines"]
+        }
+        assert records[original.id]["information_status"] == "historical_event"
+        assert records[original.id]["corrections"][0]["corrected_text"] == (
+            "Caregiver did not observe Mum sleeping poorly."
+        )
+        assert records[pending.id]["information_status"] == "event_correction_pending"
+        assert records[current.id]["information_status"] == "caregiver_reported"
+
+        answer = collaboration._care_history_extractive_answer(
+            "What has the caregiver recorded about sleep?", context["event_lines"]
+        )
+        assert answer is not None
+        assert "slept well" in answer.casefold()
+        assert "slept poorly" not in answer.casefold()
+        assert "slept through the night" not in answer.casefold()
+    finally:
+        db.close()
+        teardown()
+
+
 
 def test_companion_history_projection_ids_match_direct_recall_ids():
     event_id = "event-sleep-1"
