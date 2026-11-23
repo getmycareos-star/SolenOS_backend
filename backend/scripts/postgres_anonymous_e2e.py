@@ -836,10 +836,20 @@ def main():
                 body={**payload, "idempotency_key": f"postgres-open-loop-terminal-race-{label}-001"},
             )
             require(status == 200, f"Terminal race preparation {label} failed: {status}: {result}")
+        status, terminal_race_loop = request(
+            "GET", f"/api/v1/open-loops/{conflict_loop_id}", token=token_a,
+        )
+        require(
+            status == 200 and terminal_race_loop.get("loop", {}).get("version") is not None,
+            f"Terminal race loop version could not be refreshed before competing transitions: {status}: {terminal_race_loop}",
+        )
+        terminal_race_version = terminal_race_loop["loop"]["version"]
         terminal_actions = [
-            ("close", {"text": "Closure won if accepted", "evidence": workflow_source,
+            ("close", {"expected_version": terminal_race_version,
+                       "text": "Closure won if accepted", "evidence": workflow_source,
                        "idempotency_key": "postgres-open-loop-terminal-race-close-001"}),
-            ("cancel", {"text": "Cancellation won if accepted", "evidence": workflow_source,
+            ("cancel", {"expected_version": terminal_race_version,
+                        "text": "Cancellation won if accepted", "evidence": workflow_source,
                         "idempotency_key": "postgres-open-loop-terminal-race-cancel-001"}),
         ]
         with ThreadPoolExecutor(max_workers=2) as pool:
