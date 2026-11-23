@@ -50,3 +50,25 @@ def test_downgrade_does_not_claim_a_preexisting_schema_index():
     assert not migration._is_migration_owned_index(
         table, column, preexisting_name
     )
+
+
+
+def test_partial_and_unique_indexes_do_not_satisfy_full_lookup_coverage():
+    migration = _migration()
+    full_index = {"column_names": ["person_id"], "unique": False}
+    partial_index = {
+        "column_names": ["person_id"],
+        "unique": False,
+        "dialect_options": {"postgresql_where": "deleted_at IS NULL"},
+    }
+    filtered_index = {
+        "column_names": ["person_id"],
+        "unique": False,
+        "filter_definition": "is_active = 1",
+    }
+    unique_index = {"column_names": ["person_id"], "unique": True}
+
+    assert migration._is_usable_lookup_index(full_index, "person_id")
+    assert not migration._is_usable_lookup_index(partial_index, "person_id")
+    assert not migration._is_usable_lookup_index(filtered_index, "person_id")
+    assert not migration._is_usable_lookup_index(unique_index, "person_id")
