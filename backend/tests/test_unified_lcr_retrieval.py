@@ -1170,6 +1170,17 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
         engine.dispose()
 
 
+def test_withdrawn_or_superseded_care_facts_remain_historical():
+    for item in (
+        {"superseded_by_fact_id": "replacement-fact", "epistemic_status": "verified"},
+        {"superseded_by_fact_id": None, "epistemic_status": "withdrawn"},
+        {"superseded_by_fact_id": None, "epistemic_status": "superseded"},
+    ):
+        status, explanation = _information_status("facts", item)
+        assert status == "historical_fact"
+        assert "do not present it as current" in explanation
+
+
 def test_invalidated_or_superseded_care_events_remain_historical():
     for event_status in ("invalidated", "superseded", "withdrawn", "deleted"):
         status, explanation = _information_status("events", {"status": event_status})
