@@ -1631,3 +1631,16 @@ def test_written_day_week_and_month_ranges_are_resolved_as_calendar_windows():
     assert ten_days is not None and ten_days["start"] == "2026-11-06T00:00:00+00:00"
     assert four_weeks is not None and four_weeks["start"] == "2026-10-19T00:00:00+00:00"
     assert two_months is not None and two_months["start"] == "2026-09-15T00:00:00+00:00"
+
+
+def test_oversized_numeric_ranges_fail_closed_instead_of_falling_back_to_recent_history():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="between one and twenty years"):
+        _temporal_window("Show the last 1000 years", now=now)
+    with pytest.raises(ValueError, match="between one day and twenty years"):
+        _temporal_window("Show the last 10000 days", now=now)
+    with pytest.raises(ValueError, match="between one week and twenty years"):
+        _temporal_window("Show the last 10000 weeks", now=now)
+    with pytest.raises(ValueError, match="between one month and twenty years"):
+        _temporal_window("Show the last 1000 months", now=now)
