@@ -1082,9 +1082,9 @@ def build_lcr_context(
         ranked_limit = limit if exact_ordered_history else source_offset + limit
         if exact_ordered_history:
             count_statement = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
-            candidate_count = int(db.execute(count_statement).scalar_one() or 0)
             scan_statement = statement.offset(source_offset).limit(limit + 1)
         else:
+            count_statement = None
             scan_statement = statement if query_scan else statement.limit(limit + 1)
         source_query_failed = False
         expanded_only = [term for term in terms if term not in direct_terms]
@@ -1094,6 +1094,8 @@ def build_lcr_context(
             # source-specific column, or transient query failure must not turn
             # every other successfully retrieved care category into a failure.
             with db.begin_nested():
+                if count_statement is not None:
+                    candidate_count = int(db.execute(count_statement).scalar_one() or 0)
                 result = db.execute(
                     scan_statement.execution_options(stream_results=True)
                 ).mappings().yield_per(500)
