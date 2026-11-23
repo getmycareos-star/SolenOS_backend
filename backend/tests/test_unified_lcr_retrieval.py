@@ -2115,3 +2115,21 @@ def test_curated_sleep_paraphrase_expansion_retrieves_awake_wording():
     assert _retrieval_score(paraphrased_record, "sleep", direct, expanded) > _retrieval_score(
         unrelated_record, "sleep", direct, expanded
     )
+
+
+def test_retrieval_score_indexes_nested_descriptive_context_but_not_nested_ids():
+    direct = ["overnight", "awake"]
+    expanded = ["overnight", "awake", "sleep"]
+    contextual = {
+        "id": "record-1",
+        "context": {
+            "caregiver_observation": "Mum was awake repeatedly overnight.",
+            "source_event_id": "awake-overnight",
+        },
+    }
+    identifier_only = {
+        "id": "awake-overnight",
+        "context": {"source_event_id": "awake-overnight"},
+    }
+    assert _retrieval_score(contextual, "overnight awake", direct, expanded) > 0
+    assert _retrieval_score(identifier_only, "overnight awake", direct, expanded) == 0
