@@ -785,6 +785,27 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         _close_postgres_conversation_db(engine, connection, schema)
 
 
+def test_legacy_document_page_gaps_override_available_aggregate_status():
+    from app.services.lcr_context import _information_status
+
+    status, explanation = _information_status(
+        "document_extractions",
+        {
+            "extraction_status": "available",
+            "extraction_metadata": {
+                "page_count": 4,
+                "processed_page_numbers": [1, 2, 4],
+                "unprocessed_page_numbers": [3],
+                "unreadable_page_numbers": [],
+            },
+        },
+    )
+
+    assert status == "document_extraction_partial"
+    assert "Pages not yet processed: 3." in explanation
+    assert "do not treat this extraction as the complete document" in explanation
+
+
 def test_temporal_retrieval_rejects_invalid_and_reversed_explicit_dates():
     now = datetime(2026, 11, 6, 12, tzinfo=UTC)
     with pytest.raises(ValueError, match="Invalid calendar date"):
