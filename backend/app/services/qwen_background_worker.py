@@ -355,8 +355,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         if (
             current is None
             or current.status != "processing"
-            or current.locked_at != lease_state.get("locked_at")
-            or lease_state.get("lost")
+            or not _qwen_job_lease_matches(current, lease_state)
         ):
             db.rollback()
             return True
@@ -392,9 +391,6 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         source_event_id=event_id,
         source_evidence_id=evidence_id,
     )
-    if lease_state.get("lost"):
-        db.rollback()
-        return True
     current = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.id == job_id,
         QwenBackgroundJob.person_id == person_id,
@@ -403,7 +399,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
     if (
         current is None
         or current.status != "processing"
-        or current.locked_at != lease_state.get("locked_at")
+        or not _qwen_job_lease_matches(current, lease_state)
     ):
         db.rollback()
         return True
@@ -891,8 +887,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_st
     if (
         current_job is None
         or current_job.status != "processing"
-        or current_job.locked_at != lease_state.get("locked_at")
-        or lease_state.get("lost")
+        or not _qwen_job_lease_matches(current_job, lease_state)
     ):
         db.rollback()
         return True
@@ -1169,6 +1164,13 @@ def _qwen_job_lease_matches(job, lease_state: dict) -> bool:
     with lock:
         return not lease_state.get("lost") and job.locked_at == lease_state.get("locked_at")
 
+def _qwen_job_lease_lost(lease_state: dict) -> bool:
+    lock = lease_state.get("_lock")
+    if lock is None:
+        return bool(lease_state.get("lost"))
+    with lock:
+        return bool(lease_state.get("lost"))
+
 
 def _refresh_qwen_job_lease_once(
     job_id: str,
@@ -1312,13 +1314,13 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
 
         if job.workflow == "daily_capture_extraction":
             completed = await _process_daily_capture_extraction(db, job, lease_state)
-            if lease_state and lease_state.get("lost"):
+            if lease_state and _qwen_job_lease_lost(lease_state):
                 db.rollback()
                 return True
             return completed
         if job.workflow == "daily_capture_delta_reconciliation":
             completed = await _process_daily_capture_delta_reconciliation(db, job, lease_state)
-            if lease_state and lease_state.get("lost"):
+            if lease_state and _qwen_job_lease_lost(lease_state):
                 db.rollback()
                 return True
             return completed
@@ -1341,8 +1343,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 if (
                     current_job is None
                     or current_job.status == "cancelled"
-                    or current_job.locked_at != lease_state.get("locked_at")
-                    or lease_state.get("lost")
+                    or not _qwen_job_lease_matches(current_job, lease_state)
                 ):
                     db.rollback()
                     return True
@@ -1352,7 +1353,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     job.person_id,
                     job.caregiver_id,
                 )
-                if lease_state and lease_state.get("lost"):
+                if lease_state and _qwen_job_lease_lost(lease_state):
                     db.rollback()
                     return True
                 # A caregiver may delete the source while OCR/model work is in
@@ -1545,7 +1546,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         # lease renewal or share a SQLAlchemy Session across threads.
         result = await asyncio.to_thread(_run_qwen_support_assist, payload, fake_request)
         # Do not persist an answer from a worker whose exact lease was reclaimed.
-        if lease_state and lease_state.get("lost"):
+        if lease_state and _qwen_job_lease_lost(lease_state):
             db.rollback()
             return True
         # The source may have been deleted while inference was running. A
@@ -1556,8 +1557,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         if (
             current_job is None
             or current_job.status == "cancelled"
-            or current_job.locked_at != lease_state.get("locked_at")
-            or lease_state.get("lost")
+            or not _qwen_job_lease_matches(current_job, lease_state)
         ):
             db.rollback()
             return True
