@@ -2487,6 +2487,22 @@ def test_caregiver_interaction_guidance_reduces_work_for_overwhelmed_caregiver()
     assert "Prefer present-tense wording" in guidance
 
 
+def test_caregiver_pause_request_is_respected_without_follow_up_questions():
+    guidance = collaboration._caregiver_interaction_guidance(
+        "I can't continue right now. Please stop asking me questions."
+    )
+    assert "LOW-CAPACITY RESPONSE" in guidance
+    assert "PAUSE REQUEST" in guidance
+    assert "Do not ask another question" in guidance
+    assert "Immediate danger still takes precedence" in guidance
+
+    pause_only = collaboration._caregiver_interaction_guidance(
+        "I don't want to talk about this anymore."
+    )
+    assert "PAUSE REQUEST" in pause_only
+    assert "Do not ask another question" in pause_only
+
+
 def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflow():
     guidance = collaboration._caregiver_interaction_guidance(
         "I'm angry and upset. I just want a break."
