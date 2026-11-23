@@ -20,6 +20,7 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.services.lcr_context import _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
+from app.api.collaboration import _lcr_retrieval_incomplete_notice
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -2484,3 +2485,29 @@ def test_corrected_care_event_remains_historical_and_links_original_wording():
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_companion_discloses_incomplete_lcr_retrieval_without_claiming_empty_history():
+    complete = {
+        "retrieval_scan_complete": True,
+        "missing_required_sources": [],
+        "page_limit_reached": False,
+        "sources": {"events": {"status": "available"}},
+    }
+    assert _lcr_retrieval_incomplete_notice(complete) is None
+
+    incomplete = {
+        "retrieval_scan_complete": False,
+        "missing_required_sources": [],
+        "page_limit_reached": False,
+        "sources": {"events": {"status": "partial"}},
+    }
+    notice = _lcr_retrieval_incomplete_notice(incomplete)
+    assert notice is not None
+    assert "Missing details should not be treated as proof" in notice
+    assert "complete history" in notice
+
+    truncated_notice = _lcr_retrieval_incomplete_notice(
+        complete, prompt_context_truncated=True
+    )
+    assert truncated_notice is not None
