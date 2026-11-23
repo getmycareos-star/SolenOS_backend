@@ -7451,6 +7451,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 lcr_context_coverage["page_limit_reached"] = True
 
         source_lcr_context_ids = _context_record_ids(shared_lcr_lines, "source_id")
+        # Events selected by the shared temporal LCR projection may be older
+        # than the legacy recent-events window. Preserve their event provenance
+        # in the response receipt instead of returning an empty event list for
+        # records that were actually supplied to Companion.
+        shared_lcr_event_ids = []
+        for shared_line in shared_lcr_lines:
+            brace = (shared_line or "").find("{")
+            if brace < 0:
+                continue
+            try:
+                shared_payload = json.loads(shared_line[brace:])
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(shared_payload, dict)
+                and shared_payload.get("source_type") == "events"
+                and shared_payload.get("source_id")
+            ):
+                shared_lcr_event_ids.append(str(shared_payload["source_id"]))
         temporal_event_ids = []
         for temporal_line in temporal_event_lines:
             brace = (temporal_line or "").find("{")
@@ -7464,7 +7483,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if temporal_source_id:
                 temporal_event_ids.append(str(temporal_source_id))
         source_event_ids = list(dict.fromkeys([
-            *_context_record_ids(event_context, "event_id"), *temporal_event_ids,
+            *_context_record_ids(event_context, "event_id"),
+            *shared_lcr_event_ids,
+            *temporal_event_ids,
         ]))
         source_assertion_ids = _context_record_ids(assertion_context, "assertion_id")
         source_appointment_ids = _context_record_ids(appointment_context, "appointment_id")
