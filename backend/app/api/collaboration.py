@@ -80,7 +80,7 @@ from app.services.document_binary_storage import (
 
 
 from app.services.lcr_context import _expanded_search_terms
-from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_greeting_message, resolve_response_length_policy, resolve_workflow_response_length_policy
+from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -6595,6 +6595,23 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     return " ".join(guidance)
 
 
+def _emergency_response_for_message(user_text: str) -> tuple[str, str]:
+    """Return immediate, plain-language guidance for deterministic safety routing."""
+    if is_self_harm_safety_message(user_text):
+        return (
+            "I'm concerned about immediate safety. If you or someone else may act on these thoughts, call 911 now "
+            "or go to the nearest emergency department. In the U.S., call or text 988 for immediate suicide and "
+            "crisis support. If you are outside the U.S., contact your local emergency or crisis service. If possible, "
+            "stay with a trusted person while getting help. I can't provide emergency help through chat.",
+            "Possible self-harm, suicide, or immediate harm risk was detected; human support is needed now.",
+        )
+    return (
+        "This may be an emergency. Contact local emergency services or seek urgent medical help now. "
+        "I cannot assess an emergency through chat.",
+        "Possible emergency language detected; urgent human assessment is needed.",
+    )
+
+
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
@@ -6927,12 +6944,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if emergency:
         # A fixed emergency instruction is a safety control, not a conversational
         # response mapping. Do not wait for inference when the message signals danger.
-        reply = (
-            "This may be an emergency. Contact local emergency services or seek urgent "
-            "medical help now. I cannot assess an emergency through chat."
-        )
+        reply, safety_note = _emergency_response_for_message(user_text)
         verdict = "blocked"
-        safety_note = "Possible emergency language detected; urgent human assessment is needed."
         ai_generated = False
     else:
         # Retrieve a bounded but broader care history. All queries are server-scoped
