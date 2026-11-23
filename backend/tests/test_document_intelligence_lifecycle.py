@@ -419,6 +419,16 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         )
         assert corrected_again.status_code == 200, corrected_again.text
         assert corrected_again.json()["idempotent_replay"] is True
+
+        stale_pre_correction_review = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json=review_payload(
+                analysis_id, 1, "accept",
+                expected_review_status="pending_review",
+            ),
+        )
+        assert stale_pre_correction_review.status_code == 409, stale_pre_correction_review.text
         db = Session()
         try:
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 0
