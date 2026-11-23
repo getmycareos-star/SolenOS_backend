@@ -2357,3 +2357,61 @@ def test_postgres_source_query_failure_is_distinct_from_an_empty_source(monkeypa
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
 
+
+
+def test_document_extraction_temporal_search_uses_linked_source_date():
+    """A historical document is dated by its source evidence, not its later OCR job."""
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        with Session(bind=connection) as db:
+            person = Person(id="document-date-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="document-date-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            historical_event_at = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
+            uploaded_at = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+            evidence = Evidence(
+                id="historical-document-evidence", person_id=person.id,
+                type="document", source_text="Discharge summary from March 4, 2025.",
+                uploaded_by_caregiver_id=caregiver.id,
+                occurred_at=historical_event_at,
+                uploaded_at=uploaded_at,
+                time_provenance="document_date",
+            )
+            db.add(evidence)
+            db.flush()
+            extraction = CaptureAnalysis(
+                id="historical-document-extraction", person_id=person.id,
+                caregiver_id=caregiver.id, source_evidence_id=evidence.id,
+                source_text="Discharge summary from March 4, 2025.",
+                extraction_status="available",
+                candidates={"kind": "document_extraction_v1"},
+                created_at=uploaded_at,
+            )
+            db.add(extraction)
+            db.commit()
+
+            historical = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id,
+                temporal_window={
+                    "start": "2025-03-04T00:00:00+00:00",
+                    "end": "2025-03-04T23:59:59.999999+00:00",
+                    "timezone": "UTC",
+                    "basis": "explicit_user_temporal_expression",
+                },
+                limit_per_source=20,
+            )
+
+        documents = historical["sources"]["document_extractions"]
+        assert [row["id"] for row in documents["items"]] == [extraction.id]
+        assert documents["candidate_scan_complete"] is True
+        assert documents["status"] == "available"
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
