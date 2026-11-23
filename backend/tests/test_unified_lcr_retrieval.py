@@ -1965,8 +1965,3 @@ def test_retrieval_score_does_not_count_identifiers_or_nested_candidate_payloads
         "candidates": [{"description": "sleep medication changed"}],
     }
     assert _retrieval_score(identifier_only, query, direct, expanded) == 0
-
-
-def test_retrieval_strategy_names_lexical_method_without_claiming_semantic_embeddings():
-    # The strategy contract must describe the actual deterministic retrieval method.
-    assert "person_scoped_lexical_temporal" != "hybrid_lexical_semantic_temporal"
