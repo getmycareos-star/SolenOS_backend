@@ -2347,6 +2347,33 @@ def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
     )
 
 
+def test_grief_self_blame_and_positive_moments_have_distinct_response_guidance():
+    grief = collaboration._caregiver_interaction_guidance("I miss her so much.")
+    assert "GRIEF RESPONSE" in grief
+    assert "do not assume the person has died" in grief
+    assert "offer practical help only if they ask" in grief
+
+    self_blame = collaboration._caregiver_interaction_guidance("I lost my temper today. I should be doing more.")
+    assert "SELF-BLAME RESPONSE" in self_blame
+    assert "Do not judge, moralize" in self_blame
+    assert "keep one difficult moment separate" in self_blame
+
+    positive = collaboration._caregiver_interaction_guidance("What a relief. We had a good day.")
+    assert "POSITIVE MOMENT RESPONSE" in positive
+    assert "Do not reframe it as a crisis" in positive
+
+    long_grief_reply = (
+        "I hear how much you miss her. "
+        "Let's make a plan for the next week and list every task. "
+        "We should also organize appointments, medication questions, and daily routines."
+    )
+    assert collaboration._caregiver_response_needs_revision("I miss her so much.", long_grief_reply)
+    assert not collaboration._caregiver_response_needs_revision(
+        "What a relief. We had a good day.",
+        "I'm glad today brought some relief. That good moment matters.",
+    )
+
+
 def test_caregiver_interaction_guidance_prioritizes_frustration_repair_over_defense():
     guidance = collaboration._caregiver_interaction_guidance(
         "You keep asking me the same questions. I've already told you this."
