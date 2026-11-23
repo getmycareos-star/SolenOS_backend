@@ -16,7 +16,7 @@ def assertion_information_status(
     # Terminal review actions override the epistemic label for currentness.
     # A previously verified or inferred assertion that was later withdrawn,
     # rejected, or superseded remains in history but must not read as current.
-    if lifecycle in {"rejected", "superseded", "withdrawn"}:
+    if lifecycle in {"rejected", "superseded", "retracted", "withdrawn"}:
         return (
             "historical_assertion",
             "This assertion is no longer current; retain it only as part of the record history.",
@@ -52,7 +52,7 @@ def assertion_information_status(
             "caregiver_reviewed_report",
             "A caregiver reviewed this report; review does not establish independent or clinical verification.",
         )
-    if lifecycle in {"rejected", "superseded", "withdrawn"}:
+    if lifecycle in {"rejected", "superseded", "retracted", "withdrawn"}:
         return (
             "historical_assertion",
             "This assertion is no longer current; retain it only as part of the record history.",
