@@ -116,9 +116,10 @@ def test_postgres_query_does_not_return_unsearchable_source_rows():
                 {"id": "unrelated-2", "person_id": "person-a", "private_payload": "another unrelated detail"},
             ])
             statement = select(table.c.id).where(table.c.person_id == "person-a")
-            statement = _apply_text_search_filter(
+            statement, searchable = _apply_text_search_filter(
                 statement, table, "legacy_source_without_search_fields", ["medication"]
             )
+            assert searchable is False
             assert connection.execute(statement).scalars().all() == []
     finally:
         metadata.drop_all(engine)
