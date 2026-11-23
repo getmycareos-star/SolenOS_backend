@@ -1204,6 +1204,26 @@ def test_withdrawn_or_superseded_care_facts_remain_historical():
         assert "do not present it as current" in explanation
 
 
+def test_corrections_remain_caregiver_attributed_and_not_independently_verified():
+    for processing_status, expected in (
+        ("completed", "caregiver_correction_applied"),
+        ("pending", "caregiver_correction_pending"),
+        ("failed", "caregiver_correction_processing_failed"),
+    ):
+        status, explanation = _information_status(
+            "corrections",
+            {
+                "processing_status": processing_status,
+                "original_text": "Medication was given.",
+                "corrected_text": "Caregiver did not witness it.",
+                "caregiver_id": "caregiver-1",
+            },
+        )
+        assert status == expected
+        assert "caregiver-submitted correction" in explanation
+        assert "not independent verification" in explanation
+
+
 def test_invalidated_or_superseded_care_events_remain_historical():
     for event_status in ("invalidated", "superseded", "withdrawn", "deleted"):
         status, explanation = _information_status("events", {"status": event_status})
