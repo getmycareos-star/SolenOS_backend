@@ -1010,11 +1010,11 @@ def build_lcr_context(
                 )
         if temporal_window:
             temporal_fields = {
-                "events": ("occurred_at", "recorded_at"),
-                "evidence": ("occurred_at", "uploaded_at"),
-                "evidence_observations": ("occurred_at", "observed_at", "recorded_at"),
-                "facts": ("effective_at", "recorded_at"),
-                "assertions": ("observed_at", "recorded_at"),
+                "events": ("occurred_at", "recorded_at", "created_at"),
+                "evidence": ("occurred_at", "reported_at", "collected_at", "uploaded_at", "ingested_at", "created_at"),
+                "evidence_observations": ("occurred_at", "observed_at", "reported_at", "recorded_at", "created_at"),
+                "facts": ("effective_at", "recorded_at", "created_at"),
+                "assertions": ("observed_at", "recorded_at", "created_at"),
                 "document_extractions": ("created_at",),
                 "evidence_reviews": ("created_at",),
                 "claim_assessments": ("created_at",),
