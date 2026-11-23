@@ -40,10 +40,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Keep only the newest main-branch validation queued; obsolete revisions
-  # must not starve verification of the current source.
-  group: backend-tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Every test run uses disposable databases/containers. Cancel obsolete
+  # revisions so current-main regression evidence is not starved by stale runs.
+  group: backend-tests-current-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
