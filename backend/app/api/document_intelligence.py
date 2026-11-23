@@ -317,7 +317,7 @@ def _existing_assertion_for_exact_document_duplicate(
     active_duplicate_assertions = [
         row for row in existing
         if duplicate_group_ids.intersection(str(value) for value in (row.evidence_ids or []))
-        and row.assertion_status not in {"rejected", "superseded", "withdrawn"}
+        and row.assertion_status not in {"rejected", "superseded", "retracted", "withdrawn"}
     ]
     assertion_row = next(
         (
@@ -1571,7 +1571,7 @@ def review_document_candidate(
                     ).first()
             active_assertion = (
                 accepted_assertion is not None
-                and accepted_assertion.assertion_status not in {"rejected", "superseded", "withdrawn"}
+                and accepted_assertion.assertion_status not in {"rejected", "superseded", "retracted", "withdrawn"}
             )
             replay_changed = False
             if active_assertion:
