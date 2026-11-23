@@ -1930,7 +1930,7 @@ async def post_situation(
         offer_return_invite=0,
         db=db,
     )
-    response_payload = result.dict()
+    response_payload = result.model_dump()
     response_payload.update({
         "care_key": hydration["care_key"],
         "care_recipient_id": hydration["care_recipient_id"],
