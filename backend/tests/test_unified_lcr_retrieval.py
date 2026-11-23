@@ -971,8 +971,8 @@ def test_long_relative_windows_are_not_silently_clamped_to_one_year():
     weeks = _temporal_window("What changed in the last 80 weeks?", now=now)
 
     assert months is not None and months["start"] == "2025-05-15T00:00:00+00:00"
-    assert days is not None and days["start"] == "2025-07-04T00:00:00+00:00"
-    assert weeks is not None and weeks["start"] == "2025-05-08T00:00:00+00:00"
+    assert days is not None and days["start"] == "2025-07-03T00:00:00+00:00"
+    assert weeks is not None and weeks["start"] == "2025-05-04T00:00:00+00:00"
 
 
 def test_unsupported_long_relative_windows_fail_instead_of_silently_narrowing():
