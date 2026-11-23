@@ -26,6 +26,8 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
     ("postgresql://", "postgresql+psycopg2://", "postgresql+psycopg://")
 )
+if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not POSTGRES_DATABASE:
+    raise RuntimeError("Live Daily Care Qwen acceptance requires PostgreSQL; refusing a skipped non-PostgreSQL run.")
 pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
     reason="requires the dedicated live-Qwen workflow and migrated PostgreSQL",
