@@ -383,6 +383,15 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "order": ["updated_at", "created_at"],
     },
+    "appointment_workspace_revisions": {
+        "table": "appointment_workspace_revisions",
+        "required": False,
+        "fields": [
+            "id", "record_id", "revision_number", "payload", "change_reason",
+            "changed_by_caregiver_id", "changed_at",
+        ],
+        "order": ["changed_at"],
+    },
 }
 
 SEARCH_FIELDS = {
@@ -421,6 +430,7 @@ SEARCH_FIELDS = {
         "preparation_notes", "travel_notes", "time_provenance", "location_provenance",
     ],
     "appointment_workspaces": ["status", "last_revision_reason", "payload"],
+    "appointment_workspace_revisions": ["change_reason", "payload"],
 }
 
 def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
@@ -439,7 +449,7 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
             searchable_column = cast(column, String)
         elif isinstance(column.type, String):
             searchable_column = column
-        elif source_name == "appointment_workspaces" and name == "payload":
+        elif source_name in {"appointment_workspaces", "appointment_workspace_revisions"} and name == "payload":
             searchable_column = cast(column, String)
         else:
             continue
@@ -618,6 +628,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         return (
             "appointment_workspace_caregiver_notes",
             "This is a caregiver-authored appointment workspace, saved separately from the Living Care Record. It may contain caregiver reports and notes about what a healthcare professional said; those statements are not independently verified. Preserve the saved status, version, and the payload's epistemic boundary.",
+        )
+    if source_name == "appointment_workspace_revisions":
+        return (
+            "appointment_workspace_revision_history",
+            "This is a prior saved version of caregiver-authored appointment notes. It is historical context, not the current appointment plan or a verified care fact. Compare it with the latest workspace version before describing what is current.",
         )
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
@@ -1010,7 +1025,7 @@ def build_lcr_context(
                     item = {key: _safe_value(value, key) for key, value in dict(row).items()}
                     if source_name == "document_extractions":
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None))
-                    if source_name == "appointment_workspaces":
+                    if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
                         item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
                     information_status, interpretation_limit = _information_status(source_name, item)
                     item["information_status"] = information_status
