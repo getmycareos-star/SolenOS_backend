@@ -607,6 +607,17 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "document_extraction_failed",
                 "The original document is saved, but text extraction failed. No care details can be established from this extraction.",
             )
+        interpretation_status = str(metadata.get("interpretation_status") or "").casefold()
+        if interpretation_status == "partial":
+            return (
+                "document_interpretation_partial",
+                "The document text is available, but automated review did not finish across the full document. Treat any suggested details as incomplete and unreviewed.",
+            )
+        if interpretation_status == "failed":
+            return (
+                "document_interpretation_failed",
+                "The document text is available, but automated interpretation failed. The original text remains source material and no AI interpretation should be treated as established.",
+            )
         return (
             "document_extracted_unreviewed",
             "Extracted document text is source material, not a verified care fact or accepted LCR assertion.",
