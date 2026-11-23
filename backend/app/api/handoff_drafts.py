@@ -28,6 +28,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
+from app.services.response_length_policy import resolve_response_length_policy, count_response_words
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
@@ -2126,6 +2127,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         for item in considered
     ]
     appointment_mode = purpose == "professional_appointment"
+    response_length_policy = resolve_response_length_policy("appointment preparation" if appointment_mode else "care handoff")
     audience_guidance = (
         "Write for a healthcare professional: concise, dated, neutral, source-attributed, and explicit about uncertainty."
         if audience == "professional" else
@@ -2140,7 +2142,9 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         {"role": "system", "content": (
             "You draft a care briefing using ONLY the supplied Living Care Record (LCR) source records. "
             "The LCR records supplied in this request are the sole authority. Do not use model memory, "
-            "general medical knowledge, assumptions, or prior conversation. " + audience_guidance + " " + purpose_guidance + " "
+            "general medical knowledge, assumptions, or prior conversation. "
+            + f"Response length target: {response_length_policy.target_words} words; hard maximum: {response_length_policy.max_words}. Preserve uncertainty and all material source distinctions. "
+            + audience_guidance + " " + purpose_guidance + " "
             "Return JSON only with this exact shape: {\"items\":[{\"section\":string,\"source_ref\":string,"
             "\"summary\":string,\"supporting_quote\":string}]}. Select at most 6 relevant supplied records. "
             "Each summary must be a cautious paraphrase of its supporting_quote only. The supporting_quote "
@@ -2186,12 +2190,32 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             messages,
             timeout=150,
             response_format=response_schema,
-            options={"temperature": 0, "num_predict": 512},
+            options={"temperature": 0, "num_predict": response_length_policy.token_budget},
         )
         parsed = json.loads(raw)
         items = parsed.get("items") if isinstance(parsed, dict) else None
         if not isinstance(items, list):
             raise ValueError("invalid_items")
+        total_summary_words = sum(count_response_words(item.get("summary") or "") for item in items if isinstance(item, dict))
+        if response_length_policy.max_words is not None and total_summary_words > response_length_policy.max_words:
+            repair_messages = [
+                *messages,
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": f"Revise the JSON answer. Keep the total word count across all summary fields at or below {response_length_policy.max_words} words (target {response_length_policy.target_words}). Preserve every supported distinction, uncertainty, and exact supporting quote. Do not remove material facts. Return the same JSON schema only."},
+            ]
+            raw = qwen_chat(
+                repair_messages,
+                timeout=150,
+                response_format=response_schema,
+                options={"temperature": 0, "num_predict": response_length_policy.token_budget},
+            )
+            parsed = json.loads(raw)
+            items = parsed.get("items") if isinstance(parsed, dict) else None
+            if not isinstance(items, list):
+                raise ValueError("invalid_repaired_items")
+            total_summary_words = sum(count_response_words(item.get("summary") or "") for item in items if isinstance(item, dict))
+            if total_summary_words > response_length_policy.max_words:
+                raise ValueError("response_length_exceeded_after_repair")
 
         source_by_ref = {item["source_ref"]: item for item in considered}
         validated = []
