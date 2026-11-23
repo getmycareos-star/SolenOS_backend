@@ -828,6 +828,37 @@ def test_temporal_retrieval_rejects_invalid_and_reversed_explicit_dates():
         )
 
 
+def test_temporal_retrieval_resolves_named_month_and_day_dates():
+    now = datetime(2026, 11, 6, 12, tzinfo=UTC)
+
+    month = _temporal_window("What happened in March 2025?", now=now)
+    assert month is not None
+    assert month["start"] == "2025-03-01T00:00:00+00:00"
+    assert month["end"].startswith("2025-03-31T23:59:59")
+
+    abbreviated_month = _temporal_window("Show me care from Sept 2024", now=now)
+    assert abbreviated_month is not None
+    assert abbreviated_month["start"] == "2024-09-01T00:00:00+00:00"
+    assert abbreviated_month["end"].startswith("2024-09-30T23:59:59")
+
+    full_date = _temporal_window("What happened on March 4th, 2025?", now=now)
+    assert full_date is not None
+    assert full_date["start"] == "2025-03-04T00:00:00+00:00"
+    assert full_date["end"].startswith("2025-03-04T23:59:59")
+
+    reversed_date = _temporal_window("What happened on 4 March 2025?", now=now)
+    assert reversed_date is not None
+    assert reversed_date["start"] == "2025-03-04T00:00:00+00:00"
+
+
+def test_temporal_retrieval_rejects_invalid_named_month_dates():
+    with pytest.raises(ValueError, match="Invalid calendar date"):
+        _temporal_window(
+            "What happened on February 30, 2025?",
+            now=datetime(2026, 11, 6, 12, tzinfo=UTC),
+        )
+
+
 def test_temporal_retrieval_uses_exclusive_before_and_after_date_boundaries():
     now = datetime(2026, 11, 6, 12, tzinfo=UTC)
     before = _temporal_window("What happened before 2026-11-06?", now=now)
