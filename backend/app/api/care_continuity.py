@@ -2190,7 +2190,7 @@ def current_care_projection(
             return
         if source_name == "facts" and row.get("superseded_by_fact_id"):
             return
-        if source_name == "assertions" and status in {"retracted", "superseded"}:
+        if source_name == "assertions" and status in {"retracted", "superseded", "withdrawn"}:
             return
 
         title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "attribute", "subject_label", "follow_up_kind", "target_type",
