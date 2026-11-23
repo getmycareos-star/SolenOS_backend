@@ -81,6 +81,13 @@ _EXPLANATION = re.compile(
 )
 
 
+def is_greeting_message(message: str) -> bool:
+    """Shared exact-match greeting detector; emotional messages are not greetings."""
+    value = re.sub(r"[.!?,;:]+", " ", (message or "").casefold().strip())
+    value = " ".join(value.split())
+    return bool(_GREETING.fullmatch(value))
+
+
 def resolve_response_length_policy(
     message: str,
     caregiver_stage: str | None = None,
@@ -110,7 +117,7 @@ def resolve_response_length_policy(
     # Acknowledgements (including goodbye) must not enter the orientation path.
     if _ACK.fullmatch(value):
         return _POLICIES["simple_acknowledgement"]
-    if _GREETING.fullmatch(value):
+    if is_greeting_message(value):
         if caregiver_stage == "returning":
             return _POLICIES["returning_greeting"]
         return _POLICIES["first_time_greeting"]
