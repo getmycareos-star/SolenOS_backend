@@ -2351,6 +2351,20 @@ def test_caregiver_interaction_guidance_repairs_direct_frustration_and_anger():
 
 
 
+def test_caregiver_interaction_guidance_recognizes_intensified_emotional_language():
+    cases = (
+        ("I feel really overwhelmed today.", "LOW-CAPACITY RESPONSE"),
+        ("I'm so exhausted I can't think straight.", "LOW-CAPACITY RESPONSE"),
+        ("I feel very sad about this.", "DISTRESS RESPONSE"),
+        ("I'm really scared about tonight.", "DISTRESS RESPONSE"),
+        ("I am very frustrated with being asked again.", "CONTINUITY REPAIR"),
+        ("I feel so fed up with this system.", "CONTINUITY REPAIR"),
+    )
+    for message, expected_guidance in cases:
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert expected_guidance in guidance, message
+
+
 def test_caregiver_interaction_guidance_preserves_correction_and_vague_concern_rules():
     correction = collaboration._caregiver_interaction_guidance(
         "No, that's not what happened. She was eating less."
