@@ -174,8 +174,8 @@ def _unprocessed_page_numbers(source_text: str) -> list[int]:
 
 
 def _retryable_page_numbers(source_text: str) -> list[int]:
-    source_text = _page_parsing_text(source_text)
     """Return pages that failed transient processing, not pages blocked by limits."""
+    source_text = _page_parsing_text(source_text)
     return [
         int(match.group(1))
         for match in re.finditer(
@@ -186,8 +186,8 @@ def _retryable_page_numbers(source_text: str) -> list[int]:
 
 
 def _blocked_page_numbers(source_text: str) -> list[int]:
-    source_text = _page_parsing_text(source_text)
     """Return pages that cannot be retried without changing the source or limits."""
+    source_text = _page_parsing_text(source_text)
     return [
         int(match.group(1))
         for match in re.finditer(
