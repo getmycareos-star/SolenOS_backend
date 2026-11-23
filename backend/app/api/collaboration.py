@@ -6651,6 +6651,53 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "alone', or 'I'm here for you'; do not promise outcomes or imply personal presence. Immediate danger "
             "still takes precedence and requires clear real-world emergency or human support guidance."
         )
+    fear_or_uncertainty = re.search(
+        r"\b(?:i(?:'m| am) (?:afraid|scared|frightened|worried) about (?:what happens|the future|"
+        r"what will happen)|i(?:'m| am) scared (?:right now|something is happening)|"
+        r"i don't know what to expect|i do not know what to expect|"
+        r"i don't know if this is normal|i do not know if this is normal|"
+        r"i'm not sure (?:what to do|whether this is safe)|i am not sure (?:what to do|whether this is safe)|"
+        r"i'm worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
+        r"i am worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
+        r"i can't tell if (?:this is getting worse|something is wrong)|"
+        r"i cannot tell if (?:this is getting worse|something is wrong))\b",
+        text,
+    )
+    loneliness = re.search(
+        r"\b(?:i feel (?:so )?(?:alone|lonely|isolated)|i have nobody to talk to|"
+        r"there is nobody i can talk to|no one understands what this is like|"
+        r"i have no one helping me)\b",
+        text,
+    )
+    anger = re.search(
+        r"\b(?:i(?:'m| am) (?:angry|furious|fed up) (?:with|at) (?:the doctor|the doctors|"
+        r"the nurse|the nurses|the hospital|the care team|solenos|this app)|"
+        r"i hate how (?:the doctor|the hospital|the care team|solenos) handled this|"
+        r"this makes me furious)\b",
+        text,
+    )
+
+    if anger:
+        guidance.append(
+            "ANGER RESPONSE: The caregiver is expressing anger about a person, care team, or SolenOS. "
+            "Acknowledge the specific issue without defending anyone or escalating the conflict. "
+            "Do not assume the caregiver is unsafe or incapable because they are angry. "
+            "If they identify an error, check the relevant authorized history and correct only what the evidence supports."
+        )
+    if loneliness:
+        guidance.append(
+            "LONELINESS RESPONSE: The caregiver explicitly describes feeling alone or unsupported. "
+            "Acknowledge that statement without claiming to know their relationships or saying they are not alone. "
+            "Do not turn the disclosure into a task list. If they want practical help, offer one small, optional way "
+            "to identify a trusted person or appropriate human support."
+        )
+    if fear_or_uncertainty:
+        guidance.append(
+            "FEAR AND UNCERTAINTY RESPONSE: The caregiver expresses fear or uncertainty. Distinguish fear about "
+            "the future from concern about something happening now. Do not use reassurance as medical evidence, "
+            "predict dementia progression, or declare a situation safe without support. Follow the actual question; "
+            "if immediate safety cannot be established, recommend timely human assessment."
+        )
     if grief:
         guidance.append(
             "GRIEF RESPONSE: The caregiver is describing grief or the fear of losing someone. Acknowledge only the "
