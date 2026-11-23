@@ -6473,23 +6473,23 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
     grief = re.search(
-        r"\\b(?:i miss (?:her|him|them)|i(?:'m| am) grieving|"
+        r"\b(?:i miss (?:her|him|them)|i(?:'m| am) grieving|"
         r"i feel like i(?:'m| am) losing (?:her|him|them)|"
         r"since (?:she|he|they) died|after (?:she|he|they) died|"
-        r"(?:she|he|they) passed away|i can't believe (?:she|he|they) are gone)\\b",
+        r"(?:she|he|they) passed away|i can't believe (?:she|he|they) are gone)\b",
         text,
     )
     self_blame = re.search(
-        r"\\b(?:i feel like i(?:'m| am) failing|i should be doing more|"
+        r"\b(?:i feel like i(?:'m| am) failing|i should be doing more|"
         r"i lost my temper|i don't think i(?:'m| am) a good caregiver|"
         r"i(?:'m| am) a bad (?:caregiver|daughter|son)|"
-        r"it's my fault|it is my fault|i let (?:her|him|them) down)\\b",
+        r"it's my fault|it is my fault|i let (?:her|him|them) down)\b",
         text,
     )
     positive_emotion = re.search(
-        r"\\b(?:what a relief|i feel relieved|i(?:'m| am) hopeful|"
+        r"\b(?:what a relief|i feel relieved|i(?:'m| am) hopeful|"
         r"i feel hopeful|we had a good day|she had a good day|he had a good day|"
-        r"that went well|i(?:'m| am) proud of)\\b",
+        r"that went well|i(?:'m| am) proud of)\b",
         text,
     )
     standalone_overload = re.fullmatch(
