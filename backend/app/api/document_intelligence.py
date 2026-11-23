@@ -144,7 +144,7 @@ def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | Non
         )
         observed_pages = {
             int(match.group(1))
-            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+            for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
         }
         unprocessed.update(set(range(1, page_count + 1)) - observed_pages)
     return sorted(unprocessed)
@@ -678,7 +678,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         # with actual source markers; never infer that an absent PDF page was read.
         recorded_processed_pages = [
             int(match.group(1))
-            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+            for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
         ]
         if not recorded_processed_pages and source_text.strip() and not (
             str(metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold() == "application/pdf"
