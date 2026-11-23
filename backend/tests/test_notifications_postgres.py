@@ -153,3 +153,99 @@ def test_notification_preferences_and_read_receipts_survive_new_session_and_enfo
                 db.query(NotificationReadReceipt).filter(NotificationReadReceipt.notification_id.in_(created_ids)).delete(synchronize_session=False)
                 db.query(CareNotification).filter(CareNotification.id.in_(created_ids)).delete(synchronize_session=False)
                 db.commit()
+
+
+def test_assigned_reminder_quiet_hours_release_uses_recipient_preference():
+    from datetime import datetime, timezone
+
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    suffix = uuid.uuid4().hex[:12]
+    client = TestClient(app)
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        primary = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"name": f"Reminder owner {suffix}", "caregiver_name": f"Reminder creator {suffix}"},
+        )
+        assert primary.status_code == 201, primary.text
+        primary_session = primary.json()
+        primary_headers = {"Authorization": f"Bearer {primary_session['access_token']}"}
+
+        invitation = client.post(
+            "/api/v1/caregiver-access/invitations",
+            headers=primary_headers,
+            json={"email": f"reminder-assignee-{suffix}@example.test"},
+        )
+        assert invitation.status_code == 201, invitation.text
+        accepted = client.post(
+            "/api/v1/caregiver-access/invitations/accept",
+            json={
+                "token": invitation.json()["invitation_token"],
+                "email": f"reminder-assignee-{suffix}@example.test",
+                "password": f"Reminder-assignee-{suffix}-password",
+                "name": "Assigned caregiver",
+            },
+        )
+        assert accepted.status_code == 201, accepted.text
+        assignee = accepted.json()
+        assignee_headers = {"Authorization": f"Bearer {assignee['access_token']}"}
+
+        created = client.post(
+            "/api/v1/reminders",
+            headers=primary_headers,
+            json={
+                "person_id": primary_session["person"]["id"],
+                "title": f"Assigned reminder {suffix}",
+                "due_at": datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc).isoformat(),
+                "assigned_to_caregiver_id": assignee["caregiver_id"],
+            },
+        )
+        assert created.status_code == 201, created.text
+        reminder_id = created.json()["id"]
+        now = datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc)
+
+        with Session() as db:
+            db.add(CareNotificationPreference(
+                person_id=primary_session["person"]["id"],
+                caregiver_id=assignee["caregiver_id"],
+                reminders_enabled=True,
+                quiet_hours_enabled=True,
+                quiet_hours_start="09:00",
+                quiet_hours_end="18:00",
+                timezone_name="America/New_York",
+            ))
+            db.commit()
+            assert deliver_due_reminders(db=db, now=now) == 0
+            reminder = db.query(CareReminder).filter_by(id=reminder_id).one()
+            assert reminder.notification_deferred_until is not None
+
+        changed = client.put(
+            "/api/v1/notifications/preferences",
+            headers=assignee_headers,
+            json={"timezone_name": "Asia/Tokyo"},
+        )
+        assert changed.status_code == 200, changed.text
+
+        with Session() as db:
+            reminder = db.query(CareReminder).filter_by(id=reminder_id).one()
+            assert reminder.notification_deferred_until is None
+            assert deliver_due_reminders(db=db, now=now) == 1
+            notification = db.query(CareNotification).filter_by(
+                source_event_id=reminder_id,
+                caregiver_id=assignee["caregiver_id"],
+                category="reminder_due",
+            ).one()
+            assert notification.person_id == primary_session["person"]["id"]
+    finally:
+        app.dependency_overrides.clear()
