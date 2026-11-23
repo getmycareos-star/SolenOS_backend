@@ -189,7 +189,7 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
 
     restricted_scope = client.patch(
         f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
-        headers=initial_headers,
+        headers=fresh_headers,
         json={"access_scope": "documents_only"},
     )
     assert restricted_scope.status_code == 200, restricted_scope.text
@@ -200,7 +200,7 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
 
     restored_scope = client.patch(
         f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
-        headers=initial_headers,
+        headers=fresh_headers,
         json={"access_scope": "full_record"},
     )
     assert restored_scope.status_code == 200, restored_scope.text
@@ -212,7 +212,7 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
 
     revoked = client.delete(
         f"/api/v1/caregiver-access/members/{invited_caregiver_id}",
-        headers=initial_headers,
+        headers=fresh_headers,
     )
     assert revoked.status_code == 200, revoked.text
     revoked_history = client.get(
