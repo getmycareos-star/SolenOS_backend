@@ -1532,19 +1532,26 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
 
     prepared_sources = []
     for source_name, source in context.get("sources", {}).items():
-        items = [
-            json.dumps(
+        items = []
+        for item in source.get("items", []):
+            # CaptureAnalysis.candidates contains unreviewed model extraction
+            # proposals. Keep the separately derived, allow-listed
+            # extraction_metadata (page coverage and processing status), but
+            # never send candidate payloads or their source_quote values to
+            # Companion inference as if they were accepted care information.
+            prompt_record = dict(item)
+            if source_name == "document_extractions":
+                prompt_record.pop("candidates", None)
+            items.append(json.dumps(
                 {
                     "source_type": source_name,
                     "source_id": item.get("id"),
-                    "record": item,
+                    "record": prompt_record,
                 },
                 ensure_ascii=False,
                 default=str,
                 separators=(",", ":"),
-            )
-            for item in source.get("items", [])
-        ]
+            ))
         section = (
             f"[{source_name}; status={source.get('status')}; "
             f"returned={source.get('returned_count', 0)}; "
