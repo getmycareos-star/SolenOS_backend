@@ -143,8 +143,8 @@ def _temporal_window(
         for name in sorted(month_lookup, key=len, reverse=True)
     )
     full_month_date = re.search(
-        rf"\\b(?:({month_pattern})\\s+(\\d{{1,2}})(?:st|nd|rd|th)?[,]?\\s+(20\\d{{2}})"
-        rf"|(\\d{{1,2}})(?:st|nd|rd|th)?\\s+({month_pattern})\\s+(20\\d{{2}}))\\b",
+        rf"\b(?:({month_pattern})\s+(\d{{1,2}})(?:st|nd|rd|th)?[,]?\s+(20\d{{2}})"
+        rf"|(\d{{1,2}})(?:st|nd|rd|th)?\s+({month_pattern})\s+(20\d{{2}}))\b",
         text,
     )
     if full_month_date:
@@ -163,7 +163,7 @@ def _temporal_window(
         return date_window(selected, selected)
 
     month_year = re.search(
-        rf"\\b({month_pattern})\\s+(20\\d{{2}})\\b|\\b(20\\d{{2}})\\s+({month_pattern})\\b",
+        rf"\b({month_pattern})\s+(20\d{{2}})\b|\b(20\d{{2}})\s+({month_pattern})\b",
         text,
     )
     if month_year:
