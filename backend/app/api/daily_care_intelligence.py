@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -643,6 +644,61 @@ async def ask_daily_care_qwen(
     }
 
 
+def _find_existing_daily_care_proposal_assertion(
+    db: Session,
+    *,
+    person_id: str,
+    field: str,
+    asserted_value: str,
+    source_ids: list[str],
+    event_ids: list[str],
+) -> CareAssertion | None:
+    """Reuse an accepted proposal for the same source set instead of duplicating its LCR assertion.
+
+    A row lock on CaptureAnalysis protects retries of one analysis only. Qwen can
+    produce the same proposal in a later analysis, so PostgreSQL serializes the
+    cross-analysis identity using a transaction-scoped advisory lock.
+    """
+    source_identity = sorted(set(str(value) for value in source_ids))
+    lock_material = json.dumps(
+        [person_id, field, asserted_value, source_identity],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    lock_key = int.from_bytes(
+        hashlib.sha256(lock_material.encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_key)"),
+            {"lock_key": lock_key},
+        )
+
+    query = db.query(CareAssertion).filter(
+        CareAssertion.person_id == person_id,
+        CareAssertion.field == field,
+        CareAssertion.asserted_value == asserted_value,
+        CareAssertion.assertion_kind == "caregiver_reviewed_daily_care",
+        CareAssertion.assertion_status.in_(("accepted", "caregiver_reviewed")),
+    )
+    if event_ids:
+        query = query.filter(CareAssertion.source_event_id.in_(event_ids))
+    for existing in query.order_by(CareAssertion.recorded_at.desc()).all():
+        try:
+            source_record = json.loads(existing.source_text or "{}")
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        original_proposal = source_record.get("original_proposal") if isinstance(source_record, dict) else None
+        prior_source_ids = original_proposal.get("source_ids") if isinstance(original_proposal, dict) else None
+        if not isinstance(prior_source_ids, list):
+            continue
+        if sorted(set(str(value) for value in prior_source_ids)) == source_identity:
+            return existing
+    return None
+
+
 @router.post("/proposals/{analysis_id}/{proposal_index}/review")
 def review_daily_care_lcr_proposal(
     analysis_id: str,
@@ -691,6 +747,8 @@ def review_daily_care_lcr_proposal(
         }
 
     original = dict(proposal)
+    reused_existing_assertion = False
+    evidence_ids: list[str] = []
     if payload.decision == "reject":
         proposal["review_status"] = "rejected_by_caregiver"
     elif payload.decision == "correct":
@@ -702,41 +760,62 @@ def review_daily_care_lcr_proposal(
     else:
         # Accept only a pending or caregiver-corrected value. Source references
         # are revalidated against this session's person before any LCR write.
-        source_ids = [str(value) for value in proposal.get("source_ids", [])]
-        event_ids = [value for value in source_ids if db.query(CareEvent.id).filter(
-            CareEvent.id == value, CareEvent.person_id == person_id
-        ).first()]
+        source_ids = list(dict.fromkeys(str(value) for value in proposal.get("source_ids", [])))
+        event_ids = sorted({
+            str(row[0])
+            for row in db.query(CareEvent.id).filter(
+                CareEvent.person_id == person_id,
+                CareEvent.id.in_(source_ids),
+            ).all()
+        }) if source_ids else []
         evidence_rows = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.id.in_(source_ids),
         ).all() if source_ids else []
-        evidence_ids = [str(row.id) for row in evidence_rows]
+        evidence_ids = sorted(str(row.id) for row in evidence_rows)
+        resolved_source_ids = set(event_ids) | set(evidence_ids)
+        if not source_ids or set(source_ids) != resolved_source_ids:
+            raise HTTPException(
+                status_code=409,
+                detail="Every proposal source must be available in this care record before it can be accepted",
+            )
         if any(row.type == "document" for row in evidence_rows):
             require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
-        if not event_ids and not evidence_ids:
-            raise HTTPException(status_code=409, detail="The proposal has no source evidence in this care record")
-        assertion = create_assertion(
+        field = str(proposal.get("field") or "daily_care_observation")[:120]
+        asserted_value = str(proposal.get("proposed_value") or "")[:4000]
+        assertion = _find_existing_daily_care_proposal_assertion(
             db,
-            CareAssertionCreate(
-                person_id=person_id,
-                subject_type="person",
-                subject_id=person_id,
-                field=str(proposal.get("field") or "daily_care_observation")[:120],
-                assertion_kind="caregiver_reviewed_daily_care",
-                epistemic_state="inferred",
-                asserted_value=str(proposal.get("proposed_value") or "")[:4000],
-                source_event_id=event_ids[0] if event_ids else None,
-                source_label="Caregiver-reviewed Daily Care Qwen proposal",
-                source_text=json.dumps({"title": proposal.get("title"), "reason": proposal.get("reason"),
-                                        "uncertainty": proposal.get("uncertainty"), "proposal_analysis_id": analysis_id,
-                                        "proposal_index": proposal_index, "original_proposal": original}, ensure_ascii=False),
-                evidence_ids=evidence_ids,
-                created_by_caregiver_id=caregiver_id,
-                updated_by_caregiver_id=caregiver_id,
-            ),
-            commit=False,
+            person_id=person_id,
+            field=field,
+            asserted_value=asserted_value,
+            source_ids=source_ids,
+            event_ids=event_ids,
         )
-        assertion.assertion_status = "caregiver_reviewed"
+        if assertion is not None:
+            reused_existing_assertion = True
+        else:
+            assertion = create_assertion(
+                db,
+                CareAssertionCreate(
+                    person_id=person_id,
+                    subject_type="person",
+                    subject_id=person_id,
+                    field=field,
+                    assertion_kind="caregiver_reviewed_daily_care",
+                    epistemic_state="inferred",
+                    asserted_value=asserted_value,
+                    source_event_id=event_ids[0] if event_ids else None,
+                    source_label="Caregiver-reviewed Daily Care Qwen proposal",
+                    source_text=json.dumps({"title": proposal.get("title"), "reason": proposal.get("reason"),
+                                            "uncertainty": proposal.get("uncertainty"), "proposal_analysis_id": analysis_id,
+                                            "proposal_index": proposal_index, "original_proposal": original}, ensure_ascii=False),
+                    evidence_ids=evidence_ids,
+                    created_by_caregiver_id=caregiver_id,
+                    updated_by_caregiver_id=caregiver_id,
+                ),
+                commit=False,
+            )
+            assertion.assertion_status = "caregiver_reviewed"
         proposal["review_status"] = "accepted_by_caregiver"
         proposal["accepted_at"] = datetime.now(timezone.utc).isoformat()
         proposal["accepted_by_caregiver_id"] = caregiver_id
@@ -751,6 +830,7 @@ def review_daily_care_lcr_proposal(
         "reviewed_by_caregiver_id": caregiver_id,
         "original_proposal": original,
         "reviewed_proposal": dict(proposal),
+        "reused_existing_assertion": reused_existing_assertion,
     }
     history = list(analysis.review_history or [])
     history.append(review_event)
@@ -799,6 +879,7 @@ def review_daily_care_lcr_proposal(
         "assertion_id": proposal.get("accepted_assertion_id") if payload.decision == "accept" else None,
         "written_to_lcr": payload.decision == "accept",
         "idempotent_replay": False,
+        "reused_existing_assertion": reused_existing_assertion,
         "message": (
             (
                 "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
