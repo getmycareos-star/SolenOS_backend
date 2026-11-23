@@ -351,6 +351,14 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         current = db.query(QwenBackgroundJob).filter_by(
             id=job_id, person_id=person_id, caregiver_id=caregiver_id
         ).populate_existing().with_for_update().first()
+        if (
+            current is None
+            or current.status != "processing"
+            or current.locked_at != lease_state.get("locked_at")
+            or lease_state.get("lost")
+        ):
+            db.rollback()
+            return True
         if current is not None:
             current.status = "cancelled"
             current.error_code = "daily_capture_source_unavailable"
