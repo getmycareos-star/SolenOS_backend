@@ -303,7 +303,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
+                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep", expected_observation=original_observation),
                     _request(other_person_id, other_caregiver_id),
                     db,
                 )
