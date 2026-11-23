@@ -1090,8 +1090,13 @@ def build_lcr_context(
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
         ranked_limit = limit if exact_ordered_history else source_offset + limit
         if exact_ordered_history:
-            count_statement = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
-            scan_statement = statement.offset(source_offset).limit(limit + 1)
+            # Return the exact per-source count with the ordered page in one
+            # database round-trip. Appointment preparation reads every source;
+            # a separate COUNT query per table was adding avoidable latency.
+            count_statement = None
+            scan_statement = statement.add_columns(
+                func.count().over().label("_lcr_candidate_count")
+            ).offset(source_offset).limit(limit + 1)
         else:
             count_statement = None
             scan_statement = statement if query_scan else statement.limit(limit + 1)
@@ -1110,11 +1115,19 @@ def build_lcr_context(
                 ).mappings().yield_per(500)
                 for row in result:
                     rows_seen += 1
-                    if not exact_ordered_history:
+                    row_values = dict(row)
+                    if exact_ordered_history:
+                        candidate_count = int(row_values.pop("_lcr_candidate_count", candidate_count) or 0)
+                    else:
                         candidate_count += 1
                     if not query_scan and candidate_count > limit:
                         continue
-                    item = {key: _safe_value(value, key) for key, value in dict(row).items()}
+                    item = {key: _safe_value(value, key) for key, value in row_values.items()}
+                if exact_ordered_history and source_offset > 0 and rows_seen == 0:
+                    # An offset beyond the final row returns no window-count
+                    # value. Resolve that uncommon page with a count fallback.
+                    fallback_count = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
+                    candidate_count = int(db.execute(fallback_count).scalar_one() or 0)
                     if source_name == "document_extractions":
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
