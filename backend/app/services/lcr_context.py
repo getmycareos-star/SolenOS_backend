@@ -816,9 +816,16 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
             # than falsely marking every page as missing.
             observed_pages = set(manifest_pages)
         else:
+            page_text = (
+                source_text.replace("\\r\\n", "\n")
+                .replace("\\n", "\n")
+                .replace("\\r", "\n")
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+            )
             observed_pages = {
                 int(match.group(1))
-                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
+                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", page_text)
             }
             # When immutable text exists, require both the text and manifest
             # to account for a page; a stale manifest cannot fill a source gap.
