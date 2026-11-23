@@ -119,9 +119,9 @@ def review_capture_candidate(
     if not isinstance(candidate, dict):
         raise HTTPException(status_code=422, detail="Candidate data is invalid")
 
-    # New clients bind the decision to the exact candidate snapshot displayed.
-    # Keep legacy requests readable during the transition, but never accept a
-    # partially supplied snapshot or a stale source/subject pair.
+    # New clients bind the decision to the exact candidate snapshot displayed:
+    # source quotation, subject, and extracted observation. Keep legacy requests
+    # readable during the transition, but never accept a partial or stale snapshot.
     snapshot_supplied = (
         payload.expected_source_quote is not None
         or payload.expected_subject is not None
