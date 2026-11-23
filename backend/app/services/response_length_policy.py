@@ -62,7 +62,19 @@ _STANDALONE_LOW_CAPACITY = re.compile(
 
 def is_low_capacity_caregiver_message(message: str) -> bool:
     value = " ".join((message or "").casefold().split())
-    return bool(_LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value))
+    if _LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value):
+        return True
+
+    capacity_terms = r"(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)"
+    first_person_capacity = re.search(
+        rf"\\bi(?:'m| am| feel| have|[' ]ve)\\b[^.!?]{{0,50}}\\b{capacity_terms}\\b",
+        value,
+    )
+    explicitly_negated = re.search(
+        rf"\\b(?:not|never|no longer)\\s+(?:(?:really|very|so)\\s+)?{capacity_terms}\\b",
+        value,
+    )
+    return bool(first_person_capacity and not explicitly_negated)
 
 
 _SELF_HARM_CRITICAL = re.compile(
