@@ -520,6 +520,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                     decision="accept",
                     expected_source_quote=candidate_for_review["source_quote"],
                     expected_subject=candidate_for_review["subject"],
+                    expected_observation=candidate_for_review["observation"],
                 ),
                 _request(person_id, caregiver_id),
                 db,
@@ -938,7 +939,6 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "expected_source_quote": quote_correct,
                 "expected_subject": caregiver_label,
                 "expected_observation": quote_correct,
-                "expected_observation": quote_correct,
                 "expected_candidate_id": "candidate-from-an-older-document-analysis",
             },
         )
@@ -956,6 +956,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "decision": "accept",
                 "expected_source_quote": quote_correct,
                 "expected_subject": caregiver_label,
+                "expected_observation": quote_correct,
                 "expected_candidate_id": current_candidate_id,
             },
         )
@@ -1125,7 +1126,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         denied_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=other_auth,
-            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label},
+            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label, "expected_observation": quote_correct},
         )
         assert denied_review.status_code == 404
 
