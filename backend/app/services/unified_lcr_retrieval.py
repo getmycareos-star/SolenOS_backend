@@ -59,9 +59,20 @@ def _temporal_window(
     # "Past year" is a rolling twelve-month window, not the previous
     # calendar year. Treating it as a calendar year drops recent months and
     # includes months older than the caregiver requested.
-    numbered_years = re.search(r"\b(?:last|past)\s+(\d{1,2})\s+years?\b", text)
+    numbered_years = re.search(
+        r"\b(?:last|past)\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+years?\b",
+        text,
+    )
     if numbered_years:
-        years = int(numbered_years.group(1))
+        year_count = numbered_years.group(1)
+        years = int(year_count) if year_count.isdigit() else {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+            "nineteen": 19, "twenty": 20,
+        }[year_count]
         if years < 1 or years > 20:
             raise ValueError("A numbered care-history year range must be between one and twenty years.")
         start_year = today.year - years
