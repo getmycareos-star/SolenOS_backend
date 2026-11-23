@@ -127,13 +127,14 @@ def test_postgres_query_does_not_return_unsearchable_source_rows():
 
 
 
-def test_postgres_unsearchable_source_marks_lcr_retrieval_incomplete():
-    """A missing search contract must not be reported as a complete care-history scan."""
+def test_postgres_unsearchable_optional_source_marks_projection_incomplete(monkeypatch):
+    """An unsearchable optional source must make the projection incomplete even when no required source is missing."""
     import os
     import uuid
 
     import pytest
     from sqlalchemy import create_engine
+    import app.services.lcr_context as lcr_context
 
     database_url = os.environ.get("DATABASE_URL", "")
     if database_url.startswith("postgresql+psycopg://"):
@@ -141,6 +142,11 @@ def test_postgres_unsearchable_source_marks_lcr_retrieval_incomplete():
     if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
         pytest.skip("requires a real PostgreSQL DATABASE_URL")
 
+    monkeypatch.setattr(
+        lcr_context,
+        "SOURCE_SPECS",
+        {"evidence_reviews": lcr_context.SOURCE_SPECS["evidence_reviews"]},
+    )
     schema = "lcr_unsearchable_" + uuid.uuid4().hex[:16]
     engine = create_engine(database_url, pool_pre_ping=True)
     connection = engine.connect()
@@ -148,16 +154,19 @@ def test_postgres_unsearchable_source_marks_lcr_retrieval_incomplete():
         connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
         connection.exec_driver_sql(f'SET search_path TO "{schema}"')
         connection.exec_driver_sql(
-            "CREATE TABLE care_events (id VARCHAR PRIMARY KEY, person_id VARCHAR NOT NULL)"
+            "CREATE TABLE evidence_review_records (id VARCHAR PRIMARY KEY, person_id VARCHAR NOT NULL, private_payload TEXT)"
         )
         connection.exec_driver_sql(
-            "INSERT INTO care_events (id, person_id) VALUES ('event-a', 'person-a')"
+            "INSERT INTO evidence_review_records (id, person_id, private_payload) VALUES ('review-a', 'person-a', 'unrelated detail')"
         )
         _load_source_schema.cache_clear()
         with Session(bind=connection) as db:
             context = build_lcr_context(db, "person-a", query="medication")
-        assert context["sources"]["events"]["status"] == "unsearchable"
-        assert "events" in context["failed_sources"]
+        assert context["sources"]["evidence_reviews"]["status"] == "unsearchable"
+        assert "evidence_reviews" in context["failed_sources"]
+        assert "evidence_reviews" in context["failed_optional_sources"]
+        assert context["missing_required_sources"] == []
+        assert context["missing_optional_sources"] == []
         assert context["retrieval_scan_complete"] is False
         assert context["retrieval_projection_complete"] is False
         assert context["history_coverage"] == "partial_source_history"
