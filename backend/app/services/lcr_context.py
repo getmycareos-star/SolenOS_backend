@@ -1376,6 +1376,12 @@ def build_lcr_context(
                     "reason": None,
                     "interpretation_limit": "No later person-scoped care-record change was found. This watermark does not replace exact source-dependency verification.",
                 }
+            # Freshness is computed after source rows are materialized. Refresh
+            # the semantic status now so it reflects the watermark rather than
+            # the pre-check "currentness unknown" placeholder.
+            workspace["information_status"], workspace["interpretation_limit"] = _information_status(
+                "appointment_workspaces", workspace
+            )
 
     # A source that cannot be searched is not an empty source. It must
     # reduce retrieval completeness just like a failed or partial source read.
