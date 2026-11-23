@@ -1,3 +1,4 @@
+import re
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -346,6 +347,34 @@ def database_schema_differences(bind=None):
             if value is None:
                 return None
             normalized = " ".join(str(value).strip().split())
+            # PostgreSQL's pg_get_expr() adds casts and rewrites IN lists as
+            # = ANY (ARRAY[...]). Those are equivalent to the ORM predicate
+            # for these string columns, so normalize them before comparison.
+            normalized = re.sub(
+                r"::(?:character varying|varchar|text)(?:\\[\\])?",
+                "",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            normalized = re.sub(
+                r"(\\b[a-z_][a-z0-9_\\.]*\\b)\\s*=\\s*ANY\\s*\\(\\s*\\(*\\s*ARRAY\\s*\\[(.*?)\\]\\s*\\)*\\s*\\)",
+                r"\\1 IN (\\2)",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            normalized = re.sub(
+                r"\\(\\s*([a-z_][a-z0-9_\\.]*)\\s*(=\\s*[^()]+|IS\\s+NOT\\s+NULL)\\s*\\)",
+                r"\\1 \\2",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            normalized = re.sub(
+                r"\\(\\s*([a-z_][a-z0-9_\\.]*\\s+IN\\s*\\([^()]*\\))\\s*\\)",
+                r"\\1",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            normalized = " ".join(normalized.split())
             # PostgreSQL may wrap pg_get_expr() output in one or more
             # redundant outer parentheses. Remove only fully enclosing pairs.
             while normalized.startswith("(") and normalized.endswith(")"):
