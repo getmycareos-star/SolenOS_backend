@@ -431,7 +431,7 @@ def review_companion_care_update(
                     "idempotent_replay": True,
                 }
             assertion = db.query(CareAssertion).filter_by(source_proposal_id=proposal.id).first()
-            active_assertion = assertion is not None and assertion.assertion_status not in {"rejected", "superseded"}
+            active_assertion = assertion is not None and assertion.assertion_status not in {"rejected", "superseded", "withdrawn"}
             return {
                 "proposal": _proposal_json(proposal),
                 "status": proposal.status,
