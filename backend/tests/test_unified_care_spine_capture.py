@@ -772,7 +772,10 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
     current_event_id = f"companion-lineage-current-{suffix}"
     applied_correction_id = f"companion-lineage-applied-{suffix}"
     pending_correction_id = f"companion-lineage-waiting-{suffix}"
+    aggregate_event_id = f"companion-lineage-unsteadiness-{suffix}"
+    aggregate_correction_id = f"companion-lineage-unsteadiness-correction-{suffix}"
     relationship_id = f"companion-lineage-link-{suffix}"
+    aggregate_event_time = datetime.now(timezone.utc) - timedelta(hours=1)
 
     try:
         with SessionLocal() as db:
@@ -811,6 +814,15 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
                     evidence_ids=[], created_by_caregiver_id=caregiver_id,
                     time_provenance="caregiver_reported",
                 ),
+                CareEvent(
+                    id=aggregate_event_id, person_id=person_id,
+                    event_type="observation", status="recorded",
+                    occurred_at=aggregate_event_time,
+                    title="Unsteadiness observation",
+                    description="Caregiver reported an unsteadiness episode.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
             ])
             db.flush()
             db.add_all([
@@ -829,6 +841,15 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
                     original_text="Mum slept through the night.",
                     corrected_text="Caregiver is unsure whether Mum slept through the night.",
                     reason="The caregiver is checking the overnight notes.",
+                    caregiver_id=caregiver_id, processing_status="pending",
+                    processing_attempts=0,
+                ),
+                Correction(
+                    id=aggregate_correction_id, person_id=person_id,
+                    target_type="care_event", target_id=aggregate_event_id,
+                    original_text="Caregiver reported an unsteadiness episode.",
+                    corrected_text="Caregiver is unsure whether this was an unsteadiness episode.",
+                    reason="The event details need confirmation.",
                     caregiver_id=caregiver_id, processing_status="pending",
                     processing_attempts=0,
                 ),
@@ -868,6 +889,13 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             assert "slept well" in answer.casefold()
             assert "slept poorly" not in answer.casefold()
             assert "slept through the night" not in answer.casefold()
+
+            aggregate = collaboration._requested_event_aggregates(
+                db, person_id, caregiver_id,
+                "How many unsteadiness incidents this month?",
+            )[0]
+            assert aggregate["status"] == "source_correction_requires_review"
+            assert aggregate["count"] is None
     finally:
         with SessionLocal() as db:
             db.query(CareRecordRelationship).filter(
