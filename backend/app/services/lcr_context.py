@@ -11,6 +11,7 @@ import re
 from datetime import date, datetime, timezone
 from functools import lru_cache
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy import MetaData, String, Table, and_, cast, desc, false, func, inspect, or_, select
@@ -497,6 +498,8 @@ JSON_TEXT_FIELDS = {
 def _safe_value(value: Any, key: str | None = None) -> Any:
     if isinstance(value, (datetime, date)):
         return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, dict):
         return {str(k): _safe_value(v, str(k)) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
