@@ -84,6 +84,11 @@ def _explicit_document_event_datetime(candidate: dict, source_quote: str) -> dat
 class CandidateReview(BaseModel):
     candidate_index: int = Field(ge=0)
     decision: Literal["accept", "correct", "reject"]
+    # Bind a caregiver decision to the exact suggestion they reviewed. The
+    # index alone is not stable when a document analysis is refreshed or
+    # candidate ordering changes between render and submission.
+    expected_source_quote: str | None = Field(default=None, max_length=20000)
+    expected_subject: str | None = Field(default=None, max_length=120)
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
     rationale: str | None = Field(default=None, max_length=1000)
@@ -1510,6 +1515,25 @@ def review_document_candidate(
     updated = copy.deepcopy(metadata)
     intelligence = updated["document_intelligence"]
     candidate = intelligence["observations"][payload.candidate_index]
+    # Reject a decision based on a stale UI snapshot. Candidate indices are
+    # positional; source wording and subject bind the action to what the
+    # caregiver actually saw, while the existing row lock serializes review.
+    if (
+        payload.expected_source_quote is not None
+        and candidate.get("source_quote") != payload.expected_source_quote
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
+        )
+    if (
+        payload.expected_subject is not None
+        and candidate.get("subject") != payload.expected_subject
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
+        )
     status = candidate.get("review_status")
     if status in {"accepted_by_caregiver", "rejected_by_caregiver"}:
         prior = candidate.get("review_decision")
