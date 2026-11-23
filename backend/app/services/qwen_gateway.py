@@ -485,16 +485,16 @@ def extract_review_candidates(
     # sentence remains a pending caregiver-review candidate.
     existing_quotes = {item["source_quote"] for item in observations}
     tentative_condition_pattern = re.compile(
-        r"\\b(?:suspects?|suspected|possible|possibly|probable|likely|unlikely|may have|might have|could have)\\s+"
-        r"(?P<subject>(?:[A-Za-z][A-Za-z'-]*\\s+){0,4}[A-Za-z][A-Za-z'-]*)",
+        r"\b(?:suspects?|suspected|possible|possibly|probable|likely|unlikely|may have|might have|could have)\s+"
+        r"(?P<subject>(?:[A-Za-z][A-Za-z'-]*\s+){0,4}[A-Za-z][A-Za-z'-]*)",
         re.IGNORECASE,
     )
     for match in tentative_condition_pattern.finditer(bounded_source):
         subject = match.group("subject").strip(" .,:;")
         observation = match.group(0).strip(" .,:;")
         if not subject or not re.search(
-            r"\\b(?:pneumonia|infection|disease|condition|diagnosis|symptom|illness|"
-            r"allergy|fracture|stroke|sepsis|tumou?r|cancer|dementia|parkinson)\\b",
+            r"\b(?:pneumonia|infection|disease|condition|diagnosis|symptom|illness|"
+            r"allergy|fracture|stroke|sepsis|tumou?r|cancer|dementia|parkinson)\b",
             subject,
             re.IGNORECASE,
         ):
