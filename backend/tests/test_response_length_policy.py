@@ -263,6 +263,8 @@ def test_patient_emotion_does_not_trigger_caregiver_low_capacity_response():
     for message in (
         "Mum was overwhelmed after lunch.",
         "My dad has been exhausted all week.",
+        "Mum is tired after lunch.",
+        "She seems drained after the appointment.",
         "She seems frightened at night.",
         "Mum was panicking before the appointment.",
         "He is terrified about the move.",
@@ -285,6 +287,6 @@ def test_caregiver_distress_still_wins_when_patient_emotion_is_also_reported():
 
 
 def test_single_word_caregiver_emotions_use_low_capacity_support():
-    for message in ("Sad", "Angry.", "Frustrated", "Overwhelmed", "Furious!"):
+    for message in ("Sad", "Angry.", "Frustrated", "Overwhelmed", "Furious!", "Tired", "Drained"):
         policy = resolve_response_length_policy(message)
         assert policy.intent == "low_capacity_support", message
