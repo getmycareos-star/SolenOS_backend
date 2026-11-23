@@ -193,6 +193,36 @@ def test_schema_verifier_reports_missing_partial_index_predicate():
         engine.dispose()
 
 
+def test_schema_verifier_preserves_composite_index_column_order():
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(bind=engine)
+        index_name = "uq_patterns_one_active_per_subject"
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP INDEX "{index_name}"'))
+            connection.execute(text(
+                f"CREATE UNIQUE INDEX \"{index_name}\" "
+                "ON patterns (pattern_type, subject_id, subject_type, person_id) "
+                "WHERE is_active IS TRUE"
+            ))
+        actual = next(
+            item for item in inspect(engine).get_indexes("patterns")
+            if item["name"] == index_name
+        )
+        assert actual["column_names"] == [
+            "pattern_type", "subject_id", "subject_type", "person_id"
+        ]
+        differences = database_schema_differences(engine)
+        assert any(
+            item.startswith("patterns: missing indexes or index predicates")
+            for item in differences
+        )
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_does_not_accept_partial_unique_index_as_full_constraint():
     engine = create_engine("sqlite:///:memory:")
     try:
