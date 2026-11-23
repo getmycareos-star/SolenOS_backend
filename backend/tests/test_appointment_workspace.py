@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
+import app.api.appointment_workspace as appointment_workspace
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
@@ -1360,6 +1361,49 @@ def test_appointment_preparation_brief_uses_stable_source_coverage_contract(clie
     # The preparation brief must never disclose another person's care data.
     other_headers = {"Authorization": f"Bearer {owner['access_token']}"}
     assert "Other person private care detail" not in response.text
+
+
+def test_appointment_preparation_status_explains_unsearchable_lcr_sources(client, monkeypatch):
+    test_client, owner, _ = client
+    original_builder = appointment_workspace.build_lcr_context
+
+    def with_unsearchable_source(*args, **kwargs):
+        context = original_builder(*args, **kwargs)
+        context["sources"]["legacy_optional"] = {
+            "status": "unsearchable",
+            "items": [],
+            "candidate_count": None,
+            "returned_count": 0,
+            "candidate_scan_complete": False,
+            "has_more": False,
+            "interpretation_limit": (
+                "This source cannot be searched for this topic; its lack of returned records "
+                "does not establish that no matching care information exists."
+            ),
+        }
+        context["failed_sources"] = sorted(set(context.get("failed_sources", [])) | {"legacy_optional"})
+        context["failed_optional_sources"] = sorted(set(context.get("failed_optional_sources", [])) | {"legacy_optional"})
+        context["schema_status"] = "partial"
+        context["retrieval_scan_complete"] = False
+        context["retrieval_projection_complete"] = False
+        context["history_coverage"] = "partial_source_history"
+        return context
+
+    monkeypatch.setattr(appointment_workspace, "build_lcr_context", with_unsearchable_source)
+    response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+    )
+    assert response.status_code == 200, response.text
+    status = response.json()["lcr_retrieval_status"]
+    assert status["status"] == "failed"
+    assert "legacy_optional" in status["failed_sources"]
+    assert any(
+        item["source_type"] == "legacy_optional"
+        and item["status"] == "unsearchable"
+        and "cannot be searched for this topic" in item["interpretation_limit"]
+        for item in status["source_limits"]
+    )
 
 
 def test_appointment_preparation_brief_surfaces_evidence_backed_appointment_need(client):
