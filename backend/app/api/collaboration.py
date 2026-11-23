@@ -80,7 +80,7 @@ from app.services.document_binary_storage import (
 
 
 from app.services.lcr_context import _expanded_search_terms
-from app.services.response_length_policy import resolve_response_length_policy
+from app.services.response_length_policy import is_greeting_message, resolve_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -3180,16 +3180,8 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
 
 
 def _is_casual_greeting(text: str) -> bool:
-    normalized = re.sub(r"[.!?,;:]+", " ", (text or "").casefold().strip())
-    normalized = " ".join(normalized.split())
-    return normalized in {
-        "hi", "hello", "hey", "hiya", "howdy",
-        "how are you", "how are you doing", "how are you today",
-        "how's it going", "hows it going", "what's up", "whats up",
-        "good morning", "good afternoon", "good evening", "good day", "good night",
-        "hi there", "hello there", "hey there",
-    }
-
+    """Use the shared exact-match greeting detector; acknowledgements are separate."""
+    return is_greeting_message(text)
 
 def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
     """Greeting replies stay within the selected first-time/returning contract."""
