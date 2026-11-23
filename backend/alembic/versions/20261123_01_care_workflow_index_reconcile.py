@@ -46,10 +46,23 @@ def _index_name(table_name: str, column_name: str) -> str:
     return f"ix_solenos_schema_{digest}"
 
 
-def _has_required_index(bind, table_name: str, column_name: str) -> bool:
-    return any(
+def _is_usable_lookup_index(index: dict, column_name: str) -> bool:
+    dialect_options = index.get("dialect_options") or {}
+    has_predicate = bool(index.get("filter_definition")) or any(
+        bool(value)
+        for key, value in dialect_options.items()
+        if str(key).endswith("_where")
+    )
+    return (
         tuple(index.get("column_names") or ()) == (column_name,)
         and not bool(index.get("unique", False))
+        and not has_predicate
+    )
+
+
+def _has_required_index(bind, table_name: str, column_name: str) -> bool:
+    return any(
+        _is_usable_lookup_index(index, column_name)
         for index in inspect(bind).get_indexes(table_name)
     )
 
