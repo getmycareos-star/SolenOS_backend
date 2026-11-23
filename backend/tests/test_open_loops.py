@@ -137,7 +137,10 @@ def test_concurrent_create_audit_collision_returns_the_committed_occurrence(monk
     }
     original_audit = open_loop_api._audit
 
-    def simulate_winning_request(db, loop, event_type, before, evidence=None, key=None, actor="session_caregiver"):
+    def simulate_winning_request(
+        db, loop, event_type, before, evidence=None, key=None,
+        actor="session_caregiver", event_context=None,
+    ):
         if event_type == "created" and key == payload["idempotency_key"]:
             # Model the interleaving where another request commits the same
             # occurrence after this request's initial lookup but before audit.
@@ -160,7 +163,10 @@ def test_concurrent_create_audit_collision_returns_the_committed_occurrence(monk
                 caregiver_id=loop.caregiver_id,
                 event_type="created",
                 before_state=None,
-                after_state=open_loop_api._snapshot(loop),
+                after_state={
+                    **open_loop_api._snapshot(loop),
+                    **({"event_context": event_context} if event_context else {}),
+                },
                 evidence=evidence or [],
                 idempotency_key=key,
                 actor=actor,
@@ -170,7 +176,10 @@ def test_concurrent_create_audit_collision_returns_the_committed_occurrence(monk
                 status_code=409,
                 detail="Idempotency key has already been used for this care record",
             )
-        return original_audit(db, loop, event_type, before, evidence, key, actor)
+        return original_audit(
+            db, loop, event_type, before, evidence, key, actor,
+            event_context=event_context,
+        )
 
     monkeypatch.setattr(open_loop_api, "_audit", simulate_winning_request)
     response = client.post("/api/v1/open-loops", headers=headers, json=payload)
