@@ -6542,15 +6542,15 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
     unable_to_continue = re.search(
-        r"\\b(?:i can't continue|i cannot continue|i can't keep doing this|i cannot keep doing this|"
-        r"i can't do this any longer|i cannot do this any longer)\\b",
+        r"\b(?:i can't continue|i cannot continue|i can't keep doing this|i cannot keep doing this|"
+        r"i can't do this any longer|i cannot do this any longer)\b",
         text,
     )
     pause_request = re.search(
-        r"\\b(?:please stop|stop for now|enough for now|i need to stop|i want to stop|"
+        r"\b(?:please stop|stop for now|enough for now|i need to stop|i want to stop|"
         r"i need a pause|i want a pause|let's pause|not now|"
         r"i don't want to talk(?: about this)?|i do not want to talk(?: about this)?|"
-        r"leave it for now|that's enough)\\b",
+        r"leave it for now|that's enough)\b",
         text,
     )
     distress = re.search(
