@@ -630,6 +630,16 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
     if source_name == "events":
         event_status = str(item.get("status") or "").casefold()
+        if item.get("superseded_by_corrections"):
+            return (
+                "historical_event",
+                "A caregiver correction is linked to this original event. Keep the original report and correction together as history; do not present the original wording as the current account.",
+            )
+        if item.get("correction_lineage_status") in {"unavailable_schema", "failed"}:
+            return (
+                "event_currentness_unknown",
+                "The correction history for this event could not be checked. Preserve the original report, but do not assume it is the latest account.",
+            )
         if event_status in {"invalidated", "superseded", "retracted", "withdrawn", "deleted"}:
             return (
                 "historical_event",
@@ -1097,6 +1107,11 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     # facts already selected for this person-scoped projection.
     if "care_fact_evidence" in available_tables:
         present.append("care_fact_evidence")
+    # Correction relationships are append-only source lineage. Reflect them as
+    # auxiliary metadata so an unchanged original event can be marked historical
+    # without mutating or deleting the caregiver's original report.
+    if "care_record_relationships" in available_tables:
+        present.append("care_record_relationships")
     if present:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)), resolve_fks=False)
     return available_tables, metadata
@@ -1537,6 +1552,100 @@ def build_lcr_context(
                 "recent_records_page"
             ),
         }
+
+    # Attach append-only correction lineage to retrieved original events.
+    # The event row itself is immutable; a correction relationship changes how
+    # the event is interpreted in the current projection without erasing history.
+    event_items = sources.get("events", {}).get("items", [])
+    relationship_table = metadata.tables.get("care_record_relationships")
+    if event_items:
+        event_ids = [
+            str(item.get("id")) for item in event_items
+            if isinstance(item, dict) and item.get("id")
+        ]
+        if relationship_table is None:
+            for item in event_items:
+                item["correction_lineage_status"] = "unavailable_schema"
+                item["information_status"], item["interpretation_limit"] = _information_status("events", item)
+            sources["events"]["correction_lineage_status"] = "unavailable_schema"
+        elif event_ids:
+            try:
+                with db.begin_nested():
+                    relationship_rows = db.execute(
+                        select(
+                            relationship_table.c.source_id,
+                            relationship_table.c.target_id,
+                            relationship_table.c.provenance,
+                            relationship_table.c.created_at,
+                        ).where(
+                            relationship_table.c.person_id == str(person_id),
+                            relationship_table.c.source_type == "correction",
+                            relationship_table.c.relationship_type == "corrects",
+                            relationship_table.c.target_type == "care_event",
+                            relationship_table.c.target_id.in_(event_ids),
+                        ).order_by(relationship_table.c.created_at.asc())
+                    ).mappings().all()
+                    correction_ids = list(dict.fromkeys(
+                        str(row["source_id"]) for row in relationship_rows if row.get("source_id")
+                    ))
+                    correction_rows_by_id = {}
+                    corrections_table = metadata.tables.get("corrections")
+                    if correction_ids and corrections_table is not None:
+                        correction_columns = [
+                            corrections_table.c[name]
+                            for name in (
+                                "id", "original_text", "corrected_text", "reason",
+                                "created_at", "processing_status",
+                            )
+                            if name in corrections_table.c
+                        ]
+                        if {"id", "person_id"}.issubset(corrections_table.c.keys()):
+                            correction_rows = db.execute(
+                                select(*correction_columns).where(
+                                    corrections_table.c.person_id == str(person_id),
+                                    corrections_table.c.id.in_(correction_ids),
+                                )
+                            ).mappings().all()
+                            correction_rows_by_id = {
+                                str(row["id"]): {
+                                    key: _safe_value(value, key)
+                                    for key, value in dict(row).items()
+                                }
+                                for row in correction_rows
+                            }
+                corrections_by_event: dict[str, list[dict[str, Any]]] = {}
+                for relationship in relationship_rows:
+                    correction_id = str(relationship.get("source_id") or "")
+                    target_id = str(relationship.get("target_id") or "")
+                    if not correction_id or not target_id:
+                        continue
+                    correction = correction_rows_by_id.get(correction_id, {"id": correction_id})
+                    corrections_by_event.setdefault(target_id, []).append({
+                        **correction,
+                        "relationship_provenance": _safe_value(relationship.get("provenance"), "provenance"),
+                        "linked_at": _safe_value(relationship.get("created_at"), "created_at"),
+                    })
+                for item in event_items:
+                    item["correction_lineage_status"] = "checked"
+                    linked_corrections = corrections_by_event.get(str(item.get("id") or ""), [])
+                    if linked_corrections:
+                        item["superseded_by_corrections"] = linked_corrections
+                    item["information_status"], item["interpretation_limit"] = _information_status("events", item)
+                sources["events"]["correction_lineage_status"] = "checked"
+            except SQLAlchemyError:
+                for item in event_items:
+                    item["correction_lineage_status"] = "failed"
+                    item["information_status"], item["interpretation_limit"] = _information_status("events", item)
+                sources["events"].update({
+                    "status": "partial",
+                    "candidate_scan_complete": False,
+                    "returned_history_complete": False,
+                    "error_code": "event_correction_lineage_lookup_failed",
+                    "interpretation_limit": (
+                        "The correction history for these events could not be checked. "
+                        "Original reports remain visible, but their currentness is unknown."
+                    ),
+                })
 
     # Attach explicit, person-scoped evidence links to selected care facts.
     # Without this join, the fact text could be retrieved while its originating
