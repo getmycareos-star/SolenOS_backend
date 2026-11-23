@@ -653,13 +653,17 @@ def _response(analysis: CaptureAnalysis) -> dict:
         else _page_count(source_text)
     )
     metadata_processed_pages = metadata.get("processed_page_numbers")
+    unprocessed_page_set = set(unprocessed_pages)
     processed_pages = (
         sorted({
             page for page in metadata_processed_pages
-            if isinstance(page, int) and not isinstance(page, bool) and page > 0
+            if isinstance(page, int)
+            and not isinstance(page, bool)
+            and page > 0
+            and page not in unprocessed_page_set
         })
         if isinstance(metadata_processed_pages, list)
-        else [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
+        else [number for number in range(1, page_count + 1) if number not in unprocessed_page_set]
     )
     stored_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
     all_observations = stored_observations
