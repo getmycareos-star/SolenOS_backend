@@ -158,18 +158,30 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    inspector = inspect(bind)
-    for table_name, columns in reversed(tuple(INDEXES.items())):
-        if not inspector.has_table(table_name):
-            continue
-        expected_columns = set(columns)
-        for index in inspector.get_indexes(table_name):
-            name = str(index.get("name") or "")
-            indexed_columns = tuple(index.get("column_names") or ())
-            if (
-                len(indexed_columns) == 1
-                and indexed_columns[0] in expected_columns
-                and not bool(index.get("unique", False))
-                and _is_migration_owned_index(table_name, indexed_columns[0], name)
-            ):
-                op.drop_index(name, table_name=table_name)
+
+    def drop_migration_owned_indexes() -> None:
+        inspector = inspect(bind)
+        for table_name, columns in reversed(tuple(INDEXES.items())):
+            if not inspector.has_table(table_name):
+                continue
+            expected_columns = set(columns)
+            for index in inspector.get_indexes(table_name):
+                name = str(index.get("name") or "")
+                indexed_columns = tuple(index.get("column_names") or ())
+                if (
+                    len(indexed_columns) == 1
+                    and indexed_columns[0] in expected_columns
+                    and not bool(index.get("unique", False))
+                    and _is_migration_owned_index(table_name, indexed_columns[0], name)
+                ):
+                    if bind.dialect.name == "postgresql":
+                        op.drop_index(name, table_name=table_name, postgresql_concurrently=True)
+                    else:
+                        op.drop_index(name, table_name=table_name)
+
+    if bind.dialect.name == "postgresql":
+        # Keep rollback index removal from blocking ordinary table writes.
+        with op.get_context().autocommit_block():
+            drop_migration_owned_indexes()
+    else:
+        drop_migration_owned_indexes()
