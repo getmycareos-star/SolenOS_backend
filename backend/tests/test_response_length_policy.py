@@ -32,6 +32,17 @@ def test_explicit_caregiver_distress_uses_low_capacity_response_budget():
         assert (policy.target_words, policy.max_words) == (35, 60), message
 
 
+def test_inability_to_continue_and_explicit_pause_use_low_capacity_budget():
+    for message in (
+        "I can't continue right now.",
+        "I cannot keep doing this.",
+        "I need a pause.",
+    ):
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "low_capacity_support", message
+        assert (policy.target_words, policy.max_words) == (35, 60), message
+
+
 def test_patient_emotion_is_not_mistaken_for_caregiver_distress():
     policy = resolve_response_length_policy("Mum has seemed sad and withdrawn this week.")
     assert policy.intent != "low_capacity_support"
