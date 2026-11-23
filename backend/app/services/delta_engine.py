@@ -935,7 +935,9 @@ def _reconcile_from_change_intelligence(
     from sqlalchemy import func
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
-    reference_time = _event_time_for_reconciliation(event_date, source_event_row) or datetime.now(timezone.utc)
+    event_time = _event_time_for_reconciliation(event_date, source_event_row)
+    source_recorded_at = getattr(source_event_row, "recorded_at", None) if source_event_row else None
+    reference_time = event_time or source_recorded_at or datetime.now(timezone.utc)
     source_assertions = []
     if source_event_id:
         source_assertions = db.query(CareAssertion).filter(
@@ -1253,7 +1255,9 @@ def _reconcile_from_change_intelligence(
             "person_id": person_id,
             "created_by_caregiver_id": created_by_caregiver_id,
             "source": source,
-            "event_date": reference_time.isoformat(),
+            "event_date": event_time.isoformat() if event_time else None,
+            "event_time_basis": "explicit_request" if event_date is not None else "persisted_source_event" if event_time else "not_established",
+            "recorded_at": reference_time.isoformat(),
             "source_event_id": source_event_id,
             "evidence_ids": evidence_ids,
             "input_content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
@@ -1347,7 +1351,11 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
 
     effective_event_date = _event_time_for_reconciliation(event_date, source_event_row)
-    delta_recorded_at = datetime.now(timezone.utc)
+    delta_recorded_at = (
+        effective_event_date
+        or (getattr(source_event_row, "recorded_at", None) if source_event_row else None)
+        or datetime.now(timezone.utc)
+    )
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
