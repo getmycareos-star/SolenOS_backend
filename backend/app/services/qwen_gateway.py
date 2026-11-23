@@ -259,6 +259,13 @@ def qwen_chat(
             status_code=503,
             detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
         ) from exc
+    except http.client.HTTPException as exc:
+        # A truncated or malformed HTTP message is an upstream protocol
+        # failure, not an uncaught server error and never a successful answer.
+        _mark_inference_unverified(model)
+        failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
