@@ -341,8 +341,11 @@ def database_schema_differences(bind=None):
 
         expected_indexes = set()
         for index in table.indexes:
+            # B-tree column order is part of the query contract: an index on
+            # (person_id, created_at) does not replace one on (created_at, person_id).
+            # Preserve declared order instead of treating composite indexes as sets.
             columns = tuple(
-                sorted(expression.name for expression in index.expressions if hasattr(expression, "name"))
+                expression.name for expression in index.expressions if hasattr(expression, "name")
             )
             if columns and len(columns) == len(index.expressions):
                 expected_indexes.add(
@@ -359,7 +362,7 @@ def database_schema_differences(bind=None):
                 or item.get("filter_definition")
             )
             actual_indexes.add((
-                tuple(sorted(columns)),
+                tuple(columns),
                 bool(item.get("unique", False)),
                 normalize_index_predicate(predicate),
             ))
