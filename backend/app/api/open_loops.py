@@ -1111,6 +1111,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
     loop.closure_result = "verified"
     loop.closure_actor = "session_caregiver"
     loop.closed_at = datetime.now(timezone.utc)
+    _reassess(db, loop)
 
     # A mandatory dependent becomes actionable only when every prerequisite
     # reaches verified "closed". Cancellation deliberately does not unblock it.
@@ -1166,6 +1167,7 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     loop.closure_result = "cancelled_not_resolved"
     loop.closure_actor = "session_caregiver"
     loop.closed_at = datetime.now(timezone.utc)
+    _reassess(db, loop)
     _audit(db, loop, "cancelled", before, payload.evidence, payload.idempotency_key)
     db.commit()
     db.refresh(loop)
