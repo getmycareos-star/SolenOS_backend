@@ -8724,6 +8724,70 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             retrieval_receipt,
             historical_question=historical_question,
         )
+        # The deterministic retrieval qualifier is caregiver-facing text too.
+        # Validate the final composed response, not only the model's pre-qualifier
+        # draft. If the qualifier pushes a model answer over its ceiling, repair
+        # once against the same authorized context; never truncate the qualifier.
+        if _companion_message_needs_revision(reply, response_length_policy.max_words):
+            deterministic_source_answer = bool(
+                care_history_direct_answer_used
+                or caregiver_question_direct_answer_used
+                or medication_dose_recall_fallback_used
+                or care_history_extractive_fallback_used
+                or low_capacity_support_fallback_used
+            )
+            if not deterministic_source_answer and base:
+                if response_length_policy.max_words is None:
+                    length_repair_instruction = (
+                        "Preserve all material safety information; do not shorten it to meet a generic word count."
+                    )
+                else:
+                    length_repair_instruction = (
+                        f"Target {response_length_policy.target_words} words and remain at or below "
+                        f"{response_length_policy.max_words} words."
+                    )
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": reply},
+                    {"role": "user", "content": (
+                        "Revise the complete caregiver-facing answer because the final retrieval qualification "
+                        "made it exceed the selected response contract. " + length_repair_instruction + " "
+                        "Preserve every supported fact, date, source distinction, uncertainty, conflict, and "
+                        "missing-history qualification. Include this exact qualification when retrieval is incomplete: "
+                        "'I couldn't verify that all relevant saved history was reviewed, so this may not reflect "
+                        "the full care picture.' Do not invent or remove a material safety detail. Return only the answer."
+                    )},
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": response_token_budget},
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion could not preserve the required care-history qualification within its response contract. No reply was saved; please retry.",
+                    ) from exc
+                reply = _qualify_reply_for_incomplete_retrieval(
+                    (reply or "").strip(),
+                    retrieval_receipt,
+                    historical_question=historical_question,
+                )
+            if (
+                _companion_message_needs_revision(reply, response_length_policy.max_words)
+                or _contains_unrequested_saba(reply, validation_source)
+                or _contains_unsupported_care_claim(reply, validation_source)
+                or _contains_unsupported_operational_claim(reply, validation_source, source_context)
+                or _contains_unsupported_record_reference(reply, validation_source)
+                or _caregiver_response_needs_revision(user_text, reply)
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Companion could not preserve all required care-history qualifications within its response contract. No reply was saved; please retry.",
+                )
         if unsupported_trend:
             verdict = "blocked"
             safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
