@@ -6186,7 +6186,7 @@ def _care_history_recall_context_lines(
         caregiver_report = _care_history_event_text({"description": row.description})
         if not caregiver_report:
             continue
-        report_terms = set(re.findall(r"[\\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
+        report_terms = set(re.findall(r"[\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
         if not any(report_terms.intersection(variants) for _, variants in topics):
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
