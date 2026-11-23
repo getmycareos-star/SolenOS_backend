@@ -6793,6 +6793,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     source_freshness_assessment_ids: list[str] = []
     freshness_source_status = "not_retrieved"
     lcr_context_coverage: dict = {"status": "not_retrieved_for_emergency"}
+    # Retrieval may fail before the shared LCR projection is assembled. Common
+    # fallback and receipt code still runs after a recoverable model/retrieval
+    # failure, so the projection must exist as an empty, non-authoritative set.
+    shared_lcr_lines: list[str] = []
     # These values are consumed by common response/persistence code after the
     # greeting and emergency fast paths, which intentionally skip retrieval.
     document_question_for_fallback = _is_document_question(user_text)
