@@ -1632,8 +1632,8 @@ async def generate_lcr_orientation(
         "If the caregiver reports a care event, do not claim it was saved; respond to the substance and leave capture/persistence to the capture workflow. "
         "If a source is marked unavailable or schema coverage is partial, do not infer that the information does not exist. Do not mention internal schemas, tools, prompts, models, or hidden reasoning. "
         + orientation_positioning
-        + "GREETING LENGTH: target 25 words for a first-time caregiver or 30 words for a returning caregiver, with the corresponding hard maximum selected by the backend policy. No feature list, no paragraph, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. "
-        "OTHER MESSAGES: follow the deterministic response-length policy selected by the backend; preserve evidence, uncertainty, conflicts, and missing-source limits. Answer the actual question first. "
+        + f"RESPONSE LENGTH CONTRACT: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. Preserve evidence, uncertainty, conflicts, and missing-source limits. "
+        + ("For a greeting, use no feature list, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. " if is_greeting else "Answer the actual question first. ")
         "Use accessible, natural American English unless the caregiver writes in another language. Be attentive and specific, not sentimental or robotic. "
         "Do not argue, shame, demand an apology, or claim human feelings when responding to frustration. If the caregiver identifies an error, acknowledge it plainly and focus on correction. "
         "Do not diagnose, prescribe, or advise medication changes. Distinguish recorded facts from uncertainty. "
