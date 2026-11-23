@@ -353,7 +353,7 @@ def test_postgres_worker_does_not_requeue_after_lease_reclaim_and_inference_erro
             ).count() == 0
             assert db.query(QwenJobEvent).filter_by(
                 job_id=job_id,
-                event_type="job_retry_scheduled",
+                event_type="job_failed_or_requeued",
             ).count() == 0
             assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
     finally:
