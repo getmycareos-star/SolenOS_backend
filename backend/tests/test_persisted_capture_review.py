@@ -291,7 +291,7 @@ def _post_capture_review(client, path, headers, payload):
 def test_capture_review_rejects_requests_without_the_displayed_candidate_snapshot(monkeypatch):
     client = TestClient(app)
     session = create_session(client, "Snapshot-required recipient")
-    auth = {"Authorization": f"Bearer {session["access_token"]}"}
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
     source_quote = "Mum was restless after dinner."
     monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
         "observations": [{
@@ -319,7 +319,7 @@ def test_capture_review_rejects_requests_without_the_displayed_candidate_snapsho
     process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
 
     response = client.post(
-        f"/api/v1/capture/analyses/{saved.json()["qwen_analysis_id"]}/review",
+        f"/api/v1/capture/analyses/{saved.json()['qwen_analysis_id']}/review",
         headers=auth,
         json={"candidate_index": 0, "decision": "accept"},
     )
