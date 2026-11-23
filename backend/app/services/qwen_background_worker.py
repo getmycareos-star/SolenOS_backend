@@ -1208,6 +1208,7 @@ def _run_qwen_support_assist(payload, request):
 async def process_one_qwen_job(job_id: str | None = None) -> bool:
     db = SessionLocal()
     job = None
+    lease_state: dict | None = None
     lease_task: asyncio.Task | None = None
     try:
         # The API container can start while the deployment migration command is
@@ -1255,9 +1256,17 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         )
 
         if job.workflow == "daily_capture_extraction":
-            return await _process_daily_capture_extraction(db, job)
+            completed = await _process_daily_capture_extraction(db, job)
+            if lease_state and lease_state.get("lost"):
+                db.rollback()
+                return True
+            return completed
         if job.workflow == "daily_capture_delta_reconciliation":
-            return await _process_daily_capture_delta_reconciliation(db, job)
+            completed = await _process_daily_capture_delta_reconciliation(db, job)
+            if lease_state and lease_state.get("lost"):
+                db.rollback()
+                return True
+            return completed
 
         # Document intake reuses this durable PostgreSQL queue so extraction and
         # review continue even if the caregiver closes the app after upload.
@@ -1283,6 +1292,9 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     job.person_id,
                     job.caregiver_id,
                 )
+                if lease_state and lease_state.get("lost"):
+                    db.rollback()
+                    return True
                 # A caregiver may delete the source while OCR/model work is in
                 # flight. Never let this stale worker overwrite cancellation or
                 # requeue the deleted document after the processing call returns.
@@ -1445,6 +1457,10 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         # isolated worker thread and session so live inference cannot block
         # lease renewal or share a SQLAlchemy Session across threads.
         result = await asyncio.to_thread(_run_qwen_support_assist, payload, fake_request)
+        # Do not persist an answer from a worker whose exact lease was reclaimed.
+        if lease_state and lease_state.get("lost"):
+            db.rollback()
+            return True
         # The source may have been deleted while inference was running. A
         # cancelled job must never persist a derived answer after that deletion.
         current_job = db.query(QwenBackgroundJob).filter(
@@ -1541,6 +1557,14 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 if current is not None and current.status == "cancelled":
                     # Cancellation is terminal regardless of why the caregiver
                     # or source lifecycle stopped the job. Never requeue it.
+                    db.rollback()
+                    return True
+                if current is not None and lease_state and (
+                    lease_state.get("lost")
+                    or current.locked_at != lease_state.get("locked_at")
+                ):
+                    # A reclaimed worker must not requeue, fail, or otherwise
+                    # overwrite the state owned by the newer lease holder.
                     db.rollback()
                     return True
                 if current is not None:
