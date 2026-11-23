@@ -684,9 +684,17 @@ def main():
         )
         require(status == 200,
                 f"Source-backed professional response failed: {status}: {accepted_professional_response}")
+        status, current_professional_loop = request(
+            "GET", f"/api/v1/open-loops/{professional_loop_id}", token=token_a,
+        )
+        require(
+            status == 200 and current_professional_loop.get("loop", {}).get("version") is not None,
+            f"Source-backed professional loop version could not be refreshed: {status}: {current_professional_loop}",
+        )
         status, closed_professional_loop = request(
             "POST", f"/api/v1/open-loops/{professional_loop_id}/close", token=token_a,
-            body={"text": "Reviewed against source record",
+            body={"expected_version": current_professional_loop["loop"]["version"],
+                  "text": "Reviewed against source record",
                   "evidence": [{"kind": "closure_review", "text": "Synthetic CI closure review"}]},
         )
         require(status == 200 and closed_professional_loop.get("loop", {}).get("status") == "closed",
