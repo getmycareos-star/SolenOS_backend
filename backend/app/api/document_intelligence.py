@@ -89,6 +89,7 @@ class CandidateReview(BaseModel):
     # candidate ordering changes between render and submission.
     expected_source_quote: str = Field(max_length=20000)
     expected_subject: str = Field(max_length=120)
+    expected_observation: str = Field(max_length=500)
     expected_candidate_id: str | None = Field(default=None, max_length=128)
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
@@ -1528,6 +1529,7 @@ def review_document_candidate(
         )
     if (
         candidate.get("subject") != payload.expected_subject
+        or candidate.get("observation") != payload.expected_observation
     ):
         raise HTTPException(
             status_code=409,
