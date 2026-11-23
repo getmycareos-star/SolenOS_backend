@@ -423,6 +423,19 @@ def test_postgres_follow_up_approval_rejects_stale_open_loop_version():
         "limitations": "The source may have changed since it was reviewed.",
         "evidence_ids": [evidence_id],
     }
+    missing_version_payload = {
+        **payload,
+        "idempotency_key": f"missing-version-{suffix}-0001",
+        "suggestion_version": None,
+    }
+    missing_version = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=headers,
+        json=missing_version_payload,
+    )
+    assert missing_version.status_code == 409, missing_version.text
+    assert "no saved version to verify" in missing_version.json()["detail"]
+
     stale = client.post(
         f"/api/v1/registered-actions/{person_id}/approve",
         headers=headers,
@@ -438,6 +451,24 @@ def test_postgres_follow_up_approval_rejects_stale_open_loop_version():
         json=payload,
     )
     assert current.status_code == 201, current.text
+
+    with SessionLocal() as db:
+        loop = db.query(OpenLoopRecord).filter_by(id=f"stale-loop-{suffix}").one()
+        loop.version = 3
+        loop.status = "resolved"
+        db.commit()
+    closed_payload = {
+        **payload,
+        "idempotency_key": f"closed-follow-up-{suffix}-0001",
+        "suggestion_version": 3,
+    }
+    closed = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=headers,
+        json=closed_payload,
+    )
+    assert closed.status_code == 409, closed.text
+    assert "no longer open for approval" in closed.json()["detail"]
 
     unversioned_payload = {
         **payload,
