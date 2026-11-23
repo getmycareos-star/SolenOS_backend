@@ -911,6 +911,23 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
+        # Matching source quote and subject are insufficient if the generated
+        # interpretation changed after the caregiver rendered the candidate.
+        stale_observation = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": caregiver_label,
+                "expected_observation": "An older interpretation of the same source quote.",
+            },
+        )
+        assert stale_observation.status_code == 409, stale_observation.text
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # A caregiver decision from an older rendered candidate must not apply
         # after the candidate subject has been corrected in another review.
         stale_snapshot = client.post(
