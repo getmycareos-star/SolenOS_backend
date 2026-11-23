@@ -134,6 +134,37 @@ def test_schema_verifier_reports_missing_partial_index_predicate():
         engine.dispose()
 
 
+def test_schema_verifier_does_not_accept_partial_unique_index_as_full_constraint():
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE caregivers (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("""
+                CREATE TABLE caregiver_accounts (
+                    id VARCHAR PRIMARY KEY,
+                    email_normalized VARCHAR(320) NOT NULL,
+                    password_hash VARCHAR(256) NOT NULL,
+                    person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+                    caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id) ON DELETE CASCADE,
+                    created_at DATETIME NOT NULL
+                )
+            """))
+            connection.execute(text("""
+                CREATE UNIQUE INDEX uq_caregiver_accounts_email_normalized
+                ON caregiver_accounts(email_normalized)
+                WHERE id IS NOT NULL
+            """))
+        differences = database_schema_differences(engine)
+        assert any(
+            item.startswith("caregiver_accounts: missing unique constraints")
+            and "email_normalized" in item
+            for item in differences
+        )
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_tables():
     engine = create_engine("sqlite:///:memory:")
     try:
