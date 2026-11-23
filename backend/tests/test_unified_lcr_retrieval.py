@@ -1231,6 +1231,52 @@ def test_withdrawn_or_superseded_evidence_never_reads_as_current():
         assert "do not treat it as current evidence" in explanation
 
 
+def test_postgres_lcr_preserves_exact_document_quotation_for_companion():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        quote = "The exact wording from the scanned clinic letter. " * 75
+        with Session(bind=connection) as db:
+            person = Person(id="exact-quote-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="exact-quote-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add(CareAssertion(
+                id="exact-document-quote-assertion",
+                person_id=person.id,
+                subject_type="person",
+                subject_id=person.id,
+                field="clinic_letter_statement",
+                assertion_kind="document_reviewed_observation",
+                asserted_value="A source-backed statement",
+                source_label="Caregiver-reviewed document",
+                source_text=quote,
+                evidence_ids=["exact-document-evidence"],
+                assertion_status="accepted",
+                epistemic_state="reported",
+                created_by_caregiver_id=caregiver.id,
+                updated_by_caregiver_id=caregiver.id,
+            ))
+            db.flush()
+            context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id, include_all_history=True,
+            )
+        assertion = next(
+            item for item in context["sources"]["assertions"]["items"]
+            if item["id"] == "exact-document-quote-assertion"
+        )
+        assert assertion["source_text"] == quote
+        prompt = format_lcr_context_for_prompt(context, max_chars=12000)
+        assert quote in prompt
+    finally:
+        connection.close()
+        engine.dispose()
+
+
 def test_postgres_lcr_keeps_failed_and_pending_document_extractions_visible():
     engine, connection, schema = _postgres_conversation_db()
     try:
