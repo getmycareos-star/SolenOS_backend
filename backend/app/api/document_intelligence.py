@@ -118,10 +118,11 @@ def _metadata(analysis: CaptureAnalysis) -> dict:
 
 
 def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | None = None) -> list[int]:
-    """Combine explicit failure markers with missing page markers persisted at extraction time."""
+    """Combine explicit failures with PDF page gaps, including legacy records without page metadata."""
     value = metadata if isinstance(metadata, dict) else (
         analysis.candidates if isinstance(analysis.candidates, dict) else {}
     )
+    source_text = analysis.source_text or ""
     recorded = value.get("unprocessed_page_numbers")
     persisted = {
         page for page in recorded
@@ -130,7 +131,23 @@ def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | Non
         and not isinstance(page, bool)
         and page > 0
     } if isinstance(recorded, list) else set()
-    return sorted(set(_unprocessed_page_numbers(analysis.source_text or "")) | persisted)
+    unprocessed = set(_unprocessed_page_numbers(source_text)) | persisted
+    mime_type = str(value.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+    filename = str(value.get("filename") or "").casefold()
+    is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
+    if is_paginated_pdf:
+        raw_page_count = value.get("page_count")
+        page_count = (
+            raw_page_count
+            if isinstance(raw_page_count, int) and not isinstance(raw_page_count, bool) and raw_page_count > 0
+            else _page_count(source_text)
+        )
+        observed_pages = {
+            int(match.group(1))
+            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+        }
+        unprocessed.update(set(range(1, page_count + 1)) - observed_pages)
+    return sorted(unprocessed)
 
 
 def _require_complete_extraction(analysis: CaptureAnalysis) -> None:
@@ -654,17 +671,28 @@ def _response(analysis: CaptureAnalysis) -> dict:
     )
     metadata_processed_pages = metadata.get("processed_page_numbers")
     unprocessed_page_set = set(unprocessed_pages)
-    processed_pages = (
-        sorted({
-            page for page in metadata_processed_pages
-            if isinstance(page, int)
-            and not isinstance(page, bool)
-            and page > 0
-            and page not in unprocessed_page_set
-        })
-        if isinstance(metadata_processed_pages, list)
-        else [number for number in range(1, page_count + 1) if number not in unprocessed_page_set]
-    )
+    if isinstance(metadata_processed_pages, list):
+        recorded_processed_pages = metadata_processed_pages
+    else:
+        # Legacy rows may not have a processed-page manifest. Derive only pages
+        # with actual source markers; never infer that an absent PDF page was read.
+        recorded_processed_pages = [
+            int(match.group(1))
+            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+        ]
+        if not recorded_processed_pages and source_text.strip() and not (
+            str(metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold() == "application/pdf"
+            or str(metadata.get("filename") or "").casefold().endswith(".pdf")
+        ):
+            recorded_processed_pages = [1]
+    processed_pages = sorted({
+        page for page in recorded_processed_pages
+        if isinstance(page, int)
+        and not isinstance(page, bool)
+        and page > 0
+        and page not in unprocessed_page_set
+        and page not in set(unreadable_pages)
+    })
     stored_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
     all_observations = stored_observations
     extraction_complete = (
