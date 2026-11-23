@@ -17,19 +17,36 @@ def test_first_time_and_returning_greetings_have_distinct_targets_and_maxima():
     assert resolve_response_length_policy("Hello again", caregiver_stage="returning").intent == "returning_greeting"
 
 
-def test_explicit_caregiver_distress_uses_low_capacity_response_budget():
+def test_explicit_caregiver_capacity_signals_use_low_capacity_response_budget():
     for message in (
-        "I'm sad about how things are going.",
-        "I feel very lonely looking after her.",
-        "I'm really angry and upset.",
-        "I feel so frustrated with all of this.",
-        "I feel hopeless about how much care is needed.",
-        "I've been crying all morning.",
+        "I'm overwhelmed by everything today.",
+        "I'm exhausted and can't keep up.",
+        "I'm really angry and exhausted.",
+        "I can't cope with all of this.",
+        "I can't continue right now.",
+        "I need a break.",
         "I just want a break.",
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent == "low_capacity_support", message
         assert (policy.target_words, policy.max_words) == (35, 60), message
+
+
+def test_emotion_alone_does_not_override_a_caregiver_request_for_detail():
+    detailed = resolve_response_length_policy(
+        "I'm sad about how things are going. Please explain the full care history and timeline."
+    )
+    assert detailed.intent == "complex_care_history"
+    assert (detailed.target_words, detailed.max_words) == (150, 250)
+
+    for message in (
+        "I'm lonely. What did the caregiver record about Mum's sleep?",
+        "I'm frightened about the future. What was recorded at the last appointment?",
+        "I'm angry about this. Explain what changed over time.",
+        "I've been crying this morning.",
+    ):
+        policy = resolve_response_length_policy(message)
+        assert policy.intent != "low_capacity_support", message
 
 
 def test_inability_to_continue_and_explicit_pause_use_low_capacity_budget():
