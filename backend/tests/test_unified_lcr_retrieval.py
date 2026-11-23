@@ -1352,14 +1352,17 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 person_id="partial-document-person",
                 caregiver_id="partial-document-caregiver",
                 source_evidence_id="partial-interpretation-evidence",
-                source_text="Medication list: the original text was extracted successfully.",
+                source_text=(
+                    "[Page 1 OCR]\nMedication list: the original text was extracted successfully.\n"
+                    "[Page 2 OCR]\nThe second page was also extracted successfully."
+                ),
                 extraction_status="available",
                 candidates={
                     "kind": "document_extraction_v1",
                     "page_count": 2,
-                    "processed_page_numbers": [1],
+                    "processed_page_numbers": [1, 2],
                     "unreadable_page_numbers": [],
-                    "unprocessed_page_numbers": [2],
+                    "unprocessed_page_numbers": [],
                     "extraction_method": "server_pdf_text",
                     "document_intelligence": {"status": "partial", "observations": []},
                 },
