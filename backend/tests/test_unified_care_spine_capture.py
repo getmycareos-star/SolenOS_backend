@@ -617,6 +617,16 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
                 person_id=person_id,
             ))
             db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                role="primary",
+                access_scope="full_record",
+                status="active",
+                can_manage_members=True,
+                granted_by_caregiver_id=caregiver_id,
+            ))
+            db.flush()
             job = QwenBackgroundJob(
                 person_id=person_id,
                 caregiver_id=caregiver_id,
