@@ -4962,6 +4962,110 @@ def update_care_continuity_resource(
         raise HTTPException(status_code=404, detail="This care-continuity resource has no update workflow")
     person_id, caregiver_id = _scoped_identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
+
+    if resource == "caregiver-observations":
+        allowed = WRITABLE["caregiver-observations"]
+        changes = {key: value for key, value in payload.items() if key in allowed}
+        if not changes:
+            raise HTTPException(status_code=422, detail="No supported observation fields supplied")
+        table = _table(db, RESOURCES["caregiver-observations"])
+        try:
+            current_row = db.execute(
+                select(table).where(
+                    table.c.id == record_id,
+                    table.c.person_id == person_id,
+                ).with_for_update()
+            ).mappings().first()
+            if current_row is None:
+                raise HTTPException(status_code=404, detail="Observation not found")
+
+            # Keep the user-facing description and the persisted source wording
+            # synchronized without replacing the observation's original history.
+            if "description" in changes:
+                if not isinstance(changes["description"], str) or not changes["description"].strip():
+                    raise HTTPException(status_code=422, detail="description must be a non-empty string")
+                if "observation_content" in table.c:
+                    changes["observation_content"] = changes["description"]
+
+            if "observation_type" in changes:
+                raw_type = str(changes["observation_type"] or "").strip().casefold()
+                allowed_types = {item.value.casefold(): item.name for item in ObservationType}
+                allowed_types.update({item.name.casefold(): item.name for item in ObservationType})
+                normalized_type = allowed_types.get(raw_type)
+                if normalized_type is None:
+                    raise HTTPException(status_code=422, detail="Unsupported observation type")
+                changes["observation_type"] = normalized_type
+
+            if "observed_at" in changes:
+                observed_at = changes["observed_at"]
+                if isinstance(observed_at, str) and observed_at.strip():
+                    try:
+                        observed_at = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+                    except ValueError as exc:
+                        raise HTTPException(status_code=422, detail="observed_at must be a valid ISO-8601 datetime") from exc
+                if observed_at is not None and not isinstance(observed_at, datetime):
+                    raise HTTPException(status_code=422, detail="observed_at must be a valid ISO-8601 datetime")
+                changes["observed_at"] = observed_at
+                if "event_time" in table.c:
+                    changes["event_time"] = observed_at
+
+            if "evidence_ids" in changes:
+                evidence_ids = changes["evidence_ids"]
+                if not isinstance(evidence_ids, list) or any(not isinstance(item, str) or not item.strip() for item in evidence_ids):
+                    raise HTTPException(status_code=422, detail="evidence_ids must be a list of non-empty evidence IDs")
+                if len(evidence_ids) != len(set(evidence_ids)):
+                    raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
+                if evidence_ids:
+                    found = set(db.execute(
+                        select(Evidence.id).where(
+                            Evidence.person_id == person_id,
+                            Evidence.id.in_(evidence_ids),
+                        )
+                    ).scalars().all())
+                    if found != set(evidence_ids):
+                        raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
+
+            changes = {key: value for key, value in changes.items() if key in table.c}
+            if not changes:
+                raise HTTPException(status_code=422, detail="No supported observation fields supplied")
+            before = _jsonable(dict(current_row))
+            if "updated_at" in table.c:
+                changes["updated_at"] = datetime.now(timezone.utc)
+            db.execute(
+                update(table).where(
+                    table.c.id == record_id,
+                    table.c.person_id == person_id,
+                ).values(**changes)
+            )
+            updated_row = db.execute(
+                select(table).where(
+                    table.c.id == record_id,
+                    table.c.person_id == person_id,
+                )
+            ).mappings().one()
+            _append_revision_for_change_item(
+                db,
+                person_id,
+                caregiver_id,
+                {
+                    "target_type": "caregiver_observation",
+                    "target_id": record_id,
+                    "operation": "updated",
+                    "before_value": before,
+                    "after_value": _jsonable(dict(updated_row)),
+                },
+            )
+            db.commit()
+            return _jsonable(dict(updated_row))
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="Observation update and revision could not be committed") from exc
+
+    if resource != "decisions":
+        raise HTTPException(status_code=404, detail="This care-continuity resource has no update workflow")
     allowed = WRITABLE["decisions"]
     changes = {key: value for key, value in payload.items() if key in allowed}
     if not changes:
