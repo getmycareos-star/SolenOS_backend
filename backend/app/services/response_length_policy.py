@@ -48,9 +48,11 @@ _EMOTIONAL = re.compile(
 )
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
-    r"unconscious|stroke symptoms|face drooping|chest pain|severe bleeding|choking|"
-    r"overdose|suicide attempt|life[- ]threatening|collapsed|seizure|cannot wake|"
-    r"can't wake|blue lips|gasping|heavy bleeding)\b",
+    r"unconscious|stroke(?: symptoms)?|face drooping|chest pain|heart attack|"
+    r"severe bleeding|heavy bleeding|choking|seizure|overdose|poisoning|"
+    r"suicidal|suicide attempt|trying to kill myself|self[- ]harm|immediate danger|"
+    r"life[- ]threatening|collapsed|cannot wake|can't wake|not waking up|"
+    r"blue lips|gasping|anaphylaxis|severe allergic reaction)\b",
     re.I,
 )
 _APPOINTMENT = re.compile(
@@ -83,6 +85,11 @@ _EXPLANATION = re.compile(
 )
 
 
+def is_critical_safety_message(message: str) -> bool:
+    """Shared deterministic emergency classifier for response policy and Companion."""
+    return bool(_CRITICAL.search(message or ""))
+
+
 def is_greeting_message(message: str) -> bool:
     """Shared exact-match greeting detector; emotional messages are not greetings."""
     value = re.sub(r"[.!?,;:]+", " ", (message or "").casefold().strip())
@@ -106,7 +113,7 @@ def resolve_response_length_policy(
         return _POLICIES["critical_safety"]
 
     value = " ".join((message or "").casefold().split())
-    if _CRITICAL.search(value):
+    if is_critical_safety_message(value):
         return _POLICIES["critical_safety"]
     if _EMOTIONAL.search(value):
         return _POLICIES["low_capacity_support"]
