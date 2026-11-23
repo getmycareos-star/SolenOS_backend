@@ -64,6 +64,7 @@ def test_all_longer_caregiver_workflows_have_explicit_contracts():
 
 def test_goodbye_and_thanks_are_acknowledgements_not_orientation_greetings():
     assert resolve_response_length_policy("Goodbye").intent == "simple_acknowledgement"
+    assert resolve_response_length_policy("Good night").intent == "simple_acknowledgement"
     assert resolve_response_length_policy("Thanks", caregiver_stage="new").intent == "simple_acknowledgement"
 
 
@@ -113,6 +114,7 @@ def test_shared_greeting_detector_matches_orientation_and_companion_boundaries()
     assert is_greeting_message("How are you today?")
     assert not is_greeting_message("Thanks")
     assert not is_greeting_message("Goodbye")
+    assert not is_greeting_message("Good night")
     assert not is_greeting_message("Hi, I am exhausted.")
 
 
