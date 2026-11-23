@@ -153,6 +153,7 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
         },
     )
     assert invited.status_code == 201, invited.text
+    invited_caregiver_id = invited.json()["caregiver_id"]
     invited_headers = {"Authorization": f"Bearer {invited.json()['access_token']}"}
     invited_list = client.get("/api/v1/conversations", headers=invited_headers)
     assert invited_list.status_code == 200, invited_list.text
