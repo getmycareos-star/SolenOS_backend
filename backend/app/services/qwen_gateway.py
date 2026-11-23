@@ -17,6 +17,8 @@ from urllib.parse import urlparse
 
 from fastapi import HTTPException
 
+from app.services.qwen_system_prompt import apply_solenos_system_contract
+
 logger = logging.getLogger(__name__)
 _READINESS_CACHE: dict[str, object] = {"checked_at": 0.0, "result": None}
 _INFERENCE_VERIFICATION_CACHE: dict[str, object] = {"verified_at": 0.0, "model": None}
@@ -98,6 +100,9 @@ def qwen_chat(
     response_format: dict | str | None = None,
     options: dict | None = None,
 ) -> str:
+    # Every inference receives the canonical SolenOS care-continuity contract.
+    # Workflow prompts remain intact and are appended as narrower instructions.
+    messages = apply_solenos_system_contract(messages)
     started = time.monotonic()
     try:
         base, model, configured_timeout = get_ollama_config()
