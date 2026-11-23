@@ -6580,7 +6580,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"\b(?:you keep asking|i already told you|i've already told you|"
         r"i have already told you|stop asking|asked you before|"
         r"why do i have to repeat|i said this already|you forgot|"
-        r"this is ridiculous|you are not listening|this is useless|"
+        r"this is ridiculous|you are not listening|this is useless|this system is useless|this app is useless|"
         r"you(?:'re| are) (?:useless|stupid)|you keep getting this wrong|"
         r"this keeps failing|i(?:'m| am) (?:really |very |so )?frustrated with (?:being asked again|repeating myself|this system)|"
         r"i feel (?:really |very |so )?fed up with (?:this system|being asked again))\b",
