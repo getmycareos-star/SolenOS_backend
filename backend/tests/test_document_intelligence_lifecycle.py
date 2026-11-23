@@ -78,13 +78,17 @@ def review_payload(analysis_id, candidate_index, decision, **extra):
         intelligence = (analysis.candidates or {}).get("document_intelligence") or {}
         candidates = intelligence.get("observations") or []
         candidate = candidates[candidate_index]
+        review_status = candidate.get("review_status") or "pending_review"
+        if review_status not in {"pending_review", "corrected_pending_approval"}:
+            # Final-decision idempotent replays are resolved before the pending-state guard.
+            review_status = "pending_review"
         return {
             "candidate_index": candidate_index,
             "decision": decision,
             "expected_source_quote": candidate.get("source_quote") or "",
             "expected_subject": candidate.get("subject") or "",
             "expected_observation": candidate.get("observation") or "",
-            "expected_review_status": candidate.get("review_status") or "pending_review",
+            "expected_review_status": review_status,
             **extra,
         }
 
