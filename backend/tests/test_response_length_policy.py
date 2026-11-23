@@ -40,3 +40,21 @@ def test_hard_maximum_rejects_without_truncating():
     policy = resolve_response_length_policy("What does this document mean?")
     assert policy.max_words == 180
     assert response_exceeds_hard_maximum("word " * 181, policy)
+
+
+
+def test_acknowledgement_is_not_misclassified_as_first_time_orientation():
+    policy = resolve_response_length_policy("Thanks", caregiver_stage="new")
+    assert policy.intent == "simple_acknowledgement"
+    assert (policy.target_words, policy.max_words) == (10, 15)
+
+
+def test_all_longer_caregiver_workflows_have_explicit_contracts():
+    assert (resolve_response_length_policy("Prepare for Mum's appointment").target_words,
+            resolve_response_length_policy("Prepare for Mum's appointment").max_words) == (150, 250)
+    assert (resolve_response_length_policy("Prepare a care handoff").target_words,
+            resolve_response_length_policy("Prepare a care handoff").max_words) == (150, 250)
+    assert (resolve_response_length_policy("What does this document mean?").target_words,
+            resolve_response_length_policy("What does this document mean?").max_words) == (100, 180)
+    assert (resolve_response_length_policy("Has her sleep worsened over time?").target_words,
+            resolve_response_length_policy("Has her sleep worsened over time?").max_words) == (120, 200)
