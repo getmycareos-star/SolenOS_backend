@@ -537,34 +537,59 @@ async def ask_daily_care_qwen(
         "If there is no supported proposal, return an empty proposals array. Return only the required JSON."
     )
     system_prompt += f" RESPONSE LENGTH: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. Preserve source limitations and uncertainty; do not pad or speculate."
+    daily_messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": json.dumps({
+            "question": payload.question,
+            "retrieved_history": selected,
+            "retrieval_metadata": {
+                "matching_records_in_database": len(records),
+                "records_sent_to_model": len(selected),
+                "records_omitted_from_model": records_omitted,
+                "selection_truncated": selection_truncated,
+                "oldest_record_at": bundle["oldest_record_at"],
+                "newest_record_at": bundle["newest_record_at"],
+                "lcr_context": bundle.get("lcr_context", {}),
+            },
+            "lcr_proposals_requested": payload.prepare_lcr_proposals,
+        }, ensure_ascii=False)},
+    ]
+    daily_token_budget = min(
+        1024,
+        response_length_policy.token_budget + (256 if payload.prepare_lcr_proposals else 0),
+    )
     try:
         raw = await __import__("asyncio").to_thread(
             qwen_chat,
-            [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": json.dumps({
-                    "question": payload.question,
-                    "retrieved_history": selected,
-                    "retrieval_metadata": {
-                        "matching_records_in_database": len(records),
-                        "records_sent_to_model": len(selected),
-                        "records_omitted_from_model": records_omitted,
-                        "selection_truncated": selection_truncated,
-                        "oldest_record_at": bundle["oldest_record_at"],
-                        "newest_record_at": bundle["newest_record_at"],
-                        "lcr_context": bundle.get("lcr_context", {}),
-                    },
-                    "lcr_proposals_requested": payload.prepare_lcr_proposals,
-                }, ensure_ascii=False)},
-            ],
+            daily_messages,
             response_format=schema,
-            options={"temperature": 0, "num_predict": min(1024, response_length_policy.token_budget + (256 if payload.prepare_lcr_proposals else 0))},
+            options={"temperature": 0, "num_predict": daily_token_budget},
         )
         parsed = json.loads(raw)
         if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not isinstance(parsed.get("proposals"), list):
             raise ValueError("invalid qwen response schema")
         if response_exceeds_hard_maximum(parsed["answer"], response_length_policy):
-            raise ValueError("Qwen answer exceeded the selected caregiver response-length contract")
+            repair_messages = [
+                *daily_messages,
+                {"role": "assistant", "content": raw},
+                {"role": "user", "content": (
+                    f"Revise only the caregiver-facing answer to target {response_length_policy.target_words} words "
+                    f"and remain at or below {response_length_policy.max_words} words. Preserve every supported fact, "
+                    "source ID, date, conflict, uncertainty, and missing-history qualification. Do not truncate a sentence "
+                    "or remove a material safety detail. Keep the proposals array and exact JSON schema valid. Return JSON only."
+                )},
+            ]
+            raw = await __import__("asyncio").to_thread(
+                qwen_chat,
+                repair_messages,
+                response_format=schema,
+                options={"temperature": 0, "num_predict": daily_token_budget},
+            )
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not isinstance(parsed.get("proposals"), list):
+                raise ValueError("invalid repaired qwen response schema")
+            if response_exceeds_hard_maximum(parsed["answer"], response_length_policy):
+                raise ValueError("Qwen answer exceeded the selected caregiver response-length contract after repair")
     except HTTPException as exc:
         if exc.status_code == 503:
             return {
