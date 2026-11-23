@@ -2875,6 +2875,30 @@ def prepare_handoff_draft(
     if document_items:
         sections.append({"title": "Uploaded documents and extracted text", "items": document_items})
 
+    event_records_present = any(
+        isinstance(record, dict) and record.get("source_table") == "care_events"
+        for record in records
+    )
+    if event_records_present:
+        try:
+            event_lineage_context = build_lcr_context(
+                db, person_id, caregiver_id=caregiver_id,
+                limit_per_source=40, include_all_history=True,
+            )
+        except Exception:
+            logger.exception("Handoff correction-aware event projection failed")
+            event_lineage_context = {}
+        records = _attach_event_correction_lineage(records, event_lineage_context)
+        if any(
+            record.get("correction_lineage_status") != "checked"
+            for record in records
+            if isinstance(record, dict) and record.get("source_table") == "care_events"
+        ):
+            statuses["care_events"].update({
+                "status": "partial",
+                "reason": "event_correction_lineage_incomplete",
+            })
+
     gaps = [
         {"source": name, "status": info["status"], "reason": info.get("reason")}
         for name, info in statuses.items()
@@ -2908,21 +2932,6 @@ def prepare_handoff_draft(
     request_id = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())
     if len(request_id) > 255:
         raise HTTPException(status_code=422, detail="Draft request ID must be 255 characters or fewer")
-    event_records_present = any(
-        isinstance(record, dict) and record.get("source_table") == "care_events"
-        for record in records
-    )
-    if event_records_present:
-        try:
-            event_lineage_context = build_lcr_context(
-                db, person_id, caregiver_id=caregiver_id,
-                limit_per_source=40, include_all_history=True,
-            )
-        except Exception:
-            logger.exception("Handoff correction-aware event projection failed")
-            event_lineage_context = {}
-        records = _attach_event_correction_lineage(records, event_lineage_context)
-
     source_snapshot = {
         "snapshot_id": str(uuid.uuid4()),
         "snapshot_at": now.isoformat(),
