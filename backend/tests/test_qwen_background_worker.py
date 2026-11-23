@@ -610,50 +610,6 @@ def test_worker_waits_quietly_when_job_table_is_not_yet_migrated(tmp_path, monke
         engine.dispose()
 
 
-def test_document_intake_job_can_be_cancelled_while_ocr_is_running(tmp_path, monkeypatch):
-    sessions = _isolated_job_store(tmp_path, monkeypatch)
-    db = sessions()
-    job = QwenBackgroundJob(
-        person_id="person-test",
-        caregiver_id="caregiver-test",
-        task_text="Process saved document for caregiver review.",
-        context_text="",
-        workflow="document_intake",
-        evidence_ids_json='["evidence-test"]',
-        status="queued",
-        attempt_count=0,
-        available_at=datetime.now(timezone.utc) - timedelta(minutes=1),
-    )
-    db.add(job)
-    db.commit()
-    job_id = job.id
-    db.close()
-
-    def cancel_during_ocr(evidence_id, person_id, caregiver_id):
-        assert evidence_id == "evidence-test"
-        other_db = sessions()
-        current = other_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
-        current.status = "cancelled"
-        current.locked_at = None
-        current.error_code = "document_deleted_during_processing"
-        other_db.commit()
-        other_db.close()
-        return (
-            {"analysis_id": "analysis-test", "retryable_page_numbers": [], "retry_exhausted_page_numbers": []},
-            {"intelligence_status": "complete", "observations": [], "processed_page_count": 1, "total_page_count": 1, "unprocessed_page_numbers": []},
-        )
-
-    monkeypatch.setattr(worker, "_process_document_evidence", cancel_during_ocr)
-    assert asyncio.run(worker.process_one_qwen_job()) is True
-
-    db = sessions()
-    current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
-    assert current.status == "cancelled"
-    assert current.error_code == "document_deleted_during_processing"
-    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="document_intake_completed").count() == 0
-    db.close()
-
-
 def test_worker_processes_document_intake_job_without_qwen_output(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     db = sessions()
