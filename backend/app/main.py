@@ -1759,11 +1759,11 @@ async def generate_lcr_orientation(
     except Exception as exc:
         if is_greeting:
             if caregiver_stage == "new":
-                fallback_reply = "Welcome to SolenOS. We help keep your loved one's care story together; start with whatever is happening today."
+                fallback_reply = "Welcome to SolenOS. This is where we can start keeping your loved one's care story together, including what happens today and what changes over time."
             elif caregiver_stage == "returning":
-                fallback_reply = "Welcome back to SolenOS. Your care record is here, and we can continue with the update that matters today."
+                fallback_reply = "Welcome back to SolenOS. Your care record is already underway, so we can continue with today's update and keep the earlier care story in view, without losing the details that matter."
             else:
-                fallback_reply = "Welcome to SolenOS. We can start with the care story you want to keep track of today."
+                fallback_reply = "Welcome to SolenOS. We can keep the care story together as you share what is happening, while being clear about what is known and what still needs checking."
             return {
                 "reply": fallback_reply,
                 "ai_generated": False,
