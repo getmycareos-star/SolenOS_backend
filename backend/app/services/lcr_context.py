@@ -18,6 +18,7 @@ from sqlalchemy import MetaData, String, Table, and_, cast, desc, false, func, i
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.models.care_continuity import CareStateRevision
 from app.services.epistemic_contract import assertion_information_status
 
 # Only caregiver-relevant fields are exposed. Internal storage paths, raw tokens,
@@ -1334,21 +1335,14 @@ def build_lcr_context(
     # preparation cannot be presented as current after the LCR has changed.
     workspace_source = sources.get("appointment_workspaces")
     if workspace_source and workspace_source.get("items"):
-        revision_table = metadata.tables.get("care_state_revisions")
         latest_care_change = None
-        freshness_available = bool(
-            revision_table is not None
-            and {"person_id", "changed_at"}.issubset(revision_table.c.keys())
-        )
-        if freshness_available:
-            try:
-                latest_care_change = db.execute(
-                    select(func.max(revision_table.c.changed_at)).where(
-                        revision_table.c.person_id == str(person_id)
-                    )
-                ).scalar_one_or_none()
-            except Exception:
-                freshness_available = False
+        freshness_available = True
+        try:
+            latest_care_change = db.query(func.max(CareStateRevision.changed_at)).filter(
+                CareStateRevision.person_id == str(person_id)
+            ).scalar()
+        except Exception:
+            freshness_available = False
         for workspace in workspace_source["items"]:
             updated_value = workspace.get("updated_at")
             try:
