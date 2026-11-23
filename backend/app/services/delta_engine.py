@@ -936,8 +936,7 @@ def _reconcile_from_change_intelligence(
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
     event_time = _event_time_for_reconciliation(event_date, source_event_row)
-    source_recorded_at = getattr(source_event_row, "recorded_at", None) if source_event_row else None
-    reference_time = event_time or source_recorded_at or datetime.now(timezone.utc)
+    reference_time = _reconciliation_reference_time(event_time, source_event_row)
     source_assertions = []
     if source_event_id:
         source_assertions = db.query(CareAssertion).filter(
@@ -1318,6 +1317,19 @@ def _event_time_for_reconciliation(
     return getattr(source_event_row, "occurred_at", None)
 
 
+def _reconciliation_reference_time(
+    event_time: datetime | None,
+    source_event_row: CareEvent | None,
+    *,
+    now: datetime | None = None,
+) -> datetime:
+    """Use the persisted recording time for stable processing when event time is unknown."""
+    if event_time is not None:
+        return event_time
+    source_recorded_at = getattr(source_event_row, "recorded_at", None) if source_event_row else None
+    return source_recorded_at or now or datetime.now(timezone.utc)
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -1351,11 +1363,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
 
     effective_event_date = _event_time_for_reconciliation(event_date, source_event_row)
-    delta_recorded_at = (
-        effective_event_date
-        or (getattr(source_event_row, "recorded_at", None) if source_event_row else None)
-        or datetime.now(timezone.utc)
-    )
+    delta_recorded_at = _reconciliation_reference_time(effective_event_date, source_event_row)
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
