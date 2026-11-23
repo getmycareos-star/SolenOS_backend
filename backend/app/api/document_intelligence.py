@@ -91,7 +91,7 @@ class CandidateReview(BaseModel):
     expected_subject: str = Field(max_length=120)
     expected_observation: str = Field(max_length=500)
     expected_candidate_id: str | None = Field(default=None, max_length=128)
-    expected_review_status: Literal["pending_review", "corrected_pending_approval"] | None = None
+    expected_review_status: Literal["pending_review", "corrected_pending_approval"] = "pending_review"
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
     rationale: str | None = Field(default=None, max_length=1000)
@@ -1528,11 +1528,6 @@ def review_document_candidate(
             status_code=409,
             detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
         )
-    if payload.expected_review_status is not None and candidate.get("review_status") != payload.expected_review_status:
-        raise HTTPException(
-            status_code=409,
-            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
-        )
     if (
         candidate.get("subject") != payload.expected_subject
         or candidate.get("observation") != payload.expected_observation
@@ -1697,6 +1692,11 @@ def review_document_candidate(
                 "review_required": True,
                 "idempotent_replay": True,
             }
+    if payload.expected_review_status is not None and candidate.get("review_status") != payload.expected_review_status:
+        raise HTTPException(
+            status_code=409,
+            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
+        )
     if status not in {"pending_review", "corrected_pending_approval"}:
         raise HTTPException(status_code=409, detail="This candidate is not awaiting caregiver review")
 
