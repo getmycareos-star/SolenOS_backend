@@ -324,12 +324,10 @@ def database_schema_differences(bind=None):
                 and item.get("column_names")
                 # A partial unique index only constrains rows satisfying its
                 # predicate; it cannot replace a full UNIQUE constraint.
-                and not (
-                    (item.get("dialect_options") or {}).get(
-                        f"{target.dialect.name}_where"
-                    )
-                    or item.get("filter_definition")
-                )
+                and (item.get("dialect_options") or {}).get(
+                    f"{target.dialect.name}_where"
+                ) is None
+                and item.get("filter_definition") is None
                 and (
                     valid_postgres_index_names is None
                     or str(item.get("name") or "") in valid_postgres_index_names
