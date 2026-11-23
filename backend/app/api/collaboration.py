@@ -2898,6 +2898,19 @@ def _collect_full_lcr_context_pages(
         for name, source in merged_sources.items()
         if name != "companion_conversation" and source.get("has_more")
     }
+    scan_sources = [
+        source for name, source in merged_sources.items()
+        if name != "companion_conversation" and source.get("status") in {"available", "empty"}
+    ]
+    scan_has_failed_source = any(
+        source.get("status") in {"failed", "partial"}
+        for name, source in merged_sources.items()
+        if name != "companion_conversation"
+    )
+    merged["retrieval_scan_complete"] = bool(scan_sources) and not scan_has_failed_source and all(
+        source.get("candidate_scan_complete") is True
+        for source in scan_sources
+    )
     merged["retrieval_projection_complete"] = (
         not merged.get("missing_required_sources")
         and not merged.get("missing_optional_sources")
