@@ -1665,7 +1665,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 db.rollback()
                 current = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
-                ).populate_existing().first()
+                ).populate_existing().with_for_update().first()
                 if current is not None and current.status == "cancelled":
                     # Cancellation is terminal regardless of why the caregiver
                     # or source lifecycle stopped the job. Never requeue it.
