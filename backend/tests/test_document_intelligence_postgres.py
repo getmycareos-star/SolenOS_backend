@@ -1076,8 +1076,8 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert historical_lcr.status_code == 200, historical_lcr.text
         assert any(item["id"] == assertion_id for item in historical_lcr.json())
         with Session() as db:
-            companion_context = build_lcr_context(db, person_id, limit_per_source=50)
-            context_assertions = companion_context["sources"]["assertions"]["items"]
+            from app.services.unified_lcr_retrieval import build_unified_lcr_context
+            companion_context = build_unified_lcr_context(
             assert any(item["id"] == assertion_id for item in context_assertions)
 
         # The rotated token replaces the old capability; it cannot be reused.
