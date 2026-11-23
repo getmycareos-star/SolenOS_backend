@@ -886,15 +886,54 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
 
 
 def _retrieval_score(item: dict[str, Any], query: str, direct_terms: list[str], expanded_terms: list[str]) -> int:
-    haystack = " ".join(
-        str(value) for key, value in item.items()
-        if key not in {"id", "evidence_ids", "candidates"} and value is not None
-    ).casefold()
+    """Rank lexical matches by caregiver-relevant fields without implying embeddings.
+
+    The score deliberately remains deterministic and explainable. Titles and
+    source narratives carry more weight than incidental metadata; matching all
+    query concepts receives a coverage bonus so a record mentioning only one
+    common word does not outrank a record that answers the whole question.
+    """
+    excluded = {"id", "evidence_ids", "candidates"}
+    field_weights = {
+        "title": 5,
+        "question": 5,
+        "topic": 4,
+        "description": 3,
+        "summary": 3,
+        "source_text": 3,
+        "decision_text": 3,
+        "notes": 2,
+        "context": 2,
+        "fact_value": 3,
+        "asserted_value": 3,
+        "value_text": 3,
+    }
+    fields = [
+        (key, str(value).casefold())
+        for key, value in item.items()
+        if key not in excluded and value is not None and not isinstance(value, (dict, list, tuple))
+    ]
+    haystack = " ".join(value for _, value in fields)
     record_terms = set(re.findall(r"[a-z0-9_-]{3,}", haystack))
-    direct_hits = sum(1 for term in direct_terms if term in record_terms)
-    expanded_hits = sum(1 for term in expanded_terms if term not in direct_terms and term in record_terms)
-    phrase = 8 if query and query.casefold().strip() in haystack else 0
-    return phrase + direct_hits * 4 + expanded_hits
+    direct_present = [term for term in direct_terms if term in record_terms]
+    expanded_present = [
+        term for term in expanded_terms
+        if term not in direct_terms and term in record_terms
+    ]
+    weighted_hits = sum(
+        field_weights.get(key, 1)
+        * sum(1 for term in direct_terms if term in set(re.findall(r"[a-z0-9_-]{3,}", value)))
+        for key, value in fields
+    )
+    expansion_hits = sum(
+        field_weights.get(key, 1)
+        * sum(1 for term in expanded_present if term in set(re.findall(r"[a-z0-9_-]{3,}", value)))
+        for key, value in fields
+    )
+    normalized_query = " ".join(re.findall(r"[a-z0-9_-]{3,}", (query or "").casefold()))
+    phrase = 10 if normalized_query and normalized_query in haystack else 0
+    coverage = round(6 * len(direct_present) / len(direct_terms)) if direct_terms else 0
+    return phrase + weighted_hits + expansion_hits + coverage
 
 
 @lru_cache(maxsize=16)
@@ -1550,7 +1589,7 @@ def build_lcr_context(
             )
         ),
         "query_applied": bool(terms),
-        "retrieval_strategy": ("person_scoped_exact_count_ordered_history" if include_all_history and not terms and not temporal_window else "person_scoped_full_source_scan") if include_all_history else ("hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history"),
+        "retrieval_strategy": ("person_scoped_exact_count_ordered_history" if include_all_history and not terms and not temporal_window else "person_scoped_full_source_scan") if include_all_history else ("person_scoped_lexical_temporal" if query or temporal_window else "bounded_recent_history"),
         "temporal_window": temporal_window,
         "schema_status": schema_status,
         "missing_required_sources": missing_required,
