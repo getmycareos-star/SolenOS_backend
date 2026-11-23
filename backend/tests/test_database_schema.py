@@ -70,6 +70,38 @@ def test_schema_verifier_reports_missing_indexes():
         engine.dispose()
 
 
+def test_schema_verifier_reports_foreign_key_action_drift():
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE persons (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE changes (id VARCHAR PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE caregivers (id VARCHAR PRIMARY KEY)"))
+            # The ORM requires CASCADE for change_id. A different action is a
+            # real persistence-contract mismatch even though the FK target matches.
+            connection.execute(text("""
+                CREATE TABLE change_confirmation_events (
+                    id VARCHAR PRIMARY KEY,
+                    change_id VARCHAR NOT NULL REFERENCES changes(id) ON DELETE SET NULL,
+                    person_id VARCHAR NOT NULL REFERENCES persons(id) ON DELETE CASCADE,
+                    actor_caregiver_id VARCHAR NOT NULL REFERENCES caregivers(id)
+                )
+            """))
+        differences = database_schema_differences(engine)
+        mismatch = next(
+            (
+                item for item in differences
+                if item.startswith("change_confirmation_events: missing foreign keys or foreign-key actions")
+            ),
+            None,
+        )
+        assert mismatch is not None
+        assert "change_id" in mismatch
+        assert "ondelete=CASCADE" in mismatch
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_tables():
     engine = create_engine("sqlite:///:memory:")
     try:
