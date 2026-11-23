@@ -61,6 +61,42 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_does_not_keep_unenriched_duplicate_of_correction_aware_event():
+    direct_lines = [
+        "LCR event evidence: " + json.dumps({
+            "event_id": "corrected-event",
+            "status": "recorded",
+            "description": "The earlier report said the medicine was given.",
+        }),
+        "LCR event evidence: " + json.dumps({
+            "event_id": "lineage-unavailable-event",
+            "status": "recorded",
+            "description": "A separate recent report.",
+        }),
+    ]
+    shared = {
+        "sources": {
+            "events": {
+                "items": [{
+                    "id": "corrected-event",
+                    "information_status": "historical_event",
+                    "correction_lineage_status": "checked",
+                    "superseded_by_corrections": [{
+                        "original_text": "Medicine was given.",
+                        "corrected_text": "Caregiver did not witness it being given.",
+                    }],
+                }],
+            },
+        },
+    }
+
+    retained = collaboration._sanitize_companion_event_context(direct_lines, shared)
+    assert len(retained) == 1
+    payload = json.loads(retained[0].partition(":")[2].strip())
+    assert payload["event_id"] == "lineage-unavailable-event"
+    assert payload["correction_lineage_status"] == "failed"
+    assert payload["information_status"] == "event_currentness_unknown"
+
 def test_companion_history_projection_ids_match_direct_recall_ids():
     event_id = "event-sleep-1"
     evidence_id = "evidence-sleep-1"
