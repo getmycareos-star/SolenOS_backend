@@ -213,6 +213,7 @@ def test_qwen_workflow_contracts_select_the_expected_caregiver_detail_level():
     expected = {
         "document": (100, 180),
         "living_care_record": (150, 250),
+        "uncertainty_contradictions": (150, 250),
         "care_situation_change": (120, 200),
         "returning_caregiver": (120, 200),
         "appointment": (150, 250),
