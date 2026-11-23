@@ -1585,9 +1585,10 @@ def review_document_candidate(
                 str(candidate.get("source_quote") or ""),
                 str(candidate.get("subject") or ""),
             )
-            canonical["warnings"].append(
-                "Caregiver-corrected wording requires review against the original source passage."
-            )
+            # Corrections are accepted only when the caregiver's wording
+            # exactly matches the preserved source quotation. The mandatory
+            # review already occurred, so do not add a contradictory warning
+            # that says this same wording still needs source verification.
             candidate["warnings"] = canonical["warnings"]
         candidate["review_status"] = "corrected_pending_approval"
     else:
