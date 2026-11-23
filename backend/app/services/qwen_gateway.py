@@ -250,6 +250,25 @@ def qwen_chat(
                 first_attempt = False
                 logger.info("Local Qwen runtime is still starting; retrying inference connection")
                 time.sleep(min(1.0, remaining))
+            except (
+                ConnectionRefusedError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                BrokenPipeError,
+                http.client.RemoteDisconnected,
+            ) as exc:
+                # urllib may surface a connection-establishment failure
+                # directly instead of wrapping it in URLError. Treat both
+                # forms identically during the bounded model cold-start window.
+                if first_attempt:
+                    retry_deadline = time.monotonic() + retry_seconds
+                remaining = retry_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                last_startup_error = exc
+                first_attempt = False
+                logger.info("Local Qwen runtime is still starting; retrying inference connection")
+                time.sleep(min(1.0, remaining))
     except urllib.error.HTTPError as exc:
         _mark_inference_unverified(model)
         failure_category = "upstream_http_error"
@@ -277,6 +296,17 @@ def qwen_chat(
             status_code=503,
             detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
         ) from exc
+    except (
+        ConnectionRefusedError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        BrokenPipeError,
+        http.client.RemoteDisconnected,
+    ) as exc:
+        _mark_inference_unverified(model)
+        failure_category, failure_reason = "runtime_unreachable", type(exc).__name__
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except http.client.HTTPException as exc:
         # A truncated or malformed HTTP message is an upstream protocol
         # failure, not an uncaught server error and never a successful answer.
