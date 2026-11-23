@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care import CareEvent, Caregiver, Person
+from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.time_location import Appointment
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
@@ -1404,10 +1404,16 @@ def test_postgres_lcr_marks_superseded_observation_versions_as_historical():
             )
             db.add(caregiver)
             db.flush()
-            db.execute(text("""
-                INSERT INTO evidence (id, person_id)
-                VALUES ('observation-correction-evidence', :person_id)
-            """), {"person_id": person.id})
+            db.add(Evidence(
+                id="observation-correction-evidence",
+                person_id=person.id,
+                type="care_note",
+                source_text="Caregiver correction source note.",
+                uploaded_by_caregiver_id=caregiver.id,
+                reported_by_caregiver_id=caregiver.id,
+                evidence_status="active",
+            ))
+            db.flush()
             original = EvidenceObservation(
                 id="observation-original",
                 person_id=person.id,
@@ -1483,22 +1489,44 @@ def test_postgres_historical_scan_includes_delayed_report_and_recording_timestam
 
             # Exercise the production temporal predicate against PostgreSQL
             # using the separate event-time, report-time and upload-time clocks.
-            db.execute(text("ALTER TABLE evidence ADD COLUMN reported_at TIMESTAMPTZ"))
-            db.execute(text("ALTER TABLE evidence ADD COLUMN uploaded_at TIMESTAMPTZ"))
-            db.execute(text("ALTER TABLE evidence ADD COLUMN occurred_at TIMESTAMPTZ"))
-            db.execute(text("ALTER TABLE evidence ADD COLUMN evidence_status VARCHAR"))
-            db.execute(text("""
-                INSERT INTO evidence (id, person_id, reported_at, uploaded_at, occurred_at, evidence_status)
-                VALUES
-                  ('reported-in-window', :person_id, '2025-03-12T10:00:00+00:00',
-                   '2026-01-02T10:00:00+00:00', NULL, 'active'),
-                  ('uploaded-in-window', :person_id, NULL,
-                   '2025-03-14T10:00:00+00:00', NULL, 'active'),
-                  ('outside-window', :person_id, '2024-12-20T10:00:00+00:00',
-                   '2026-01-02T10:00:00+00:00', NULL, 'active'),
-                  ('deleted-in-window', :person_id, '2025-03-13T10:00:00+00:00',
-                   '2025-03-13T10:00:00+00:00', NULL, 'deleted_by_caregiver')
-            """), {"person_id": person.id})
+            db.add_all([
+                Evidence(
+                    id="reported-in-window", person_id=person.id, type="care_note",
+                    source_text="Caregiver reported this event in March.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                    reported_by_caregiver_id=caregiver.id,
+                    reported_at=datetime(2025, 3, 12, 10, tzinfo=UTC),
+                    uploaded_at=datetime(2026, 1, 2, 10, tzinfo=UTC),
+                    evidence_status="active",
+                ),
+                Evidence(
+                    id="uploaded-in-window", person_id=person.id, type="care_note",
+                    source_text="This source was uploaded in March.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                    reported_by_caregiver_id=caregiver.id,
+                    uploaded_at=datetime(2025, 3, 14, 10, tzinfo=UTC),
+                    evidence_status="active",
+                ),
+                Evidence(
+                    id="outside-window", person_id=person.id, type="care_note",
+                    source_text="This source is outside the requested window.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                    reported_by_caregiver_id=caregiver.id,
+                    reported_at=datetime(2024, 12, 20, 10, tzinfo=UTC),
+                    uploaded_at=datetime(2026, 1, 2, 10, tzinfo=UTC),
+                    evidence_status="active",
+                ),
+                Evidence(
+                    id="deleted-in-window", person_id=person.id, type="care_note",
+                    source_text="This source was deleted by the caregiver.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                    reported_by_caregiver_id=caregiver.id,
+                    reported_at=datetime(2025, 3, 13, 10, tzinfo=UTC),
+                    uploaded_at=datetime(2025, 3, 13, 10, tzinfo=UTC),
+                    evidence_status="deleted_by_caregiver",
+                ),
+            ])
+            db.flush()
 
             db.add_all([
                 CareEvent(
