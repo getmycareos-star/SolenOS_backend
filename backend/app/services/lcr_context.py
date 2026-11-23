@@ -539,8 +539,14 @@ _CURATED_TERM_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "walked": ("walk", "walking"),
     "walk": ("walking", "walked"),
     "agitation": ("agitated", "distressed", "restless", "upset"),
-    "medication": ("medicine", "dose", "tablet", "pill"),
-    "medicine": ("medication", "dose", "tablet", "pill"),
+    # Caregivers commonly say "meds" or "prescription" where a saved
+    # report uses "medication". Keep this as explicit lexical expansion;
+    # it is not a claim of general semantic understanding.
+    "medication": ("medicine", "meds", "prescription", "prescribed", "dose", "tablet", "pill"),
+    "medicine": ("medication", "meds", "prescription", "prescribed", "dose", "tablet", "pill"),
+    "meds": ("medication", "medicine", "prescription", "prescribed", "dose", "tablet", "pill"),
+    "prescription": ("medication", "medicine", "meds", "prescribed", "dose", "tablet", "pill"),
+    "prescribed": ("medication", "medicine", "meds", "prescription", "dose", "tablet", "pill"),
     "fall": ("fell", "slipped", "injury"),
     "fell": ("fall", "slipped", "injury"),
     "eating": ("food", "meal", "appetite", "intake"),
