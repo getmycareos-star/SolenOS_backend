@@ -228,6 +228,54 @@ jobs:
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_01_appt_date_optional
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade 20261121_02_evidence_review_idem
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade head
+          # Exercise the new index-reconciliation downgrade only after proving
+          # it creates migration-owned indexes when legacy single-column
+          # indexes are absent. Keep unrelated composite indexes untouched.
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -d solenos_review_migration_roundtrip -c \
+            "DROP INDEX IF EXISTS ix_evidence_observations_evidence_id; DROP INDEX IF EXISTS ix_evidence_observations_person_id"
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic stamp 20261122_01_qwen_job_event_update_guard
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade head
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python - <<'PY'
+          import hashlib
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          inspector = inspect(engine)
+          indexes = inspector.get_indexes("evidence_observations")
+          for column in ("evidence_id", "person_id"):
+              digest = hashlib.sha256(f"evidence_observations.{column}".encode()).hexdigest()[:20]
+              expected_name = f"ix_solenos_schema_{digest}"
+              assert any(
+                  item["name"] == expected_name and item.get("column_names") == [column]
+                  for item in indexes
+              ), {"column": column, "indexes": indexes}
+          assert {
+              "ix_evidence_observations_person_subject",
+              "ix_evidence_observations_person_time",
+          }.issubset({item["name"] for item in indexes}), indexes
+          engine.dispose()
+          PY
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic downgrade 20261122_01_qwen_job_event_update_guard
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python - <<'PY'
+          import hashlib
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          indexes = inspect(engine).get_indexes("evidence_observations")
+          names = {item["name"] for item in indexes}
+          for column in ("evidence_id", "person_id"):
+              digest = hashlib.sha256(f"evidence_observations.{column}".encode()).hexdigest()[:20]
+              assert f"ix_solenos_schema_{digest}" not in names, names
+          assert {
+              "ix_evidence_observations_person_subject",
+              "ix_evidence_observations_person_time",
+          }.issubset(names), names
+          engine.dispose()
+          print("CARE_WORKFLOW_INDEX_MIGRATION_DOWNGRADE=PASS")
+          PY
+          DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade head
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic current
           python -m alembic current
 
