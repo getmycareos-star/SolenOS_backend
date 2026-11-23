@@ -6699,8 +6699,9 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"i don't know what to expect|i do not know what to expect|"
         r"i don't know if this is normal|i do not know if this is normal|"
         r"i'm not sure (?:what to do|whether this is safe|whether (?:this |the )?(?:medication|medicine) is safe)|i am not sure (?:what to do|whether this is safe|whether (?:this|the )?(?:medication|medicine) is safe)|"
-        r"i'm worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
-        r"i am worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
+        r"i'm worried about [^,.!?]{1,80}|i am worried about [^,.!?]{1,80}|"
+        r"i'm concerned about [^,.!?]{1,80}|i am concerned about [^,.!?]{1,80}|"
+        r"i'm uncertain about [^,.!?]{1,80}|i am uncertain about [^,.!?]{1,80}|"
         r"i can't tell if (?:this is getting worse|something is wrong)|"
         r"i cannot tell if (?:this is getting worse|something is wrong)|"
         r"i(?:'m| am) (?:angry|furious|frustrated|upset) (?:with|at) [^,]{1,60},\s*(?:and )?(?:afraid|scared|frightened|worried) about (?:what happens|the future|what will happen))\b",
@@ -6716,7 +6717,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"\b(?:i(?:'m| am) (?:angry|furious|fed up) (?:with|at) (?:the doctor|the doctors|"
         r"the nurse|the nurses|the hospital|the care team|solenos|this app)|"
         r"i hate how (?:the doctor|the hospital|the care team|solenos) handled this|"
-        r"this makes me furious)\b",
+        r"this makes me furious|i(?:'m| am) (?:angry|furious) (?:about|because of|that) [^,.!?]{1,100})\b",
         text,
     )
 
