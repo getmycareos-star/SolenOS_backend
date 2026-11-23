@@ -2326,6 +2326,30 @@ def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflo
     assert "Do not force a care workflow" in guidance
     assert "Immediate danger still takes precedence" in guidance
 
+def test_caregiver_interaction_guidance_recognizes_sadness_fear_and_loneliness():
+    for message in (
+        "I'm sad about how things are going.",
+        "I feel alone looking after her.",
+        "I'm scared about what might happen.",
+        "I've been crying all morning.",
+        "I feel like crying.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "DISTRESS RESPONSE" in guidance, message
+        assert "Do not force a care workflow" in guidance
+
+
+def test_caregiver_interaction_guidance_repairs_direct_frustration_and_anger():
+    for message in (
+        "I'm furious that this keeps happening.",
+        "You are useless. You keep getting this wrong.",
+        "This is useless.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "CONTINUITY REPAIR" in guidance, message
+        assert "Do not defend the system" in guidance
+
+
 
 def test_caregiver_interaction_guidance_preserves_correction_and_vague_concern_rules():
     correction = collaboration._caregiver_interaction_guidance(
