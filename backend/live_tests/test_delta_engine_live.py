@@ -19,20 +19,24 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or "sqlite:///:memory:"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
     ("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")
 )
+if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not POSTGRES_DATABASE:
+    raise RuntimeError("Live Delta Engine Qwen acceptance requires PostgreSQL; refusing a skipped non-PostgreSQL run.")
 pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1" or not POSTGRES_DATABASE,
     reason="requires real Qwen inference and migrated PostgreSQL",
 )
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True) if POSTGRES_DATABASE else None
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
 
 
 def override_db():
+    if TestingSessionLocal is None:
+        raise RuntimeError("Live Delta Engine acceptance requires PostgreSQL.")
     db = TestingSessionLocal()
     try:
         yield db
