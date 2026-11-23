@@ -883,9 +883,17 @@ def review_daily_care_lcr_proposal(
         "reused_existing_assertion": reused_existing_assertion,
         "message": (
             (
-                "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
+                (
+                    "This proposal matched an existing caregiver-reviewed care-record entry from the same source. No duplicate entry was created."
+                    if reused_existing_assertion else
+                    "Caregiver-approved proposal saved as a source-attributed LCR assertion. Original proposal and review history were preserved."
+                )
                 if change_intelligence_status == "available"
-                else "The assertion was saved, but change and pattern assessments could not be refreshed. Retry reassessment; do not submit the proposal again."
+                else (
+                    "The existing care-record entry was reused, but change and pattern assessments could not be refreshed. Retry reassessment; do not submit the proposal again."
+                    if reused_existing_assertion else
+                    "The assertion was saved, but change and pattern assessments could not be refreshed. Retry reassessment; do not submit the proposal again."
+                )
             )
             if payload.decision == "accept" else
             "Review decision saved. No LCR assertion was created."
