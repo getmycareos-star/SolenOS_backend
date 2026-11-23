@@ -1,4 +1,5 @@
 """PostgreSQL integration tests for unified Companion retrieval scope."""
+import json
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
