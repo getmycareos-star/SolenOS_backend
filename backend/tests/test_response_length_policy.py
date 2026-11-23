@@ -48,6 +48,7 @@ def test_emotion_alone_does_not_override_a_caregiver_request_for_detail():
         "I've been crying this morning.",
         "I feel sad but not overwhelmed.",
         "I think Mum is exhausted.",
+        "I'm worried Mum is exhausted.",
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent != "low_capacity_support", message
