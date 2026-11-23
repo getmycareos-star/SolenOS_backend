@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 import json
 
-from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
+from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine, event
 from sqlalchemy.orm import Session
 
 from app.services.lcr_context import (
@@ -66,39 +66,57 @@ def test_exact_ordered_history_pages_keep_counts_without_a_separate_count_query(
         for index in range(5)
     ]
 
+    care_event_statements = []
+
+    def record_care_event_query(connection, cursor, statement, parameters, context, executemany):
+        if "FROM care_events" in statement:
+            care_event_statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_care_event_query)
     try:
         with engine.begin() as connection:
             connection.execute(events.insert(), rows)
+        care_event_statements.clear()
 
         with Session(engine) as db:
             first_page = build_lcr_context(db, "person-a", limit_per_source=2, include_all_history=True)
         first = first_page["sources"]["events"]
+        assert len(care_event_statements) == 1
+        assert "OVER" in care_event_statements[0].upper()
         assert first["candidate_count"] == 5
         assert first["returned_count"] == 2
         assert first["has_more"] is True
         assert [item["id"] for item in first["items"]] == ["event-0", "event-1"]
 
+        statement_count_before_last_page = len(care_event_statements)
         with Session(engine) as db:
             last_page = build_lcr_context(
                 db, "person-a", limit_per_source=2, include_all_history=True,
                 source_offsets={"events": 4},
             )
         last = last_page["sources"]["events"]
+        assert len(care_event_statements) - statement_count_before_last_page == 1
+        assert "OVER" in care_event_statements[-1].upper()
         assert last["candidate_count"] == 5
         assert last["returned_count"] == 1
         assert last["has_more"] is False
         assert [item["id"] for item in last["items"]] == ["event-4"]
 
+        statement_count_before_beyond_end = len(care_event_statements)
         with Session(engine) as db:
             beyond_end = build_lcr_context(
                 db, "person-a", limit_per_source=2, include_all_history=True,
                 source_offsets={"events": 10},
             )
         empty = beyond_end["sources"]["events"]
+        assert len(care_event_statements) - statement_count_before_beyond_end == 2
+        assert "OVER" in care_event_statements[-2].upper()
+        assert "OVER" not in care_event_statements[-1].upper()
         assert empty["candidate_count"] == 5
         assert empty["returned_count"] == 0
         assert empty["has_more"] is False
     finally:
+        event.remove(engine, "before_cursor_execute", record_care_event_query)
         _load_source_schema.cache_clear()
         engine.dispose()
 
