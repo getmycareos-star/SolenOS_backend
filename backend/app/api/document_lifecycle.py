@@ -826,10 +826,18 @@ def _apply_capture_page_number(source_text: str, evidence: Evidence) -> str:
 
 
 def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) -> tuple[str, dict]:
-    total_pages = len(re.findall(r"(?m)^\[Page\s+\d+", source_text)) or 1
+    # Page markers carry source page numbers. Counting markers misreports a
+    # sparse/retried extraction (for example pages 1 and 3) as a two-page file.
+    # Derive the document extent from the highest observed page number and only
+    # report pages with an actual extraction marker as processed.
+    observed_pages = sorted({
+        int(match.group(1))
+        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
+    })
+    total_pages = max(observed_pages, default=1)
     unreadable_pages = _unreadable_page_numbers(source_text)
     unprocessed_pages = _unprocessed_page_numbers(source_text)
-    processed_pages = sorted(set(range(1, total_pages + 1)) - set(unprocessed_pages))
+    processed_pages = sorted(set(observed_pages) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
     return extraction_status, {
         "kind": "document_extraction_v1",
