@@ -644,7 +644,7 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
         async def classify(*args, **kwargs):
             return "appointment"
 
-        def complete_assist(payload, request, db):
+        async def complete_assist(payload, request, db):
             assert payload.workflow == "appointment"
             assert request.state.scoped_person_id == person_id
             return {
