@@ -36,7 +36,7 @@ from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.time_location import Appointment as LegacyAppointmentModel
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
-from app.services.response_length_policy import count_response_words, resolve_response_length_policy
+from app.services.response_length_policy import count_response_words, is_greeting_message, resolve_response_length_policy
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
     explicit_caregiver_gap_assessment,
@@ -1588,13 +1588,7 @@ async def generate_lcr_orientation(
         else "returning" if held_care_rows > 0
         else "new"
     )
-    normalized_input = " ".join(re.sub(r"[^a-z0-9' ]+", " ", raw_input.casefold()).split())
-    is_greeting = bool(re.fullmatch(
-        r"(?:hi|hello|hey|hiya|good morning|good afternoon|good evening|good day|howdy|yo|sup|"
-        r"what'?s up|how'?s it going|how are you|how're you)"
-        r"(?: there)?(?: solenos)?",
-        normalized_input,
-    ))
+    is_greeting = is_greeting_message(raw_input)
 
     recipient_name = (getattr(person, "name", None) or "").strip()
     if caregiver_stage == "new":
