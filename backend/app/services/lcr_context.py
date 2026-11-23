@@ -676,9 +676,12 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
         metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
-        if extraction_status == "partial":
-            unreadable = metadata.get("unreadable_page_numbers") or []
-            unprocessed = metadata.get("unprocessed_page_numbers") or []
+        unreadable = metadata.get("unreadable_page_numbers") or []
+        unprocessed = metadata.get("unprocessed_page_numbers") or []
+        # Older persisted rows may retain an "available" status even though
+        # page-level metadata proves that one or more pages were never read.
+        # The explicit page evidence takes precedence over the aggregate status.
+        if extraction_status == "partial" or unreadable or unprocessed:
             page_gaps = []
             if unreadable:
                 page_gaps.append("Unreadable pages: " + ", ".join(str(page) for page in unreadable) + ".")
