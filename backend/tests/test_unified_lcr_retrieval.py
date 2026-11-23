@@ -2237,6 +2237,10 @@ def test_postgres_query_coverage_is_incomplete_when_a_present_source_is_unsearch
         assert context["history_coverage"] == "partial_search_coverage"
         assert context["retrieval_scan_complete"] is False
         assert context["retrieval_projection_complete"] is False
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert "partial_search_coverage" in prompt_context
+        assert '"retrieval_scan_complete":false' in prompt_context
+        assert "This source is present, but its available fields cannot be searched" in prompt_context
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
