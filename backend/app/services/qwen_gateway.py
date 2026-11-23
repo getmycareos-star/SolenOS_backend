@@ -540,6 +540,11 @@ def qwen_readiness_status(force: bool = False) -> dict:
         )
         with urllib.request.urlopen(request, timeout=min(timeout, 5.0)) as response:
             inventory = json.loads(response.read().decode("utf-8"))
+        # A successful HTTP response is not a valid Ollama inventory unless
+        # its top-level JSON value is an object. Treat null, arrays and scalars
+        # as an unavailable runtime instead of leaking AttributeError as HTTP 500.
+        if not isinstance(inventory, dict):
+            inventory = {}
         models = inventory.get("models")
         if not isinstance(models, list):
             result = {
@@ -626,6 +631,10 @@ def qwen_runtime_status() -> dict:
         request = urllib.request.Request(base + "/api/tags", headers={"Accept": "application/json"}, method="GET")
         with urllib.request.urlopen(request, timeout=min(timeout, 10.0)) as response:
             payload = json.loads(response.read().decode("utf-8"))
+        # Keep runtime status fail-closed for syntactically valid but malformed
+        # top-level JSON responses from the Ollama service.
+        if not isinstance(payload, dict):
+            payload = {}
         models = payload.get("models")
         if not isinstance(models, list):
             return {
