@@ -444,6 +444,8 @@ def test_postgres_correction_recovery_loop_reclaims_pending_and_expired_processi
         with Session() as db:
             db.query(Correction).filter(Correction.id.in_([pending_id, stale_id])).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
-            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            # Person creation appends an immutable CareStateRevision row. Keep
+            # this uniquely named CI fixture parent rather than deleting it
+            # and violating the append-only history foreign key.
             db.commit()
         engine.dispose()
