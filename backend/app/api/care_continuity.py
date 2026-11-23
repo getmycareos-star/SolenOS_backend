@@ -2128,12 +2128,13 @@ def current_care_projection(
     retains competing claims and labels source/status rather than inferring that
     the newest report is necessarily correct.
     """
-    person_id, _ = _scoped_identity(request, db)
+    person_id, caregiver_id = _scoped_identity(request, db)
     if source is not None and source not in SOURCE_SPECS:
         raise HTTPException(status_code=422, detail="Unknown care-history source")
     context = build_lcr_context(
         db,
         person_id,
+        caregiver_id=caregiver_id,
         limit_per_source=limit_per_source,
         only_sources={source} if source else None,
     )
