@@ -1256,8 +1256,25 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 },
                 review_history=[],
             ))
+            db.add(CaptureAnalysis(
+                id="partial-interpretation-analysis",
+                person_id="partial-document-person",
+                caregiver_id="partial-document-caregiver",
+                source_evidence_id="partial-interpretation-evidence",
+                source_text="Medication list: the original text was extracted successfully.",
+                extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "page_count": 2,
+                    "processed_page_numbers": [1],
+                    "unreadable_page_numbers": [],
+                    "unprocessed_page_numbers": [2],
+                    "extraction_method": "server_pdf_text",
+                    "document_intelligence": {"status": "partial", "observations": []},
+                },
+                review_history=[],
+            ))
             db.commit()
-            from app.services.lcr_context import _load_source_schema
             _load_source_schema.cache_clear()
             context = build_lcr_context(
                 db,
@@ -1266,15 +1283,21 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 query="medication",
             )
         documents = context["sources"]["document_extractions"]
-        assert documents["returned_count"] == 1
-        item = documents["items"][0]
+        assert documents["returned_count"] == 2
+        item = next(value for value in documents["items"] if value["id"] == "partial-document-analysis")
         assert item["information_status"] == "document_extraction_partial"
         assert item["extraction_metadata"]["unreadable_page_numbers"] == [2]
         assert item["extraction_metadata"]["interpretation_status"] == "partial"
         assert item["extraction_metadata"]["unreviewed_candidate_count"] == 1
         assert "Unreadable pages: 2." in item["interpretation_limit"]
+        interpretation_only = next(
+            value for value in documents["items"] if value["id"] == "partial-interpretation-analysis"
+        )
+        assert interpretation_only["information_status"] == "document_interpretation_partial"
+        assert interpretation_only["extraction_status"] == "available"
         prompt_context = format_lcr_context_for_prompt(context)
         assert "document_extraction_partial" in prompt_context
+        assert "document_interpretation_partial" in prompt_context
         assert "unreadable_page_numbers" in prompt_context
         assert '"source_quote"' not in prompt_context, (
             "unreviewed model candidate objects must not be leaked into the LCR retrieval prompt"
