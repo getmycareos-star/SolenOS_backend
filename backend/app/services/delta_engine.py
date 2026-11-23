@@ -935,7 +935,7 @@ def _reconcile_from_change_intelligence(
     from sqlalchemy import func
     from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
-    reference_time = event_date or (source_event_row.occurred_at if source_event_row else None) or datetime.now(timezone.utc)
+    reference_time = _event_time_for_reconciliation(event_date, source_event_row) or datetime.now(timezone.utc)
     source_assertions = []
     if source_event_id:
         source_assertions = db.query(CareAssertion).filter(
@@ -1303,12 +1303,15 @@ def _reconcile_from_change_intelligence(
 def _event_time_for_reconciliation(
     event_date: datetime | None,
     source_event_row: CareEvent | None,
-) -> datetime:
-    """Prefer the saved event time over processing time when callers omit it."""
+) -> datetime | None:
+    """Return an established event time; never relabel a server timestamp as one."""
     if event_date is not None:
         return event_date
-    persisted_event_time = getattr(source_event_row, "occurred_at", None) if source_event_row else None
-    return persisted_event_time or datetime.now(timezone.utc)
+    if source_event_row is None:
+        return None
+    if getattr(source_event_row, "time_provenance", None) == "server_recorded_at":
+        return None
+    return getattr(source_event_row, "occurred_at", None)
 
 
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
@@ -1344,6 +1347,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
 
     effective_event_date = _event_time_for_reconciliation(event_date, source_event_row)
+    delta_recorded_at = datetime.now(timezone.utc)
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
@@ -1500,7 +1504,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "existing_record_context": existing_record_context,
         "existing_unresolved_care_loops": existing_unresolved_care_loops,
         "new_care_event": {
-            "date": effective_event_date.isoformat(),
+            "date": effective_event_date.isoformat() if effective_event_date else None,
             "source": source,
             "content": content,
             "evidence_ids": evidence_ids,
@@ -2522,7 +2526,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed, db=db, person_id=person_id, history_coverage=history_coverage)
     result["computed_changes"] = computed
     result["provenance"] = {
-        "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": effective_event_date.isoformat(),
+        "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": effective_event_date.isoformat() if effective_event_date else None,
+        "event_time_basis": "explicit_request" if event_date is not None else "persisted_source_event" if effective_event_date else "not_established",
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
         "source_event_snapshot_sha256": source_event_snapshot_sha256,
         "engine_version": DELTA_ENGINE_VERSION,
@@ -2575,7 +2580,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     ))
             run = CareDeltaRun(
                 person_id=person_id, source=source,
-                event_date=effective_event_date,
+                event_date=effective_event_date or delta_recorded_at,
                 source_event_id=source_event_id, evidence_ids=evidence_ids,
                 delta_json="{}", model_name=model,
                 created_by_caregiver_id=created_by_caregiver_id,
