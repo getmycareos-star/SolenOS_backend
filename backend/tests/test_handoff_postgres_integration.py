@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.core.database import SessionLocal
 from app.main import app
 
+from app.models.privacy_delivery import HandoffAcknowledgement
 
 pytestmark = pytest.mark.skipif(
     SessionLocal.kw["bind"].dialect.name != "postgresql",
@@ -454,6 +455,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
         assert db.query(CareAssertion).filter_by(person_id=owner["person"]["id"]).count() == assertions_before_ack, (
             "handoff acknowledgement must not alter the authoritative LCR"
         )
+        assert db.query(HandoffAcknowledgement).filter_by(handoff_id=handoff_id, recipient_id=recipient_id).count() == 1
     finally:
         db.close()
 
