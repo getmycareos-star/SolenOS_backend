@@ -110,7 +110,7 @@ _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
     r"having a stroke|signs of stroke|sudden weakness|slurred speech|speech is slurred|"
-    r"(?:speech|words|talking)\\b.{0,35}\\b(?:suddenly )?(?:became|becomes|is|was|sounds?)?\\s*slurred|"
+    r"(?:speech|words|talking)\b.{0,35}\b(?:suddenly )?(?:became|becomes|is|was|sounds?)?\s*slurred|"
     r"sudden confusion|suddenly confused|suddenly (?:became|got) confused|new confusion|"
     r"sudden vision loss|cannot see out of one eye|can't see out of one eye|"
     r"one[- ]sided weakness|weakness on one side|numbness on one side|"
