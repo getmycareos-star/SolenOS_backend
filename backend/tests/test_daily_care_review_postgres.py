@@ -105,6 +105,24 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             db.add_all([evidence, event, analysis])
             db.commit()
 
+            stale_snapshot_rejected = False
+            try:
+                review_capture_candidate(
+                    analysis_id,
+                    CaptureCandidateReview(
+                        candidate_index=0,
+                        decision="correct",
+                        expected_source_quote="A stale Daily Care quotation.",
+                        expected_subject="sleep",
+                        corrected_observation=corrected_observation,
+                    ),
+                    _request(person_id, caregiver_id),
+                    db,
+                )
+            except HTTPException as exc:
+                stale_snapshot_rejected = exc.status_code == 409
+            assert stale_snapshot_rejected, "a stale Daily Care review snapshot must be rejected"
+
             corrected = review_capture_candidate(
                 analysis_id,
                 CaptureCandidateReview(
