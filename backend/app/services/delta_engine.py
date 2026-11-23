@@ -1300,6 +1300,17 @@ def _reconcile_from_change_intelligence(
     return result
 
 
+def _event_time_for_reconciliation(
+    event_date: datetime | None,
+    source_event_row: CareEvent | None,
+) -> datetime:
+    """Prefer the saved event time over processing time when callers omit it."""
+    if event_date is not None:
+        return event_date
+    persisted_event_time = getattr(source_event_row, "occurred_at", None) if source_event_row else None
+    return persisted_event_time or datetime.now(timezone.utc)
+
+
 def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None, source: str,
                     content: str, source_event_id: str | None = None,
                     evidence_ids: list[str] | None = None, persist: bool = True,
@@ -1331,6 +1342,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 detail="The reconciliation text does not match the saved care update.",
             )
         source_event_snapshot_sha256 = source_event_snapshot_hash(source_event_row)
+
+    effective_event_date = _event_time_for_reconciliation(event_date, source_event_row)
 
     active_assertions_query = db.query(CareAssertion).filter(
         CareAssertion.person_id == person_id,
@@ -1487,7 +1500,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "existing_record_context": existing_record_context,
         "existing_unresolved_care_loops": existing_unresolved_care_loops,
         "new_care_event": {
-            "date": (event_date or datetime.now(timezone.utc)).isoformat(),
+            "date": effective_event_date.isoformat(),
             "source": source,
             "content": content,
             "evidence_ids": evidence_ids,
@@ -2244,7 +2257,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                         epistemic_state="reported" if assertion_kind == "time_bound_observation" else "inferred",
                         asserted_value=str(current), source_event_id=source_event_id, source_label=source,
                         source_text=str(item.get("evidence_excerpt") or content[:500]),
-                        evidence_ids=finding_evidence_ids, observed_at=event_date or datetime.now(timezone.utc),
+                        evidence_ids=finding_evidence_ids, observed_at=effective_event_date,
                         created_by_caregiver_id=created_by_caregiver_id,
                         review_after_days=30 if domain != "symptoms" else None,
                     ), commit=False)
@@ -2562,7 +2575,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                     ))
             run = CareDeltaRun(
                 person_id=person_id, source=source,
-                event_date=event_date or datetime.now(timezone.utc),
+                event_date=effective_event_date,
                 source_event_id=source_event_id, evidence_ids=evidence_ids,
                 delta_json="{}", model_name=model,
                 created_by_caregiver_id=created_by_caregiver_id,
