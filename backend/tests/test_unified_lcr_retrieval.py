@@ -1275,8 +1275,8 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         prompt_context = format_lcr_context_for_prompt(context)
         assert "document_extraction_partial" in prompt_context
         assert "unreadable_page_numbers" in prompt_context
-        assert "take the listed tablet with breakfast" not in prompt_context, (
-            "unreviewed model candidate text must not be leaked into the LCR retrieval prompt"
+        assert '"source_quote"' not in prompt_context, (
+            "unreviewed model candidate objects must not be leaked into the LCR retrieval prompt"
         )
     finally:
         _load_source_schema.cache_clear()
