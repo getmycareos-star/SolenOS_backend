@@ -861,7 +861,7 @@ def _lock_active_document_source(db: Session, evidence_id: str, person_id: str):
     ).populate_existing().with_for_update().first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
-    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
+    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).populate_existing().first()
     if upload is None:
         raise HTTPException(status_code=404, detail="Original document bytes are unavailable")
     return evidence, upload
