@@ -3400,6 +3400,16 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
 
 
 
-def test_companion_greeting_contract_allows_up_to_fifteen_words():
-    assert not collaboration._greeting_reply_needs_revision("Hello, welcome back. Glad you are here today.")
-    assert collaboration._greeting_reply_needs_revision("Hello, I am glad you are here and ready to continue with your care story today.")
+def test_companion_greeting_contract_uses_first_time_and_returning_hard_maxima():
+    first_time = "Hello " + "care " * 39
+    returning = "Hello " + "care " * 54
+    assert not collaboration._greeting_reply_needs_revision(first_time, 40)
+    assert collaboration._greeting_reply_needs_revision(first_time + "today", 40)
+    assert not collaboration._greeting_reply_needs_revision(returning, 55)
+    assert collaboration._greeting_reply_needs_revision(returning + "today", 55)
+
+
+def test_companion_does_not_treat_acknowledgements_as_greetings():
+    assert not collaboration._is_casual_greeting("Thanks")
+    assert not collaboration._is_casual_greeting("Goodbye")
+    assert collaboration._is_casual_greeting("Good morning")
