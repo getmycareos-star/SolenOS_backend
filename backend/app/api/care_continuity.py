@@ -2782,6 +2782,60 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     """Compose an explainable assessment from persisted LCR sources; never invent care facts."""
     context = build_lcr_context(db, person_id, limit_per_source=50)
     sources = context.get("sources") or {}
+
+    # A bounded recent page must not hide older events that have explicit
+    # evidence links. Keep the normal recent projection, then supplement it
+    # with a bounded, person-scoped page of evidence-linked events so routine
+    # unlinked records cannot displace a traceable care report.
+    event_source = dict(sources.get("events") or {})
+    event_items = list(event_source.get("items") or [])
+    existing_event_ids = {
+        str(item.get("id")) for item in event_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    supplemental_event_rows = []
+    if event_source.get("has_more"):
+        supplemental_event_rows = db.query(CareEvent).filter(
+            CareEvent.person_id == person_id,
+            CareEvent.evidence_ids.isnot(None),
+            cast(CareEvent.evidence_ids, SQLText) != "[]",
+        ).order_by(
+            desc(CareEvent.occurred_at),
+            desc(CareEvent.recorded_at),
+            desc(CareEvent.id),
+        ).limit(100).all()
+    supplemental_events = [
+        {
+            "id": str(row.id),
+            "event_type": row.event_type,
+            "status": row.status,
+            "occurred_at": row.occurred_at,
+            "occurred_at_timezone": row.occurred_at_timezone,
+            "recorded_at": row.recorded_at,
+            "title": row.title,
+            "description": row.description,
+            "location": row.location,
+            "evidence_ids": [str(value) for value in (row.evidence_ids or []) if value],
+            "time_provenance": row.time_provenance,
+            "location_provenance": row.location_provenance,
+            "created_by_caregiver_id": row.created_by_caregiver_id,
+            "significance_verdict": row.significance_verdict,
+            "attention_candidate": row.attention_candidate,
+            "follow_up_candidate": row.follow_up_candidate,
+            "situation_id": row.situation_id,
+        }
+        for row in supplemental_event_rows
+        if str(row.id) not in existing_event_ids
+    ]
+    if supplemental_events:
+        event_source["items"] = [*event_items, *supplemental_events]
+        event_source["count"] = max(
+            int(event_source.get("count") or 0),
+            len(event_source["items"]),
+        )
+        event_source["supplemental_evidence_linked_count"] = len(supplemental_events)
+        event_source["selection_strategy"] = "recent_plus_evidence_linked_history"
+        sources = {**sources, "events": event_source}
     # CareAssertion reconciliation writes source-linked conflicts to the
     # canonical contradictions table. The general LCR retrieval projection
     # also has a separate care_conflicts collection, so include these
