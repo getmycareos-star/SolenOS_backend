@@ -790,7 +790,17 @@ def _exact_source_passages(
     """Return verbatim source windows around query matches, never model rewrites."""
     if not source_text or not terms:
         return []
-    folded = source_text.casefold()
+    # casefold() can expand one source character into multiple matching
+    # characters (for example, German ß -> ss). Keep an index map so offsets
+    # always address the original, caregiver-supplied text rather than the
+    # expanded search representation.
+    folded_parts: list[str] = []
+    folded_to_source: list[int] = []
+    for source_index, character in enumerate(source_text):
+        folded_character = character.casefold()
+        folded_parts.append(folded_character)
+        folded_to_source.extend([source_index] * len(folded_character))
+    folded = "".join(folded_parts)
     hits: list[tuple[int, int, str]] = []
     for term in dict.fromkeys(terms):
         needle = str(term or "").strip().casefold()
@@ -801,7 +811,9 @@ def _exact_source_passages(
             position = folded.find(needle, cursor)
             if position < 0:
                 break
-            hits.append((position, position + len(needle), needle))
+            source_start = folded_to_source[position]
+            source_end = folded_to_source[position + len(needle) - 1] + 1
+            hits.append((source_start, source_end, needle))
             cursor = position + max(1, len(needle))
     if not hits:
         return []
