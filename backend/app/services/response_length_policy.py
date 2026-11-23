@@ -48,7 +48,7 @@ _LOW_CAPACITY_SIGNAL = re.compile(
     r"(?:and|but) (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
     r"i feel (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
     r"i (?:really )?(?:can't|cannot) (?:cope|continue|keep up|keep doing this|manage|do this anymore)|"
-    r"i (?:need|want) (?:a break|a pause|to stop)|i just want a break|"
+    r"i (?:need|want) (?:a break|a pause|to stop|to pause)|i just want a break|"
     r"i don't know what to do anymore|i don't even know what i'm supposed to do anymore|everything is too much|"
     r"please stop|stop for now|enough for now|not now|leave it for now|that's enough|"
     r"i don't want to talk(?: about this)?|i do not want to talk(?: about this)?|"
