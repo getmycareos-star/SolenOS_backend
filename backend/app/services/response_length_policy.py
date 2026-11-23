@@ -55,6 +55,7 @@ _CRITICAL = re.compile(
 )
 _APPOINTMENT = re.compile(
     r"\b(?:prepare|preparing|preparation)\b.{0,80}\b(?:appointment|doctor visit|clinic visit|visit)\b|"
+    r"\b(?:appointment|doctor visit|clinic visit)\b.{0,80}\b(?:prep|preparing|preparation|briefing)\b|"
     r"\bquestions? (?:to ask )?(?:the )?doctor\b",
     re.I,
 )
