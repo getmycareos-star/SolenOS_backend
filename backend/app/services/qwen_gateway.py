@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from app.services.qwen_system_prompt import apply_solenos_system_contract
+from app.services.qwen_specialized_prompts import apply_specialized_intelligence
 
 logger = logging.getLogger(__name__)
 _READINESS_CACHE: dict[str, object] = {"checked_at": 0.0, "result": None}
@@ -100,8 +101,10 @@ def qwen_chat(
     response_format: dict | str | None = None,
     options: dict | None = None,
 ) -> str:
-    # Every inference receives the canonical SolenOS care-continuity contract.
-    # Workflow prompts remain intact and are appended as narrower instructions.
+    # Activate only specialist responsibilities explicitly signaled by the
+    # workflow-owned system prompt; then apply the shared authority/safety contract.
+    # User text and source documents cannot activate or override specialist modes.
+    messages = apply_specialized_intelligence(messages)
     messages = apply_solenos_system_contract(messages)
     started = time.monotonic()
     try:
