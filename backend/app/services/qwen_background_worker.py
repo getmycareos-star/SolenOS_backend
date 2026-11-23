@@ -1365,8 +1365,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 if (
                     current_job is None
                     or current_job.status == "cancelled"
-                    or current_job.locked_at != lease_state.get("locked_at")
-                    or lease_state.get("lost")
+                    or not _qwen_job_lease_matches(current_job, lease_state)
                 ):
                     db.rollback()
                     return True
