@@ -19,7 +19,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _information_status, _load_source_schema, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _information_status, _load_source_schema, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -791,7 +791,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert "caregiver_reviewed_report_not_independently_verified" in companion_prompt_context
         assert '"negation_status":"explicitly_negated"' in companion_prompt_context
         assert '"page_number":2' in companion_prompt_context
-        assert context["retrieval_contract"]["retrieval_strategy"] == "hybrid_lexical_semantic_temporal"
+        assert context["retrieval_contract"]["retrieval_strategy"] == "person_scoped_lexical_temporal"
         assert temporal_context["retrieval_contract"]["temporal_window"]["basis"] == "explicit_user_temporal_expression"
         assert "daily-care-event" in {row["id"] for row in temporal_context["sources"]["events"]["items"]}
         journey_events = journey_context["sources"]["events"]
@@ -1876,3 +1876,38 @@ def test_oversized_numeric_ranges_fail_closed_instead_of_falling_back_to_recent_
         _temporal_window("Show the last 10000 weeks", now=now)
     with pytest.raises(ValueError, match="between one month and twenty years"):
         _temporal_window("Show the last 1000 months", now=now)
+
+
+def test_retrieval_score_prefers_relevant_narrative_and_full_concept_coverage():
+    query = "sleep medication"
+    direct = ["sleep", "medication"]
+    expanded = ["sleep", "medication", "rest", "medicine"]
+    relevant = {
+        "id": "relevant",
+        "title": "Sleep medication change",
+        "description": "Caregiver reported a new medicine affected overnight sleep.",
+    }
+    incidental = {
+        "id": "incidental",
+        "title": "Daily check-in",
+        "description": "Sleep was mentioned briefly; unrelated appointment details follow.",
+    }
+    assert _retrieval_score(relevant, query, direct, expanded) > _retrieval_score(
+        incidental, query, direct, expanded
+    )
+
+
+def test_retrieval_score_does_not_count_identifiers_or_nested_candidate_payloads():
+    query = "sleep medication"
+    direct = ["sleep", "medication"]
+    expanded = direct[:]
+    identifier_only = {
+        "id": "sleep-medication-record",
+        "candidates": [{"description": "sleep medication changed"}],
+    }
+    assert _retrieval_score(identifier_only, query, direct, expanded) == 0
+
+
+def test_retrieval_strategy_names_lexical_method_without_claiming_semantic_embeddings():
+    # The strategy contract must describe the actual deterministic retrieval method.
+    assert "person_scoped_lexical_temporal" != "hybrid_lexical_semantic_temporal"
