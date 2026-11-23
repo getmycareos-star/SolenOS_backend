@@ -2169,3 +2169,33 @@ def test_qwen_support_assist_repairs_overlength_document_explanation(monkeypatch
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
+
+
+
+def test_emergency_readiness_does_not_apply_empty_context_copy_over_an_active_emergency(monkeypatch):
+    client, token, _, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        captured = {}
+
+        def fake_qwen(messages, **kwargs):
+            captured["messages"] = messages
+            captured["options"] = kwargs["options"]
+            return "Call local emergency services now."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "emergency_readiness", "text": "Mum is not breathing."},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        assert "If immediate danger is described, direct the caregiver to local emergency services." in prompt
+        assert "empty-context emergency-readiness request" not in prompt
+        assert "situation-dependent length" in prompt
+        assert captured["options"]["num_predict"] == 1024
+        assert response.json()["reply"] == "Call local emergency services now."
+    finally:
+        teardown()
