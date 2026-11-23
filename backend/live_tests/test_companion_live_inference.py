@@ -1205,7 +1205,7 @@ def test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led():
         assert grief_data.get("written_to_lcr") is False, grief_data
         assert grief_data.get("persistence") == "conversation_only", grief_data
         assert 0 < len(grief_reply.split()) <= 90, grief_reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", grief_reply), grief_reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", grief_reply), grief_reply
         assert not re.search(r"(?i)everything will be okay|at least|you should be grateful", grief_reply), grief_reply
 
         self_blame = _ask(
