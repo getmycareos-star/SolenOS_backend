@@ -852,7 +852,7 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
 
 
 @router.post("/{evidence_id}/extract", status_code=201)
-def _lock_active_document_source(db: Session, evidence_id: str, person_id: str):
+def _lock_active_document_source(db: Session, evidence_id: str, person_id: str, caregiver_id: str):
     """Lock the source only for the short persistence phase, never during OCR."""
     evidence = db.query(Evidence).filter(
         Evidence.id == evidence_id,
@@ -861,6 +861,7 @@ def _lock_active_document_source(db: Session, evidence_id: str, person_id: str):
     ).populate_existing().with_for_update().first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
     upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).populate_existing().first()
     if upload is None:
         raise HTTPException(status_code=404, detail="Original document bytes are unavailable")
@@ -914,7 +915,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             # OCR ran without an evidence-row lock. Reacquire the source and
             # analysis rows only now, and reject stale work if deletion or a
             # concurrent retry changed either record while extraction ran.
-            evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+            evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id, caregiver_id)
             if current_upload.sha256 != upload.sha256:
                 db.rollback()
                 raise HTTPException(status_code=409, detail="The original document changed during extraction")
@@ -997,7 +998,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             db.commit()
             db.refresh(row)
             return _response(row)
-        evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+        evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id, caregiver_id)
         if current_upload.sha256 != upload.sha256:
             db.rollback()
             raise HTTPException(status_code=409, detail="The original document changed during extraction")
@@ -1015,7 +1016,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
 
     source_text, method = _extract(upload, content, evidence)
     source_text = _apply_capture_page_number(source_text, evidence)
-    evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+    evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id, caregiver_id)
     if current_upload.sha256 != upload.sha256:
         db.rollback()
         raise HTTPException(status_code=409, detail="The original document changed during extraction")
