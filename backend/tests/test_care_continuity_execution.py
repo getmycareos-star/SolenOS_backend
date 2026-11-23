@@ -696,7 +696,7 @@ def test_care_state_lock_order_assigns_ids_before_sorting_new_records():
 
 
 @pytest.mark.parametrize("assertion_kind", ["current_state", "time_bound_observation"])
-@pytest.mark.parametrize("assertion_status", ["rejected", "superseded", "withdrawn"])
+@pytest.mark.parametrize("assertion_status", ["rejected", "superseded", "retracted", "withdrawn"])
 def test_terminal_assertion_lifecycle_always_overrides_freshness(
     assertion_kind, assertion_status
 ):
