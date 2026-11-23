@@ -229,6 +229,43 @@ def test_production_qwen_gateway_accepts_only_private_railway_runtime(monkeypatc
     assert base == "http://solenos-ollama.railway.internal:11434"
     assert model == "qwen-test"
 
+
+@pytest.mark.parametrize("payload", [b"[]", b"null", b'"not-an-object"'])
+def test_qwen_readiness_and_runtime_status_reject_non_object_inventory(monkeypatch, payload):
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("QWEN_INSTALL_STATE_FILE", "/tmp/solenos-test-missing-qwen-state.json")
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(payload),
+    )
+
+    readiness = qwen_gateway.qwen_readiness_status(force=True)
+    runtime = qwen_gateway.qwen_runtime_status()
+
+    assert readiness["available"] is False
+    assert readiness["failure_reason"] == "invalid_model_inventory"
+    assert readiness["inference_verified"] is False
+    assert runtime["available"] is False
+    assert runtime["error_category"] == "invalid_model_inventory"
+    assert runtime["inference_verified"] is False
+
+
+def test_qwen_readiness_and_runtime_status_reject_inventory_without_models(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("QWEN_INSTALL_STATE_FILE", "/tmp/solenos-test-missing-qwen-state.json")
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(b'{"unexpected": []}'),
+    )
+
+    readiness = qwen_gateway.qwen_readiness_status(force=True)
+    runtime = qwen_gateway.qwen_runtime_status()
+
+    assert readiness["failure_reason"] == "invalid_model_inventory"
+    assert runtime["error_category"] == "invalid_model_inventory"
+
 def test_qwen_gateway_defaults_to_production_safe_context_and_allows_explicit_upgrade(monkeypatch):
     captured = []
     configure_gateway(monkeypatch)
