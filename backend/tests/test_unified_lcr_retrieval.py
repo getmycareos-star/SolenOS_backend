@@ -19,7 +19,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _load_source_schema, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _information_status, _load_source_schema, build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -1168,6 +1168,17 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
     finally:
         connection.close()
         engine.dispose()
+
+
+def test_withdrawn_or_superseded_evidence_never_reads_as_current():
+    for item in (
+        {"evidence_status": "withdrawn", "epistemic_status": "caregiver_reported"},
+        {"evidence_status": "superseded", "epistemic_status": "verified"},
+        {"evidence_status": "active", "epistemic_status": "withdrawn"},
+    ):
+        status, explanation = _information_status("evidence", item)
+        assert status == "historical_evidence"
+        assert "do not treat it as current evidence" in explanation
 
 
 def test_postgres_lcr_marks_superseded_observation_versions_as_historical():
