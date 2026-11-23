@@ -134,6 +134,29 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         captured_prompts.append(messages)
         return "I can explain what the saved care report says."
 
+    original_builder = collaboration.build_unified_lcr_context
+
+    def include_unsearchable_source(*args, **kwargs):
+        context = original_builder(*args, **kwargs)
+        context["sources"]["legacy_optional"] = {
+            "status": "unsearchable",
+            "items": [],
+            "candidate_count": None,
+            "returned_count": 0,
+            "candidate_scan_complete": False,
+            "has_more": False,
+            "interpretation_limit": (
+                "This source cannot be searched for this topic; its lack of returned records "
+                "does not establish that no matching care information exists."
+            ),
+        }
+        context["retrieval_scan_complete"] = False
+        context["retrieval_projection_complete"] = False
+        context["history_coverage"] = "partial_source_history"
+        return context
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", include_unsearchable_source)
+
     # Extraction output is deterministic test input. The real API route,
     # proposal persistence, caregiver decision, reconciliation, provenance,
     # and subsequent LCR retrieval all run against PostgreSQL.
@@ -168,6 +191,20 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         assert message_id
         assert body["written_to_lcr"] is False
         assert body["persistence"] == "conversation_only"
+        coverage = body["lcr_context_coverage"]
+        assert coverage["history_coverage"] == "partial_source_history"
+        assert any(
+            item["source_type"] == "legacy_optional"
+            and item["status"] == "unsearchable"
+            for item in coverage["source_limits"]
+        )
+        assert any(
+            item["source_type"] == "legacy_optional"
+            and item["status"] == "unsearchable"
+            for item in coverage["retrieval_receipt"]["source_limits"]
+        )
+        assert captured_prompts
+        assert "cannot be searched for this topic" in captured_prompts[0][-1]["content"]
 
         missing_confirmation = client.post(
             f"/api/v1/companion/care-updates/from-message/{message_id}",
