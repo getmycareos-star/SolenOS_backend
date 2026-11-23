@@ -19,7 +19,7 @@ def assertion_information_status(
     if lifecycle in {"rejected", "superseded", "retracted", "withdrawn"}:
         return (
             "historical_assertion",
-            "This assertion is no longer current; retain it only as part of the record history.",
+            "This assertion is no longer current and is not a current fact; retain it only as part of the record history.",
         )
 
     if state == "inferred":
@@ -55,7 +55,7 @@ def assertion_information_status(
     if lifecycle in {"rejected", "superseded", "retracted", "withdrawn"}:
         return (
             "historical_assertion",
-            "This assertion is no longer current; retain it only as part of the record history.",
+            "This assertion is no longer current and is not a current fact; retain it only as part of the record history.",
         )
     return (
         "caregiver_reported_assertion",
