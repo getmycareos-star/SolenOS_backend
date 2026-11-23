@@ -502,6 +502,14 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
             assert first_body["written_to_lcr"] is True
             assert first_body["reused_existing_assertion"] is False
             assertion_id = first_body["assertion_id"]
+            first_replay = client.post(
+                f"/api/v1/daily-care/intelligence/proposals/{analysis_ids[0]}/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert first_replay.status_code == 200, first_replay.text
+            assert first_replay.json()["idempotent_replay"] is True
+            assert first_replay.json()["assertion_id"] == assertion_id
 
             second = client.post(
                 f"/api/v1/daily-care/intelligence/proposals/{analysis_ids[1]}/0/review",
