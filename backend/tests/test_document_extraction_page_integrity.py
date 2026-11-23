@@ -209,3 +209,79 @@ def test_pdf_filename_still_enforces_missing_pages_when_mime_type_is_generic():
     assert metadata["page_count"] == 3
     assert metadata["processed_page_numbers"] == [1, 3]
     assert metadata["unprocessed_page_numbers"] == [2]
+
+
+def test_legacy_pdf_without_page_manifest_detects_missing_source_page():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _persisted_unprocessed_pages
+
+    analysis = SimpleNamespace(
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+        },
+    )
+
+    assert _persisted_unprocessed_pages(analysis) == [2]
+
+
+def test_legacy_pdf_page_gap_blocks_interpretation_without_saved_gap_metadata():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api.document_intelligence import _require_complete_extraction
+
+    analysis = SimpleNamespace(
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+        },
+    )
+
+    try:
+        _require_complete_extraction(analysis)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert "2" in exc.detail
+    else:
+        raise AssertionError("A legacy PDF with an unrecorded missing page must not be interpreted.")
+
+
+def test_legacy_pdf_page_gap_blocks_old_candidates_in_review_response():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="legacy-gap-analysis",
+        source_evidence_id="legacy-gap-evidence",
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+            "document_intelligence": {
+                "status": "available",
+                "observations": [{"subject": "Medication", "observation": "Old candidate"}],
+            },
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["extraction_processed_page_numbers"] == [1, 3]
+    assert response["extraction_processed_page_count"] == 2
+    assert response["extraction_unprocessed_page_numbers"] == [2]
+    assert response["interpretation_blocked"] is True
+    assert response["observations"] == []
