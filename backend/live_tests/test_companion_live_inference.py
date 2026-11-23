@@ -930,6 +930,27 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         ), sadness_reply
 
 
+        fear = _ask(
+            client,
+            session,
+            "I'm frightened about what the future holds as Mum's dementia changes. I don't know what to expect.",
+            session_id,
+        )
+        assert fear.status_code == 200, fear.text
+        fear_data = fear.json()
+        assert fear_data.get("ai_generated") is True, fear_data
+        assert fear_data.get("written_to_lcr") is False, fear_data
+        fear_reply = fear_data.get("reply", "")
+        assert 0 < len(fear_reply.split()) <= 70, fear_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\\s+", fear_reply.strip()) if part]) <= 2, fear_reply
+        assert fear_reply.count("?") <= 1, fear_reply
+        assert not re.search(
+            r"\\b(?:guaranteed|inevitable|will definitely|will certainly|everything will be okay)\\b",
+            fear_reply,
+            re.IGNORECASE,
+        ), fear_reply
+        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", fear_reply), fear_reply
+
         grief = _ask(
             client,
             session,
