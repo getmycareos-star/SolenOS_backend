@@ -80,8 +80,6 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
         value[patient_capacity.end():],
     ):
         return True
-    if re.search(r"\bi(?:'ve| have) been crying\b|\bi can't stop crying\b", value):
-        return True
     first_person = re.search(r"\bi(?:'m| am| feel)\b", value)
     if first_person is None:
         return False
