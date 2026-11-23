@@ -143,7 +143,7 @@ class CareActionOutcomeResponse(BaseModel):
 
 class CareAssertionStatusUpdate(BaseModel):
     person_id: str
-    assertion_status: Literal["reported", "review_required", "accepted", "rejected", "superseded", "withdrawn"]
+    assertion_status: Literal["reported", "review_required", "accepted", "rejected", "superseded", "retracted", "withdrawn"]
     updated_by_caregiver_id: Optional[str] = None
     review_after_days: Optional[int] = Field(default=None, ge=1, le=3650)
 
