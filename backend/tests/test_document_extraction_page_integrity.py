@@ -62,7 +62,7 @@ def test_missing_page_metadata_is_preserved_by_document_review_response_helpers(
     from app.api.document_intelligence import _persisted_unprocessed_pages
 
     analysis = SimpleNamespace(
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         candidates={
             "kind": "document_extraction_v1",
             "page_count": 3,
@@ -81,7 +81,7 @@ def test_document_interpretation_is_blocked_when_persisted_page_metadata_has_a_g
     from app.api.document_intelligence import _require_complete_extraction
 
     analysis = SimpleNamespace(
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         extraction_status="available",
         candidates={
             "kind": "document_extraction_v1",
@@ -123,7 +123,7 @@ def test_document_review_response_reports_missing_page_and_hides_old_candidates(
     analysis = SimpleNamespace(
         id="analysis-page-gap",
         source_evidence_id="evidence-page-gap",
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         extraction_status="partial",
         candidates={
             "kind": "document_extraction_v1",
