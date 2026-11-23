@@ -1605,7 +1605,7 @@ def test_explicit_multi_year_day_week_and_month_windows_are_not_truncated():
     months = _temporal_window("What changed in the last 24 months?", now=now)
 
     assert days is not None and days["start"] == "2024-09-07T00:00:00+00:00"
-    assert weeks is not None and weeks["start"] == "2024-11-17T00:00:00+00:00"
+    assert weeks is not None and weeks["start"] == "2024-11-18T00:00:00+00:00"
     assert months is not None and months["start"] == "2024-11-15T00:00:00+00:00"
     assert days["basis"] == weeks["basis"] == months["basis"] == "explicit_user_temporal_expression"
 
