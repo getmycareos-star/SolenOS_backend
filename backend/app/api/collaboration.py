@@ -8506,7 +8506,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or _caregiver_response_needs_revision(user_text, reply)
-            or (greeting_only and _greeting_reply_needs_revision(reply))
+            or (greeting_only and _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             invalid_reply = False
@@ -8559,7 +8559,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _caregiver_response_needs_revision(user_text, reply)
-                    or (greeting_only and _greeting_reply_needs_revision(reply))
+                    or (greeting_only and _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024))
                 )
                 if not invalid_reply:
                     break
