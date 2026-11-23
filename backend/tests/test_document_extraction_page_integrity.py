@@ -54,3 +54,46 @@ def test_contiguous_document_pages_remain_complete():
     assert metadata["page_count"] == 2
     assert metadata["processed_page_numbers"] == [1, 2]
     assert metadata["unprocessed_page_numbers"] == []
+
+
+def test_missing_page_metadata_is_preserved_by_document_review_response_helpers():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _persisted_unprocessed_pages
+
+    analysis = SimpleNamespace(
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        candidates={
+            "kind": "document_extraction_v1",
+            "page_count": 3,
+            "unprocessed_page_numbers": [2],
+        },
+    )
+
+    assert _persisted_unprocessed_pages(analysis) == [2]
+
+
+def test_document_interpretation_is_blocked_when_persisted_page_metadata_has_a_gap():
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    from app.api.document_intelligence import _require_complete_extraction
+
+    analysis = SimpleNamespace(
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "page_count": 3,
+            "unprocessed_page_numbers": [2],
+        },
+    )
+
+    try:
+        _require_complete_extraction(analysis)
+    except HTTPException as exc:
+        assert exc.status_code == 409
+        assert "2" in exc.detail
+    else:
+        raise AssertionError("Document interpretation must remain blocked while page 2 is missing.")
