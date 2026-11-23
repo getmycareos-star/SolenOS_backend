@@ -76,6 +76,20 @@ _CAREGIVER_SHARED_DISTRESS = re.compile(
     r"\b(?:i(?:'m| am) (?:too|also|as well)|i feel the same|me too|same here)\b",
     re.I,
 )
+_SELF_HARM_CRITICAL = re.compile(
+    r"\b(?:suicidal|suicide attempt|suicide plan|thinking about suicide|"
+    r"trying to kill myself|kill myself|end my life|want to die|"
+    r"i (?:don't|do not) want to live|i wish i (?:was|were) dead|"
+    r"better off dead|no reason to live|life isn't worth living|"
+    r"everyone would be better off without me|hurt myself|harm myself|"
+    r"self[- ]harm|can't keep myself safe|cannot keep myself safe|"
+    r"i can't go on|i cannot go on|"
+    r"might hurt (?:myself|someone|him|her|them)|"
+    r"afraid i might hurt (?:myself|someone|him|her|them))\b",
+    re.I,
+)
+
+
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
@@ -120,9 +134,15 @@ _EXPLANATION = re.compile(
 )
 
 
+def is_self_harm_safety_message(message: str) -> bool:
+    """Recognize explicit and indirect self-harm, suicide, and imminent harm language."""
+    return bool(_SELF_HARM_CRITICAL.search(message or ""))
+
+
 def is_critical_safety_message(message: str) -> bool:
     """Shared deterministic emergency classifier for response policy and Companion."""
-    return bool(_CRITICAL.search(message or ""))
+    value = message or ""
+    return bool(_CRITICAL.search(value) or _SELF_HARM_CRITICAL.search(value))
 
 
 def is_greeting_message(message: str) -> bool:
