@@ -2359,6 +2359,10 @@ def test_caregiver_interaction_guidance_recognizes_intensified_emotional_languag
         ("I'm really scared about tonight.", "DISTRESS RESPONSE"),
         ("I am very frustrated with being asked again.", "CONTINUITY REPAIR"),
         ("I feel so fed up with this system.", "CONTINUITY REPAIR"),
+        ("Sad", "DISTRESS RESPONSE"),
+        ("Angry.", "DISTRESS RESPONSE"),
+        ("Frustrated", "DISTRESS RESPONSE"),
+        ("Overwhelmed", "LOW-CAPACITY RESPONSE"),
     )
     for message, expected_guidance in cases:
         guidance = collaboration._caregiver_interaction_guidance(message)
