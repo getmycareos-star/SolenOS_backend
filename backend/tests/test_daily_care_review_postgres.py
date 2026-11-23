@@ -444,13 +444,18 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
                 proposal_source_ids = source_ids if index < 2 else second_source_ids
                 proposal_event_id = event_id if index < 2 else second_event_id
                 proposal_evidence_id = evidence_id if index < 2 else second_evidence_id
+                proposal_source_text = (
+                    "Caregiver reported that Mum woke twice overnight."
+                    if index < 2 else
+                    "Caregiver reported that Mum woke twice overnight again."
+                )
                 db.add(CaptureAnalysis(
                     id=analysis_id,
                     person_id=person_id,
                     caregiver_id=caregiver_id,
                     source_event_id=proposal_event_id,
                     source_evidence_id=proposal_evidence_id,
-                    source_text="Caregiver reported that Mum woke twice overnight.",
+                    source_text=proposal_source_text,
                     extraction_status="available",
                     candidates={
                         "kind": "daily_care_qwen_lcr_proposals",
