@@ -130,6 +130,53 @@ def _temporal_window(
             "basis": "explicit_user_temporal_expression",
         }
 
+    month_lookup = {
+        calendar.month_name[index].casefold(): index
+        for index in range(1, 13)
+    }
+    month_lookup.update({
+        calendar.month_abbr[index].casefold(): index
+        for index in range(1, 13)
+    })
+    month_pattern = "|".join(
+        re.escape(name)
+        for name in sorted(month_lookup, key=len, reverse=True)
+    )
+    full_month_date = re.search(
+        rf"\\b(?:({month_pattern})\\s+(\\d{{1,2}})(?:st|nd|rd|th)?[,]?\\s+(20\\d{{2}})"
+        rf"|(\\d{{1,2}})(?:st|nd|rd|th)?\\s+({month_pattern})\\s+(20\\d{{2}}))\\b",
+        text,
+    )
+    if full_month_date:
+        if full_month_date.group(1):
+            month_number = month_lookup[full_month_date.group(1).rstrip(".").casefold()]
+            day_number = int(full_month_date.group(2))
+            year_number = int(full_month_date.group(3))
+        else:
+            day_number = int(full_month_date.group(4))
+            month_number = month_lookup[full_month_date.group(5).rstrip(".").casefold()]
+            year_number = int(full_month_date.group(6))
+        try:
+            selected = date(year_number, month_number, day_number)
+        except ValueError as exc:
+            raise ValueError("Invalid calendar date in care-history question.") from exc
+        return date_window(selected, selected)
+
+    month_year = re.search(
+        rf"\\b({month_pattern})\\s+(20\\d{{2}})\\b|\\b(20\\d{{2}})\\s+({month_pattern})\\b",
+        text,
+    )
+    if month_year:
+        if month_year.group(1):
+            month_number = month_lookup[month_year.group(1).rstrip(".").casefold()]
+            year_number = int(month_year.group(2))
+        else:
+            year_number = int(month_year.group(3))
+            month_number = month_lookup[month_year.group(4).rstrip(".").casefold()]
+        month_start = date(year_number, month_number, 1)
+        month_end = date(year_number, month_number, calendar.monthrange(year_number, month_number)[1])
+        return date_window(month_start, month_end)
+
     start = end = None
     range_match = re.search(
         r"\b(?:between\s+(20\d{2}-\d{2}-\d{2})\s+and\s+(20\d{2}-\d{2}-\d{2})|"
