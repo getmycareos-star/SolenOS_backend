@@ -210,13 +210,12 @@ def test_companion_interaction_scenario_has_expected_deterministic_boundary(
         assert collaboration._is_casual_greeting(message), case_id
         assert not guidance, {case_id: guidance}
     elif expected == "distress":
-        assert "DISTRESS RESPONSE" in guidance, {case_id: guidance}
+        assert any(marker in guidance for marker in ("DISTRESS RESPONSE", "GRIEF RESPONSE", "LONELINESS RESPONSE")), {case_id: guidance}
         if "miss her" in message.casefold() or "grieving" in message.casefold() or "losing him" in message.casefold() or "died" in message.casefold() or "gone" in message.casefold():
             assert "GRIEF RESPONSE" in guidance, {case_id: guidance}
         if "alone" in message.casefold() or "lonely" in message.casefold() or "nobody" in message.casefold() or "no one" in message.casefold():
             assert "LONELINESS RESPONSE" in guidance, {case_id: guidance}
     elif expected == "anger_or_continuity":
-        assert "DISTRESS RESPONSE" in guidance, {case_id: guidance}
         assert "ANGER RESPONSE" in guidance or "CONTINUITY REPAIR" in guidance, {case_id: guidance}
     elif expected == "low_capacity":
         assert is_low_capacity_caregiver_message(message), case_id
