@@ -308,6 +308,26 @@ def test_caregiver_distress_still_wins_when_patient_emotion_is_also_reported():
         assert policy.intent == "low_capacity_support", message
 
 
+def test_indirect_self_harm_language_uses_unbounded_critical_safety_policy():
+    for message in (
+        "I wish I were dead.",
+        "I wish I was dead.",
+        "Everyone would be better off without me.",
+        "There is no reason to live.",
+        "Life isn't worth living.",
+        "I do not want to live.",
+        "I can't keep myself safe.",
+        "I cannot keep myself safe.",
+        "I'm thinking about suicide.",
+        "I might hurt myself.",
+        "I'm afraid I might hurt someone.",
+    ):
+        assert is_critical_safety_message(message), message
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "critical_safety", message
+        assert policy.max_words is None, message
+
+
 def test_single_word_caregiver_emotions_use_low_capacity_support():
     for message in ("Sad", "Angry.", "Frustrated", "Overwhelmed", "Furious!", "Tired", "Drained"):
         policy = resolve_response_length_policy(message)
