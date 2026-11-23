@@ -11,10 +11,10 @@ def test_all_ten_specialists_are_defined_and_have_distinct_responsibilities():
     required = {
         "lcr_retrieval": ("event chronology", "incomplete"),
         "care_extraction": ("negation", "source quotations"),
-        "longitudinal_reasoning": ("baseline", "single isolated event"),
+        "longitudinal_reasoning": ("baseline", "one isolated event"),
         "reconciliation": ("preserve each claim", "do not resolve"),
         "document_intelligence": ("page-level provenance", "OCR"),
-        "companion": ("actual question", "follow-up"),
+        "companion": ("real question", "follow-up"),
         "handoff_appointment": ("recipient", "source-attributed"),
         "caregiver_continuity": ("does not prove", "without diagnosing"),
         "medication_continuity": ("discontinued", "Never recommend"),
