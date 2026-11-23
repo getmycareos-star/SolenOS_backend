@@ -5294,11 +5294,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "observation merely because appointment details are also available. If no relevant event "
             "was retrieved, say that the requested history was not found in the supplied context."
         )
-    has_retrieved_care_records = any(
-        line.strip()
-        and not line.startswith("Canonical LCR retrieval coverage:")
-        for line in context_lines
-    )
+    has_retrieved_care_records = any((
+        source_event_ids,
+        source_evidence_ids,
+        source_document_analysis_ids,
+        source_appointment_ids,
+        source_handoff_ids,
+        source_notification_ids,
+        source_assertion_ids,
+        source_lcr_context_ids,
+        source_freshness_assessment_ids,
+        validated_aggregates,
+    ))
     empty_context_emergency_readiness = (
         payload.workflow == "emergency_readiness"
         and not has_retrieved_care_records
