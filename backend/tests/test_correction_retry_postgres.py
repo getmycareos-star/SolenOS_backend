@@ -53,10 +53,12 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
     def fail_first_reconciliation(*args, **kwargs):
         calls["reconciliation"] += 1
         if calls["reconciliation"] == 1:
-            raise RuntimeError("injected_postgres_reconciliation_failure")
+            # An empty/ambiguous result must not be mistaken for a committed
+            # reconciliation merely because no explicit failure stage exists.
+            return {"workflow": "care_record_correction", "stages": {}}
         return {
             "workflow": "care_record_correction",
-            "stages": {"reconciliation": "committed"},
+            "stages": {"reconciliation": "staged_in_caller_transaction"},
             "transaction_owner": "caller",
         }
 
