@@ -1,8 +1,8 @@
 """Regression coverage for PostgreSQL enum columns in shared LCR lexical search."""
-from sqlalchemy import Column, Enum as SAEnum, Float, MetaData, Text, Table, or_
+from sqlalchemy import Column, Enum as SAEnum, Float, MetaData, String, Text, Table, or_, select
 from sqlalchemy.dialects import postgresql
 
-from app.services.lcr_context import _text_search_predicates
+from app.services.lcr_context import _apply_text_search_filter, _text_search_predicates
 
 
 def test_uncertainty_assessment_enum_is_cast_before_ilike():
@@ -134,7 +134,9 @@ def test_postgres_unsearchable_optional_source_marks_projection_incomplete(monke
 
     import pytest
     from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
     import app.services.lcr_context as lcr_context
+    from app.services.lcr_context import _load_source_schema, build_lcr_context
 
     database_url = os.environ.get("DATABASE_URL", "")
     if database_url.startswith("postgresql+psycopg://"):
