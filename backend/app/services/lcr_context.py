@@ -1572,7 +1572,17 @@ def build_lcr_context(
             for item in event_items:
                 item["correction_lineage_status"] = "unavailable_schema"
                 item["information_status"], item["interpretation_limit"] = _information_status("events", item)
-            sources["events"]["correction_lineage_status"] = "unavailable_schema"
+            sources["events"].update({
+                "correction_lineage_status": "unavailable_schema",
+                "status": "partial",
+                "candidate_scan_complete": False,
+                "returned_history_complete": False,
+                "error_code": "event_correction_lineage_schema_unavailable",
+                "interpretation_limit": (
+                    "Correction history for these events is not available in this database schema. "
+                    "The original reports remain visible, but their currentness is unknown."
+                ),
+            })
         elif event_ids:
             try:
                 with db.begin_nested():
@@ -1658,10 +1668,24 @@ def build_lcr_context(
                     if completed_without_relationship:
                         item["correction_lineage_status"] = "failed"
                     item["information_status"], item["interpretation_limit"] = _information_status("events", item)
-                sources["events"]["correction_lineage_status"] = (
-                    "partial" if any(item.get("correction_lineage_status") == "failed" for item in event_items)
-                    else "checked"
+                correction_lineage_failed = any(
+                    item.get("correction_lineage_status") == "failed"
+                    for item in event_items
                 )
+                sources["events"]["correction_lineage_status"] = (
+                    "partial" if correction_lineage_failed else "checked"
+                )
+                if correction_lineage_failed:
+                    sources["events"].update({
+                        "status": "partial",
+                        "candidate_scan_complete": False,
+                        "returned_history_complete": False,
+                        "error_code": "event_correction_lineage_inconsistent",
+                        "interpretation_limit": (
+                            "A completed correction was found without its required source relationship. "
+                            "The affected original event cannot be treated as current."
+                        ),
+                    })
             except SQLAlchemyError:
                 for item in event_items:
                     item["correction_lineage_status"] = "failed"
