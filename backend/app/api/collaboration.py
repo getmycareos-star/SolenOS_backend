@@ -2916,7 +2916,7 @@ def _collect_full_lcr_context_pages(
         if name != "companion_conversation" and source.get("status") in {"available", "empty"}
     ]
     scan_has_failed_source = any(
-        source.get("status") in {"failed", "partial"}
+        source.get("status") in {"failed", "partial", "unsearchable"}
         for name, source in merged_sources.items()
         if name != "companion_conversation"
     )
