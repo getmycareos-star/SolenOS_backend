@@ -164,3 +164,13 @@ def test_critical_safety_classifier_is_shared_and_covers_emergency_language():
         assert policy.intent == "critical_safety"
         assert policy.max_words is None
         assert policy.token_budget == 1024
+
+
+def test_historical_diagnosis_mentions_do_not_disable_ordinary_length_contracts():
+    for message in (
+        "What does Mum's history of stroke mean for her care?",
+        "The record mentions a seizure in 2019.",
+        "Can you summarize the previous heart attack admission?",
+    ):
+        assert not is_critical_safety_message(message), message
+        assert resolve_response_length_policy(message).max_words is not None
