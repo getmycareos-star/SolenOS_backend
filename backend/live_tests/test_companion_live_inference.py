@@ -878,15 +878,15 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert sadness_data.get("written_to_lcr") is False, sadness_data
         sadness_reply = sadness_data.get("reply", "")
         assert 0 < len(sadness_reply.split()) <= 70, sadness_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", sadness_reply.strip()) if part]) <= 2, sadness_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", sadness_reply.strip()) if part]) <= 2, sadness_reply
         assert sadness_reply.count("?") <= 1, sadness_reply
         assert not re.search(
-            r"\\b(?:i'?m here for you|everything will be okay|you are not alone|you're not alone)\\b",
+            r"\b(?:i'?m here for you|everything will be okay|you are not alone|you're not alone)\b",
             sadness_reply,
             re.IGNORECASE,
         ), sadness_reply
         assert not re.search(
-            r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+",
+            r"(?m)^\s*(?:[-*•]|\d+[.)])\s+",
             sadness_reply,
         ), sadness_reply
 
