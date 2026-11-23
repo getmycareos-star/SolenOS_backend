@@ -2136,3 +2136,36 @@ def test_lcr_assist_anchors_the_newly_saved_event_beyond_recent_limit(monkeypatc
         assert len(captured) == 1, "a rejected cross-workflow event anchor must not invoke the model"
     finally:
         teardown()
+
+
+
+def test_qwen_support_assist_repairs_overlength_document_explanation(monkeypatch):
+    client, token, person_id, _, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        calls = []
+
+        def fake_qwen(messages, **kwargs):
+            calls.append((messages, kwargs))
+            if len(calls) == 1:
+                return "document detail " * 100
+            return "Please share the document text so I can explain what it says."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "document", "text": "Explain this uploaded document."},
+        )
+        assert response.status_code == 200, response.text
+        assert len(calls) == 2
+        assert "Target 100 words; hard maximum 180 words." in calls[0][0][0]["content"]
+        assert "Target 100 words; hard maximum 180 words." in calls[1][0][0]["content"]
+        assert calls[0][1]["options"]["num_predict"] == 512
+        assert calls[1][1]["options"]["num_predict"] == 512
+        assert "Revise the draft into a clear, natural, accessible response." in calls[1][0][0]["content"]
+        assert response.json()["reply"] == "Please share the document text so I can explain what it says."
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
