@@ -765,14 +765,34 @@ def _response(analysis: CaptureAnalysis) -> dict:
     stored_observations = intelligence.get("observations")
     stored_observations = stored_observations if isinstance(stored_observations, list) else []
     source_text = analysis.source_text or ""
-    unprocessed_pages = sorted(set(
-        _unprocessed_page_numbers(source_text)
-        + (details.get("unprocessed_page_numbers") if isinstance(details.get("unprocessed_page_numbers"), list) else [])
-    ))
+    observed_pages = {
+        int(match.group(1))
+        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
+    }
+    is_paginated_pdf = (
+        str(details.get("mime_type") or "").split(";", 1)[0].strip().casefold() == "application/pdf"
+        or str(details.get("filename") or "").casefold().endswith(".pdf")
+    )
+    raw_page_count = details.get("page_count")
+    page_count = (
+        raw_page_count
+        if isinstance(raw_page_count, int) and not isinstance(raw_page_count, bool) and raw_page_count > 0
+        else max(observed_pages, default=1) if is_paginated_pdf else max(len(observed_pages), 1)
+    )
+    if is_paginated_pdf:
+        page_count = max(page_count, max(observed_pages, default=0))
+    missing_page_numbers = set(range(1, page_count + 1)) - observed_pages if is_paginated_pdf else set()
+    unprocessed_pages = sorted(
+        set(_unprocessed_page_numbers(source_text))
+        | set(details.get("unprocessed_page_numbers") if isinstance(details.get("unprocessed_page_numbers"), list) else [])
+        | missing_page_numbers
+    )
+    unreadable_pages = _unreadable_page_numbers(source_text)
+    processed_pages = sorted(observed_pages - set(unprocessed_pages) - set(unreadable_pages))
     extraction_complete = (
         analysis.extraction_status == "available"
         and not unprocessed_pages
-        and not _unreadable_page_numbers(source_text)
+        and not unreadable_pages
     )
     # Match the document-intelligence response contract: candidates from an
     # earlier successful pass are hidden while the current OCR is incomplete.
@@ -782,12 +802,12 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_evidence_id": analysis.source_evidence_id,
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
-        "page_count": details.get("page_count", 1),
-        "processed_page_numbers": details.get("processed_page_numbers", []),
+        "page_count": page_count,
+        "processed_page_numbers": processed_pages,
         # The persisted extraction text is authoritative for page-level
         # readability. Recompute these lists on every response so a successful
         # retry cannot retain stale failure markers from an earlier attempt.
-        "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
+        "unreadable_page_numbers": unreadable_pages,
         "unprocessed_page_numbers": unprocessed_pages,
         "retryable_page_numbers": [
             page for page in _retryable_page_numbers(analysis.source_text or "")
