@@ -613,6 +613,19 @@ def qwen_readiness_status(force: bool = False) -> dict:
             "failure_reason": detail.get("reason", "ollama_configuration_invalid"),
             "error_category": detail.get("code", "configuration_unavailable"),
         }
+    except http.client.HTTPException as exc:
+        result = {
+            "available": False,
+            "state": "runtime_unavailable",
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "installation": installation,
+            "model_installed": False,
+            "runtime_available": False,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "failure_reason": type(exc).__name__,
+            "error_category": "invalid_model_inventory",
+        }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         result = {
             "available": False,
@@ -698,6 +711,18 @@ def qwen_runtime_status() -> dict:
             "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
             "error_category": detail.get("code", "configuration_unavailable"),
             "failure_reason": detail.get("reason", "ollama_configuration_invalid"),
+        }
+    except http.client.HTTPException as exc:
+        return {
+            "available": False,
+            "runtime_available": False,
+            "model_installed": False,
+            "inference_verified": False,
+            "inference_status": "not_verified",
+            "installation": installation,
+            "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+            "error_category": "invalid_model_inventory",
+            "failure_reason": type(exc).__name__,
         }
     except (urllib.error.URLError, TimeoutError, ValueError, OSError) as exc:
         return {
