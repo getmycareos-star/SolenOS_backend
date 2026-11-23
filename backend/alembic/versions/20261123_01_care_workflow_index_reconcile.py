@@ -94,6 +94,15 @@ def _create_missing_index(bind, table_name: str, column_name: str) -> str | None
     return index_name
 
 
+def _is_migration_owned_index(table_name: str, column_name: str, index_name: str) -> bool:
+    """Match only names this migration could have created for this exact index."""
+    base_name = _index_name(table_name, column_name)
+    if index_name == base_name:
+        return True
+    suffix = index_name.removeprefix(base_name + "_")
+    return index_name.startswith(base_name + "_") and suffix.isdigit()
+
+
 def upgrade() -> None:
     bind = op.get_bind()
 
@@ -123,9 +132,9 @@ def downgrade() -> None:
             name = str(index.get("name") or "")
             indexed_columns = tuple(index.get("column_names") or ())
             if (
-                name.startswith("ix_solenos_schema_")
-                and len(indexed_columns) == 1
+                len(indexed_columns) == 1
                 and indexed_columns[0] in expected_columns
                 and not bool(index.get("unique", False))
+                and _is_migration_owned_index(table_name, indexed_columns[0], name)
             ):
                 op.drop_index(name, table_name=table_name)
