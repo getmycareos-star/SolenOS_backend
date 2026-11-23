@@ -911,13 +911,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     evidence, upload = _source(evidence_id, person_id, caregiver_id, db)
     analysis = _analysis_for_evidence(evidence_id, person_id, caregiver_id, db)
     metadata = _metadata(analysis)
-    original_candidates = copy.deepcopy(metadata)
     duplicate_of_evidence_id = _duplicate_of(evidence)
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The extraction does not match the preserved original file")
     _verify_persisted_extraction(analysis, upload, db)
     _require_complete_extraction(analysis)
     metadata = _metadata(analysis)
+    original_candidates = copy.deepcopy(metadata)
     existing = _intelligence(analysis)
     resume_intelligence = {}
     if existing:
@@ -951,6 +951,9 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     questions=existing.get("open_questions") or [],
                 )
                 db.commit()
+            except HTTPException:
+                db.rollback()
+                raise
             except Exception:
                 db.rollback()
                 logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
