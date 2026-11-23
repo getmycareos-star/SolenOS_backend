@@ -345,3 +345,162 @@ def test_completed_daily_capture_job_without_analysis_is_not_reported_as_queued_
             assert "could not be organized" in processing["message"]
     finally:
         engine.dispose()
+
+
+
+def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgres():
+    """The same source-backed Qwen proposal must not create duplicate LCR assertions."""
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    suffix = uuid.uuid4().hex
+    person_id = f"daily-proposal-dedupe-person-{suffix}"
+    caregiver_id = f"daily-proposal-dedupe-caregiver-{suffix}"
+    event_id = f"daily-proposal-dedupe-event-{suffix}"
+    evidence_id = f"daily-proposal-dedupe-evidence-{suffix}"
+    analysis_ids = [f"daily-proposal-dedupe-analysis-{suffix}-{index}" for index in range(2)]
+    token = secrets.token_urlsafe(32)
+    now = datetime.now(UTC)
+    source_ids = [event_id, evidence_id]
+    proposed_value = "Mum woke twice overnight."
+
+    try:
+        with Session(engine) as db:
+            db.add(Person(id=person_id, name="Daily Care proposal dedupe fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Daily Care caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                role="primary",
+                access_scope="full_record",
+                status="active",
+                can_manage_members=True,
+                granted_by_caregiver_id=caregiver_id,
+            ))
+            db.flush()
+            db.add(Evidence(
+                id=evidence_id,
+                person_id=person_id,
+                type="note",
+                evidence_kind="caregiver_report",
+                epistemic_status="caregiver_reported",
+                source_text="Caregiver reported that Mum woke twice overnight.",
+                uploaded_by_caregiver_id=caregiver_id,
+                reported_by_caregiver_id=caregiver_id,
+                collected_by_caregiver_id=caregiver_id,
+                reported_by_label="Caregiver",
+                source_type="caregiver_report",
+                occurred_at=now - timedelta(hours=2),
+            ))
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="structured_daily_capture",
+                status="recorded",
+                occurred_at=now - timedelta(hours=2),
+                title="Daily Care sleep observation",
+                description="Caregiver reported that Mum woke twice overnight.",
+                evidence_ids=[evidence_id],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+            for analysis_id in analysis_ids:
+                db.add(CaptureAnalysis(
+                    id=analysis_id,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=event_id,
+                    source_evidence_id=evidence_id,
+                    source_text="Caregiver reported that Mum woke twice overnight.",
+                    extraction_status="available",
+                    candidates={
+                        "kind": "daily_care_qwen_lcr_proposals",
+                        "proposals": [{
+                            "title": "Sleep observation",
+                            "field": "sleep",
+                            "proposed_value": proposed_value,
+                            "source_ids": source_ids,
+                            "uncertainty": "Caregiver report; not independently verified.",
+                            "reason": "Preserve the reported sleep observation in the longitudinal record.",
+                            "review_status": "pending_review",
+                        }],
+                    },
+                    review_history=[],
+                ))
+            db.add(AnonymousSession(
+                id=f"daily-proposal-dedupe-session-{suffix}",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                expires_at=now + timedelta(days=1),
+            ))
+            db.commit()
+
+        SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_db():
+            request_db = SessionFactory()
+            try:
+                yield request_db
+            finally:
+                request_db.close()
+
+        app.dependency_overrides[get_db] = override_db
+        with TestClient(app) as client:
+            headers = {"Authorization": f"Bearer {token}"}
+            first = client.post(
+                f"/api/v1/daily-care/intelligence/proposals/{analysis_ids[0]}/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert first.status_code == 200, first.text
+            first_body = first.json()
+            assert first_body["written_to_lcr"] is True
+            assert first_body["reused_existing_assertion"] is False
+            assertion_id = first_body["assertion_id"]
+
+            second = client.post(
+                f"/api/v1/daily-care/intelligence/proposals/{analysis_ids[1]}/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert second.status_code == 200, second.text
+            second_body = second.json()
+            assert second_body["written_to_lcr"] is True
+            assert second_body["reused_existing_assertion"] is True
+            assert second_body["assertion_id"] == assertion_id
+
+            current_care = client.get(
+                "/api/v1/care-continuity/current-care?limit_per_source=50",
+                headers=headers,
+            )
+            assert current_care.status_code == 200, current_care.text
+            assert sum(item.get("id") == assertion_id for item in current_care.json().get("items", [])) == 1
+
+        with Session(engine) as db:
+            assertions = db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.assertion_kind == "caregiver_reviewed_daily_care",
+            ).all()
+            assert len(assertions) == 1
+            assert assertions[0].id == assertion_id
+            assert assertions[0].source_event_id == event_id
+            assert assertions[0].evidence_ids == [evidence_id]
+            assert assertions[0].asserted_value == proposed_value
+            saved_analyses = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.id.in_(analysis_ids)
+            ).all()
+            assert len(saved_analyses) == 2
+            assert all(
+                row.candidates["proposals"][0]["accepted_assertion_id"] == assertion_id
+                for row in saved_analyses
+            )
+            assert saved_analyses[1].review_history[-1]["reused_existing_assertion"] is True
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        engine.dispose()
