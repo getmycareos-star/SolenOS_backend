@@ -2446,7 +2446,7 @@ def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
         assert response.json()["reply"] == "We can focus on the one concern that matters most right now. You do not need to handle everything today."
         assert len(calls) == 2
         assert "Revise your previous answer" in calls[1][0][-1]["content"]
-        assert "Use at most two short sentences" in calls[1][0][-1]["content"]
+        assert "Do not force a two-sentence limit on a complex care question" in calls[1][0][-1]["content"]
         assert "Do not ask the caregiver to repeat information already provided" in calls[1][0][-1]["content"]
     finally:
         teardown()
@@ -2551,7 +2551,7 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
         assert replay_body["reply"] == body["reply"]
         assert len(calls) == 3
         assert all("current greeting" not in call[0][-1]["content"].casefold() for call in calls[1:])
-        assert all("Use at most two short sentences" in call[0][-1]["content"] for call in calls[1:])
+        assert all("Do not force a two-sentence limit on a complex care question" in call[0][-1]["content"] for call in calls[1:])
         assert body["reply"] == (
             "I hear that you're exhausted. "
             "We can take this one concern at a time."
@@ -3408,6 +3408,17 @@ def test_companion_greeting_contract_uses_first_time_and_returning_hard_maxima()
     assert collaboration._greeting_reply_needs_revision(first_time + "today", 40)
     assert not collaboration._greeting_reply_needs_revision(returning, 55)
     assert collaboration._greeting_reply_needs_revision(returning + "today", 55)
+
+
+def test_companion_greeting_word_count_uses_shared_unicode_and_apostrophe_rules():
+    assert not collaboration._greeting_reply_needs_revision("You're welcome to SolenOS and the care record.", 8)
+    assert collaboration._greeting_reply_needs_revision("You're welcome to SolenOS and the care record today.", 8)
+
+
+def test_companion_direct_source_answers_still_obey_response_length_contract():
+    assert not collaboration._companion_message_needs_revision("Source-supported care fact. " * 40, 250)
+    assert collaboration._companion_message_needs_revision("Source-supported care fact. " * 90, 250)
+    assert not collaboration._companion_message_needs_revision("Immediate safety instruction. " * 90, None)
 
 
 def test_companion_does_not_treat_acknowledgements_as_greetings():
