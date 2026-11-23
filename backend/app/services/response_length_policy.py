@@ -51,19 +51,19 @@ _EMOTIONAL = re.compile(
     re.I,
 )
 _PATIENT_EMOTIONAL_REPORT = re.compile(
-    r"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
-    r"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
-    r".{0,40}\\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been)\\b"
-    r".{0,24}\\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
-    r"helpless|frustrated|furious|overwhelmed|exhausted|burnt out|burned out|grieving)\\b",
+    r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+    r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
+    r".{0,40}\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been)\b"
+    r".{0,24}\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
+    r"helpless|frustrated|furious|overwhelmed|exhausted|burnt out|burned out|grieving)\b",
     re.I,
 )
 _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
-    r"\\b(?:i(?:'m| am| feel| have)|i've)\\b.{0,60}\\b(?:exhausted|overwhelmed|"
+    r"\b(?:i(?:'m| am| feel| have)|i've)\b.{0,60}\b(?:exhausted|overwhelmed|"
     r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
     r"lonely|anxious|grieving|frustrated|furious|helpless|at my limit|falling apart|"
     r"can't cope|cannot cope|can't take this|cannot take this|can't stop crying|"
-    r"need a break|have had enough|had enough)\\b",
+    r"need a break|have had enough|had enough)\b",
     re.I,
 )
 _CRITICAL = re.compile(
