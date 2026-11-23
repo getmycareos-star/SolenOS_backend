@@ -263,6 +263,8 @@ def test_patient_emotion_does_not_trigger_caregiver_low_capacity_response():
         "Mum was overwhelmed after lunch.",
         "My dad has been exhausted all week.",
         "She seems frightened at night.",
+        "Mum was panicking before the appointment.",
+        "He is terrified about the move.",
         "The care recipient felt lonely yesterday.",
     ):
         policy = resolve_response_length_policy(message)
