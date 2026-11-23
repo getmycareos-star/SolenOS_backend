@@ -1002,6 +1002,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "expected_subject": caregiver_label,
                 "expected_observation": quote_correct,
                 "expected_candidate_id": current_candidate_id,
+                "expected_review_status": "corrected_pending_approval",
             },
         )
         assert accepted.status_code == 200, accepted.text
