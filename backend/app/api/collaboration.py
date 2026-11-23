@@ -8479,7 +8479,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         ):
             history_fallback_invalid = (
-                _companion_message_needs_revision(care_history_extractive_answer)
+                _companion_message_needs_revision(care_history_extractive_answer, response_length_policy.max_words)
                 or _contains_unrequested_saba(care_history_extractive_answer, validation_source)
                 or _contains_unsupported_care_claim(care_history_extractive_answer, validation_source)
                 or _contains_unsupported_operational_claim(care_history_extractive_answer, validation_source, source_context)
@@ -8492,7 +8492,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         invalid_reply = (
             not isinstance(reply, str)
             or not reply.strip()
-            or _companion_message_needs_revision(reply)
+            or _companion_message_needs_revision(reply, response_length_policy.max_words)
             or _contains_unrequested_saba(reply, validation_source)
             or _contains_unsupported_care_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
@@ -8545,7 +8545,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 invalid_reply = (
                     not isinstance(reply, str)
                     or not reply.strip()
-                    or _companion_message_needs_revision(reply)
+                    or _companion_message_needs_revision(reply, response_length_policy.max_words)
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
@@ -8594,7 +8594,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 invalid_reply = (
                     not isinstance(reply, str)
                     or not reply.strip()
-                    or _companion_message_needs_revision(reply)
+                    or _companion_message_needs_revision(reply, response_length_policy.max_words)
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
@@ -8642,7 +8642,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 invalid_reply = (
                     not isinstance(reply, str)
                     or not reply.strip()
-                    or _companion_message_needs_revision(reply)
+                    or _companion_message_needs_revision(reply, response_length_policy.max_words)
                     or _contains_unrequested_saba(reply, validation_source)
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
@@ -8657,7 +8657,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             and not (unsupported_trend or conflict_response or missing_measurement_reply or medication_change_reply)
         ):
             history_fallback_invalid = (
-                _companion_message_needs_revision(care_history_extractive_answer)
+                _companion_message_needs_revision(care_history_extractive_answer, response_length_policy.max_words)
                 or _contains_unrequested_saba(care_history_extractive_answer, validation_source)
                 or _contains_unsupported_care_claim(care_history_extractive_answer, validation_source)
                 or _contains_unsupported_operational_claim(care_history_extractive_answer, validation_source, source_context)
@@ -8683,7 +8683,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             failed_rules = []
             if not isinstance(reply, str) or not reply.strip():
                 failed_rules.append("empty_response")
-            if _companion_message_needs_revision(reply):
+            if _companion_message_needs_revision(reply, response_length_policy.max_words):
                 failed_rules.append("message_format")
             if _contains_unrequested_saba(reply, validation_source):
                 failed_rules.append("unrequested_saba")
