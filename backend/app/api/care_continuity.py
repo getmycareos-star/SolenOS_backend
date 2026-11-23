@@ -4511,7 +4511,7 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
     requested_status = str(payload.get("assertion_status") or "").strip()
     if requested_status != "accepted":
         raise HTTPException(status_code=422, detail="This workflow only records an explicit caregiver review as accepted")
-    if previous.get("assertion_status") in {"retracted", "superseded"}:
+    if previous.get("assertion_status") in {"retracted", "superseded", "withdrawn"}:
         raise HTTPException(status_code=409, detail="Retracted or superseded assertions cannot be accepted; preserve them and create a new assertion")
     review_days = payload.get("review_after_days", previous.get("review_after_days"))
     if review_days is not None:
@@ -4780,7 +4780,7 @@ def list_person_assertion_freshness(person_id: str, request: Request, limit: int
                 age_days = max(0, int((now - parsed.astimezone(timezone.utc)).total_seconds() // 86400))
             except (TypeError, ValueError):
                 age_days = None
-        if status in {"retracted", "superseded"}:
+        if status in {"retracted", "superseded", "withdrawn"}:
             freshness_status = "historical"
             explanation = "This assertion is explicitly marked as retracted or superseded in the persisted record."
         elif kind == "time_bound_observation":
