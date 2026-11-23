@@ -5294,9 +5294,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "observation merely because appointment details are also available. If no relevant event "
             "was retrieved, say that the requested history was not found in the supplied context."
         )
+    has_retrieved_care_records = any(
+        line.strip()
+        and not line.startswith("Canonical LCR retrieval coverage:")
+        for line in context_lines
+    )
     empty_context_emergency_readiness = (
         payload.workflow == "emergency_readiness"
-        and not context_lines
+        and not has_retrieved_care_records
         and not is_critical_safety_message(payload.text)
     )
     response_length_policy = resolve_workflow_response_length_policy(payload.workflow, payload.text)
