@@ -1871,6 +1871,9 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
             and passage["page_label"] == "[Page 1]"
             for passage in retrieved_passages
         ), "Companion retrieval must return the exact matching document passage with source offsets"
+        passage_prompt = format_lcr_context_for_prompt(passage_context)
+        assert '"page_number":1' in passage_prompt
+        assert '"page_label":"[Page 1]"' in passage_prompt
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
