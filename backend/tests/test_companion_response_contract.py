@@ -3385,6 +3385,12 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
             and "cannot be searched for this topic" in item["interpretation_limit"]
             for item in coverage["source_limits"]
         )
+        receipt_limits = coverage["retrieval_receipt"]["source_limits"]
+        assert any(
+            item["source_type"] == "legacy_optional"
+            and item["status"] == "unsearchable"
+            for item in receipt_limits
+        )
         user_prompt = captured["messages"][-1]["content"]
         assert "legacy_optional" in user_prompt
         assert "cannot be searched for this topic" in user_prompt
