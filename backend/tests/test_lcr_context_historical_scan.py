@@ -1034,7 +1034,7 @@ def test_document_extraction_metadata_does_not_trust_stale_pdf_manifest():
             "page_count": 3,
             "processed_page_numbers": [1, 2, 3],
         },
-        "[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page.",
+        "[Page 1 OCR]\nFirst page.\n[Page 3 OCR]\nThird page.",
     )
 
     assert metadata["unprocessed_page_numbers"] == [2]
