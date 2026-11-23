@@ -48,8 +48,13 @@ _EMOTIONAL = re.compile(
 )
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
-    r"unconscious|stroke(?: symptoms)?|face drooping|chest pain|heart attack|"
-    r"severe bleeding|heavy bleeding|choking|seizure|overdose|poisoning|"
+    r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
+    r"having a stroke|signs of stroke|sudden weakness|chest pain with difficulty breathing|"
+    r"severe chest pain|new chest pain|chest pain now|having chest pain|"
+    r"heart attack symptoms|possible heart attack|suspected heart attack|having a heart attack|"
+    r"severe bleeding|heavy bleeding|is choking|currently choking|choking now|"
+    r"having a seizure|seizure right now|ongoing seizure|is seizing|repeated seizures|"
+    r"possible overdose|suspected overdose|overdosed|took too much|poisoning|"
     r"suicidal|suicide attempt|trying to kill myself|self[- ]harm|immediate danger|"
     r"life[- ]threatening|collapsed|cannot wake|can't wake|not waking up|"
     r"blue lips|gasping|anaphylaxis|severe allergic reaction)\b",
