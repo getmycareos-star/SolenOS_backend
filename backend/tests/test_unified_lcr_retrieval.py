@@ -1211,12 +1211,13 @@ def test_topic_search_keeps_failed_document_extractions_as_visible_evidence_gaps
         ["medication"],
     )
     sql = str(statement)
+    parameters = statement.compile().params
 
     assert searchable is True
     assert "source_text" in sql
     assert "extraction_status IN" in sql
-    assert "failed" in sql
-    assert "processing" in sql
+    assert "failed" in str(parameters)
+    assert "processing" in str(parameters)
 
 
 def test_withdrawn_or_superseded_evidence_never_reads_as_current():
