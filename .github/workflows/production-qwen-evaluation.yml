@@ -13,8 +13,10 @@ permissions:
   actions: read
 
 concurrency:
+  # Do not cancel a live-model acceptance run when another main commit arrives.
+  # Only the newest pending run is retained while the active evaluation finishes.
   group: deployed-qwen-production-acceptance-qwen-source
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   production-acceptance:
