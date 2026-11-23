@@ -74,7 +74,7 @@ def _cases():
     add("fear_guilt_uncertainty", [
         "I'm afraid about what happens as Mum's dementia progresses.",
         "I am scared about the future.",
-        "I'm frightened about what will happen next.",
+        "I'm worried about Dad's new behavior.",
         "I don't know what to expect.",
         "I don't know if this is normal.",
         "I'm not sure whether this medication is safe.",
