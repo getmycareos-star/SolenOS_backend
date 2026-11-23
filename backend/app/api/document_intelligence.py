@@ -1692,7 +1692,7 @@ def review_document_candidate(
                 "review_required": True,
                 "idempotent_replay": True,
             }
-    if payload.expected_review_status is not None and candidate.get("review_status") != payload.expected_review_status:
+    if candidate.get("review_status") != payload.expected_review_status:
         raise HTTPException(
             status_code=409,
             detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
