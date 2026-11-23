@@ -373,6 +373,16 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         ],
         "order": ["scheduled_at", "created_at"],
     },
+    "appointment_workspaces": {
+        "table": "appointment_workspace_records",
+        "required": False,
+        "fields": [
+            "id", "appointment_id", "status", "version_number", "payload",
+            "last_revision_reason", "created_by_caregiver_id", "updated_by_caregiver_id",
+            "created_at", "updated_at",
+        ],
+        "order": ["updated_at", "created_at"],
+    },
 }
 
 SEARCH_FIELDS = {
@@ -410,6 +420,7 @@ SEARCH_FIELDS = {
         "title", "status", "location", "location_type", "provider", "healthcare_org",
         "preparation_notes", "travel_notes", "time_provenance", "location_provenance",
     ],
+    "appointment_workspaces": ["status", "last_revision_reason", "payload"],
 }
 
 def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
@@ -428,6 +439,8 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
             searchable_column = cast(column, String)
         elif isinstance(column.type, String):
             searchable_column = column
+        elif source_name == "appointment_workspaces" and name == "payload":
+            searchable_column = cast(column, String)
         else:
             continue
         predicates.extend(
@@ -601,6 +614,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         )
     if source_name == "assertions":
         return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
+    if source_name == "appointment_workspaces":
+        return (
+            "appointment_workspace_caregiver_notes",
+            "This is a caregiver-authored appointment workspace, saved separately from the Living Care Record. It may contain caregiver reports and notes about what a healthcare professional said; those statements are not independently verified. Preserve the saved status, version, and the payload's epistemic boundary.",
+        )
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
         metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
@@ -646,6 +664,55 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         if item.get(key) is not None:
             return f"recorded_{str(item[key]).casefold()}", "This is the stored workflow status, not an independent truth judgment."
     return "recorded_status_unspecified", "No explicit epistemic status was stored for this record."
+
+
+def _safe_appointment_workspace_payload(value: Any) -> dict[str, Any]:
+    """Keep caregiver-authored appointment context bounded and preserve its labels."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    text_fields = (
+        "visitPurpose", "clinician", "specialty", "visitDate", "location", "attendees",
+        "changes", "symptoms", "medicationQuestions", "historyQuestions", "practicalNotes",
+        "concernsDiscussed", "caregiverReport", "clinicianFindings", "decisions",
+        "instructions", "unanswered", "medicationReconciliation", "pendingResults",
+        "familySummary", "reviewStatus",
+    )
+    result: dict[str, Any] = {}
+    for key in text_fields:
+        item = value.get(key)
+        if isinstance(item, str) and item.strip():
+            result[key] = item[:1200]
+    for key in ("topConcerns", "documentsToBring", "attachedEvidenceIds", "attached_evidence_ids"):
+        items = value.get(key)
+        if isinstance(items, list):
+            result[key] = [str(item)[:500] for item in items[:25] if isinstance(item, (str, int, float))]
+    follow_ups = value.get("followUps", value.get("follow_ups"))
+    if isinstance(follow_ups, list):
+        result["followUps"] = [
+            {
+                field: str(item[field])[:500]
+                for field in ("action", "owner", "due", "status", "open_loop_id", "reported_done_at")
+                if item.get(field) is not None and isinstance(item.get(field), (str, int, float))
+            }
+            for item in follow_ups[:25]
+            if isinstance(item, dict)
+        ]
+    boundary = value.get("epistemic_boundary")
+    if isinstance(boundary, dict):
+        result["epistemic_boundary"] = {
+            key: _safe_value(boundary[key], key)
+            for key in (
+                "caregiver_report", "clinician_findings",
+                "ai_suggestions_written_as_clinical_facts", "lcr_reconciliation",
+            )
+            if key in boundary
+        }
+    return result
 
 
 def _document_extraction_metadata(value: Any) -> dict[str, Any]:
@@ -943,6 +1010,8 @@ def build_lcr_context(
                     item = {key: _safe_value(value, key) for key, value in dict(row).items()}
                     if source_name == "document_extractions":
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None))
+                    if source_name == "appointment_workspaces":
+                        item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
                     information_status, interpretation_limit = _information_status(source_name, item)
                     item["information_status"] = information_status
                     item["interpretation_limit"] = interpretation_limit
