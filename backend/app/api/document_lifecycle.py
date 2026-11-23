@@ -782,9 +782,17 @@ def _response(analysis: CaptureAnalysis) -> dict:
     if is_paginated_pdf:
         page_count = max(page_count, max(observed_pages, default=0))
     missing_page_numbers = set(range(1, page_count + 1)) - observed_pages if is_paginated_pdf else set()
+    recorded_unprocessed_pages = details.get("unprocessed_page_numbers")
+    persisted_unprocessed_pages = {
+        page for page in recorded_unprocessed_pages
+        if isinstance(recorded_unprocessed_pages, list)
+        and isinstance(page, int)
+        and not isinstance(page, bool)
+        and page > 0
+    } if isinstance(recorded_unprocessed_pages, list) else set()
     unprocessed_pages = sorted(
         set(_unprocessed_page_numbers(source_text))
-        | set(details.get("unprocessed_page_numbers") if isinstance(details.get("unprocessed_page_numbers"), list) else [])
+        | persisted_unprocessed_pages
         | missing_page_numbers
     )
     unreadable_pages = _unreadable_page_numbers(source_text)
