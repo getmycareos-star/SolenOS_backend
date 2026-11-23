@@ -1983,3 +1983,20 @@ def test_retrieval_score_does_not_count_identifiers_or_nested_candidate_payloads
         "candidates": [{"description": "sleep medication changed"}],
     }
     assert _retrieval_score(identifier_only, query, direct, expanded) == 0
+
+
+def test_curated_sleep_paraphrase_expansion_retrieves_awake_wording():
+    direct = ["sleep"]
+    expanded = _expanded_search_terms(direct)
+    paraphrased_record = {
+        "title": "Overnight observation",
+        "description": "Caregiver reports the person was awake several times overnight.",
+    }
+    unrelated_record = {
+        "title": "Appointment update",
+        "description": "Caregiver recorded a visit with the primary care office.",
+    }
+    assert "awake" in expanded
+    assert _retrieval_score(paraphrased_record, "sleep", direct, expanded) > _retrieval_score(
+        unrelated_record, "sleep", direct, expanded
+    )
