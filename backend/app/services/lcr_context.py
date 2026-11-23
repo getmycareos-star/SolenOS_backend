@@ -814,7 +814,7 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
         else:
             observed_pages = {
                 int(match.group(1))
-                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
             }
             # When immutable text exists, require both the text and manifest
             # to account for a page; a stale manifest cannot fill a source gap.
