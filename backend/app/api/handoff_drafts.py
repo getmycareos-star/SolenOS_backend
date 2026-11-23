@@ -1763,6 +1763,13 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 effective_extraction_status = "unsupported_extraction_record"
             elif extraction_details.get("binary_sha256") != upload.sha256:
                 effective_extraction_status = "extraction_binary_checksum_mismatch"
+            elif extraction_details.get("source_text_sha256") != hashlib.sha256(
+                (extraction.source_text or "").strip().encode("utf-8")
+            ).hexdigest():
+                # The immutable upload checksum proves which binary was saved;
+                # this separate digest proves the persisted extraction text has
+                # not changed since it was produced from that binary.
+                effective_extraction_status = "extraction_text_checksum_mismatch"
             elif not (extraction.source_text or "").strip():
                 effective_extraction_status = "extraction_text_empty"
             else:
