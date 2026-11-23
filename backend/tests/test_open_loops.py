@@ -752,6 +752,7 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
         headers=headers,
         json={
             "status": "deferred",
+            "expected_version": loop["version"],
             "deferred_reason": "Waiting for the clinic to return the call.",
             "review_at": review_at.isoformat(),
         },
