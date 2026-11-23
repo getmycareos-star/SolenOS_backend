@@ -335,3 +335,18 @@ def test_delta_context_ignores_untrusted_or_malformed_document_context():
         "authority": {"untrusted": "value"},
         "document_candidate": ["not", "a", "mapping"],
     }) == {}
+
+
+def test_delta_reconciliation_uses_saved_event_time_when_request_omits_event_date():
+    persisted_event_time = datetime(2026, 10, 12, 8, 30, tzinfo=timezone.utc)
+    source_event = SimpleNamespace(occurred_at=persisted_event_time)
+
+    assert delta_engine._event_time_for_reconciliation(None, source_event) == persisted_event_time
+
+
+def test_explicit_event_time_takes_precedence_over_saved_event_time():
+    explicit_event_time = datetime(2026, 10, 13, 9, 0, tzinfo=timezone.utc)
+    persisted_event_time = datetime(2026, 10, 12, 8, 30, tzinfo=timezone.utc)
+    source_event = SimpleNamespace(occurred_at=persisted_event_time)
+
+    assert delta_engine._event_time_for_reconciliation(explicit_event_time, source_event) == explicit_event_time
