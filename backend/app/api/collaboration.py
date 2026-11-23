@@ -3186,7 +3186,8 @@ def _is_casual_greeting(text: str) -> bool:
         "hi", "hello", "hey", "hiya", "howdy",
         "how are you", "how are you doing", "how are you today",
         "how's it going", "hows it going", "what's up", "whats up",
-        "good morning", "good afternoon", "good evening", "good night",
+        "good morning", "good afternoon", "good evening", "good day", "good night",
+        "hi there", "hello there", "hey there",
     }
 
 
