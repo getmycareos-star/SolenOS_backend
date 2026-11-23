@@ -1475,8 +1475,25 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             return True
 
         workflow = await _classify_task(job.task_text, job.context_text or "")
-        job.workflow = workflow
+        # Classification is model output too. A reclaimed worker must not
+        # overwrite the workflow selected by the current lease holder.
+        current_job = db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job.id,
+            QwenBackgroundJob.person_id == job.person_id,
+            QwenBackgroundJob.caregiver_id == job.caregiver_id,
+        ).populate_existing().with_for_update().first()
+        if (
+            current_job is None
+            or current_job.status != "processing"
+            or lease_state is None
+            or current_job.locked_at != lease_state.get("locked_at")
+            or lease_state.get("lost")
+        ):
+            db.rollback()
+            return True
+        current_job.workflow = workflow
         db.commit()
+        job = current_job
 
         # Import only after app initialization to avoid a router/worker import cycle.
         from app.api.collaboration import QwenAssistRequest
