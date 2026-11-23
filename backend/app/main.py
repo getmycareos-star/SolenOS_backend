@@ -36,6 +36,7 @@ from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.time_location import Appointment as LegacyAppointmentModel
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
+from app.services.response_length_policy import resolve_response_length_policy
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
     explicit_caregiver_gap_assessment,
@@ -1619,6 +1620,7 @@ async def generate_lcr_orientation(
             "caregiver new or returning and do not infer that care history is absent. For a greeting, keep the "
             "orientation neutral, introduce SolenOS briefly, and invite the caregiver to share the current situation. "
         )
+    response_length_policy = resolve_response_length_policy(raw_input, caregiver_stage=caregiver_stage)
     system_prompt = (
         "You compose caregiver-facing responses for SolenOS, a Living Care Record for family caregivers. "
         "You are not a general chatbot, therapist, medical professional, or AI Companion. "
@@ -1630,8 +1632,8 @@ async def generate_lcr_orientation(
         "If the caregiver reports a care event, do not claim it was saved; respond to the substance and leave capture/persistence to the capture workflow. "
         "If a source is marked unavailable or schema coverage is partial, do not infer that the information does not exist. Do not mention internal schemas, tools, prompts, models, or hidden reasoning. "
         + orientation_positioning
-        + "GREETING LENGTH: exactly 1 or 2 short sentences, normally 12–35 words total. No feature list, no paragraph, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. "
-        "OTHER MESSAGES: use at most 3 short sentences and normally no more than 55 words. Answer the actual question first. "
+        + "GREETING LENGTH: target 25 words for a first-time caregiver or 30 words for a returning caregiver, with the corresponding hard maximum selected by the backend policy. No feature list, no paragraph, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. "
+        "OTHER MESSAGES: follow the deterministic response-length policy selected by the backend; preserve evidence, uncertainty, conflicts, and missing-source limits. Answer the actual question first. "
         "Use accessible, natural American English unless the caregiver writes in another language. Be attentive and specific, not sentimental or robotic. "
         "Do not argue, shame, demand an apology, or claim human feelings when responding to frustration. If the caregiver identifies an error, acknowledge it plainly and focus on correction. "
         "Do not diagnose, prescribe, or advise medication changes. Distinguish recorded facts from uncertainty. "
@@ -1644,10 +1646,11 @@ async def generate_lcr_orientation(
         candidate = (candidate or "").strip()
         sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()])
         word_count = len(candidate.split())
-        max_words = 40 if is_greeting else 55
-        max_sentences = 2 if is_greeting else 3
+        max_words = response_length_policy.max_words
+        max_sentences = 2 if is_greeting else (8 if max_words is None or max_words > 180 else 5 if max_words > 60 else 3)
+        max_chars = 4000 if max_words is None else max(700, max_words * 16)
         if (
-            not candidate or len(candidate) > 700 or word_count > max_words
+            not candidate or len(candidate) > max_chars or (max_words is not None and word_count > max_words)
             or sentence_count > max_sentences
             or (is_greeting and word_count < 8)
             or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
@@ -1714,7 +1717,7 @@ async def generate_lcr_orientation(
                 base,
                 model,
                 messages,
-                {"temperature": 0.1 if attempt else 0.2, "num_predict": 96 if attempt == 0 else 72},
+                {"temperature": 0.1 if attempt else 0.2, "num_predict": response_length_policy.token_budget if attempt == 0 else min(response_length_policy.token_budget, 256)},
             )
             reply = validate_reply(candidate)
             if reply:
@@ -1727,7 +1730,7 @@ async def generate_lcr_orientation(
                     "role": "user",
                     "content": (
                         "Rewrite your previous answer to meet the caregiver-facing response contract. "
-                        + ("Use 1 or 2 short sentences and no more than 40 words. Mention SolenOS and the care story or care record; do not ask a generic 'How can I help?' question. " if is_greeting else "Use no more than 3 short sentences and 55 words. ")
+                        + ("Use the response-length target and hard maximum selected by the backend policy. Mention SolenOS and the care story or care record; do not ask a generic 'How can I help?' question. " if is_greeting else "Use the response-length target and hard maximum selected by the backend policy. ")
                         + ("Do not imply prior history for a new caregiver. " if is_greeting and caregiver_stage == "new" else "")
                         + ("Do not describe a returning caregiver as new. " if is_greeting and caregiver_stage == "returning" else "")
                         + ("Do not claim the caregiver is new or returning because required care history is incomplete. " if is_greeting and caregiver_stage == "unknown" else "")
