@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +10,8 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, SessionLocal as DefaultSessionLocal, get_db
 from app.main import app
+from app.models.care import Evidence
+from app.models.open_loop import OpenLoopRecord
 
 pytestmark = pytest.mark.session_security
 
@@ -76,6 +79,44 @@ def approval_payload(evidence_id, **overrides):
         "evidence_ids": [evidence_id],
     }
     payload.update(overrides)
+
+    # Registered actions must be approved from a persisted, versioned open
+    # follow-up, not from an arbitrary model-generated suggestion string.
+    raw_suggestion_id = str(payload["suggestion_id"])
+    if raw_suggestion_id.startswith("open_loop_records:"):
+        record_id = raw_suggestion_id.split(":", 1)[1]
+    else:
+        record_id = raw_suggestion_id
+    payload["suggestion_id"] = f"open_loop_records:{record_id}"
+
+    db = TestSessionLocal()
+    try:
+        evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        record = db.query(OpenLoopRecord).filter_by(
+            id=record_id,
+            person_id=evidence.person_id,
+        ).first()
+        if record is None:
+            record = OpenLoopRecord(
+                id=record_id,
+                person_id=evidence.person_id,
+                caregiver_id=evidence.uploaded_by_caregiver_id,
+                loop_type="follow_up",
+                title=payload["title"][:240],
+                description=payload["rationale"],
+                status="open",
+                source_type="evidence",
+                source_id=evidence_id,
+                source_fingerprint=hashlib.sha256(
+                    f"{evidence.person_id}:{record_id}".encode("utf-8")
+                ).hexdigest(),
+                evidence=[{"evidence_id": evidence_id}],
+            )
+            db.add(record)
+            db.commit()
+        payload.setdefault("suggestion_version", int(record.version or 1))
+    finally:
+        db.close()
     return payload
 
 
