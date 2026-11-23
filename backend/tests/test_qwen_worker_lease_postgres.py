@@ -1,5 +1,6 @@
 """PostgreSQL-only regression coverage for Qwen worker lease ownership."""
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import os
 import threading
 import uuid
@@ -16,7 +17,7 @@ pytestmark = pytest.mark.skipif(
 
 from app.core.database import SessionLocal
 from app.main import app
-from app.models.care import Caregiver, Person
+from app.models.care import CaptureAnalysis, Caregiver, Person
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput
 from app.services import qwen_background_worker as worker
 
@@ -364,3 +365,75 @@ def test_postgres_worker_does_not_requeue_after_lease_reclaim_and_inference_erro
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
+
+
+def test_postgres_document_deletion_completes_while_extraction_is_running(monkeypatch):
+    """Deletion must not wait for OCR; stale extraction must not recreate deleted content."""
+    monkeypatch.setenv("SOLENOS_QWEN_WORKER_ENABLED", "false")
+    entered_ocr = threading.Event()
+    release_ocr = threading.Event()
+
+    from app.api import document_lifecycle
+
+    def blocked_extract(*args, **kwargs):
+        entered_ocr.set()
+        if not release_ocr.wait(timeout=15):
+            raise TimeoutError("test did not release the OCR barrier")
+        return "[Page 1]\\nCare note: lunch was not eaten.", "server_utf8_text"
+
+    monkeypatch.setattr(document_lifecycle, "_extract", blocked_extract)
+
+    with TestClient(app) as client:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": "Document deletion race test"},
+        )
+        assert created.status_code == 201, created.text
+        headers = {"Authorization": "Bearer " + created.json()["access_token"]}
+        person_id = created.json()["person"]["id"]
+        caregiver_id = created.json()["caregiver"]["id"]
+        uploaded = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "document",
+            },
+            files={"file": ("deletion-race.txt", b"Original care note.", "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            extraction_future = pool.submit(
+                client.post,
+                f"/api/v1/documents/{evidence_id}/extract",
+                headers=headers,
+                json={},
+            )
+            assert entered_ocr.wait(timeout=10), "extraction never reached OCR"
+            deletion_future = pool.submit(
+                client.delete,
+                f"/api/v1/documents/{evidence_id}",
+                headers=headers,
+            )
+            deletion_finished_before_ocr_release = False
+            try:
+                deletion_response = deletion_future.result(timeout=5)
+                deletion_finished_before_ocr_release = True
+            except TimeoutError:
+                release_ocr.set()
+                deletion_response = deletion_future.result(timeout=15)
+            finally:
+                release_ocr.set()
+            extraction_response = extraction_future.result(timeout=15)
+
+        assert deletion_finished_before_ocr_release, "document deletion was blocked by the OCR transaction"
+        assert deletion_response.status_code == 200, deletion_response.text
+        assert extraction_response.status_code == 404, extraction_response.text
+        with SessionLocal() as db:
+            assert db.query(CaptureAnalysis).filter_by(
+                person_id=person_id,
+                source_evidence_id=evidence_id,
+            ).count() == 0
