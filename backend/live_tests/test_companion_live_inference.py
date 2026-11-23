@@ -909,7 +909,7 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         pause = _ask(
             client,
             session,
-            "I can't continue right now. Please stop asking me questions.",
+            "You keep asking me the same questions. I can't continue right now. Please stop asking me questions.",
             session_id,
         )
         assert pause.status_code == 200, pause.text
