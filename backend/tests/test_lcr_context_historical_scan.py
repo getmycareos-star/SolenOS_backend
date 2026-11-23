@@ -1003,7 +1003,7 @@ def test_document_extraction_metadata_derives_pdf_gaps_without_processed_manifes
             "mime_type": "application/pdf",
             "page_count": 3,
         },
-        "[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page.",
+        "[Page 1 OCR]\nFirst page.\n[Page 3 OCR]\nThird page.",
     )
 
     assert metadata["unprocessed_page_numbers"] == [2]
