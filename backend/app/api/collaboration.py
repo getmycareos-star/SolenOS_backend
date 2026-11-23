@@ -6698,7 +6698,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"what will happen)|i(?:'m| am) scared (?:right now|something is happening)|"
         r"i don't know what to expect|i do not know what to expect|"
         r"i don't know if this is normal|i do not know if this is normal|"
-        r"i'm not sure (?:what to do|whether this is safe|whether (?:this|the )?(?:medication|medicine) is safe)|i am not sure (?:what to do|whether this is safe|whether (?:this|the )?(?:medication|medicine) is safe)|"
+        r"i'm not sure (?:what to do|whether this is safe|whether (?:this |the )?(?:medication|medicine) is safe)|i am not sure (?:what to do|whether this is safe|whether (?:this|the )?(?:medication|medicine) is safe)|"
         r"i'm worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i am worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i can't tell if (?:this is getting worse|something is wrong)|"
