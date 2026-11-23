@@ -1091,3 +1091,90 @@ def test_reminders_cannot_be_assigned_to_caregivers_without_completion_permissio
     eligibility = {item["caregiver_id"]: item["can_complete_assigned_reminders"] for item in assignable.json()}
     assert eligibility[second_id] is False
     assert eligibility[primary_id] is True
+
+
+def test_timezone_preference_change_releases_assigned_reminder_deferral_for_recipient():
+    from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.reminder import CareReminder
+    from app.services.reminder_delivery import deliver_due_reminders
+
+    client = TestClient(app)
+    primary = create_session(client, "Reminder creator")
+    primary_headers = {"Authorization": f"Bearer {primary['access_token']}"}
+    invitation = client.post(
+        "/api/v1/caregiver-access/invitations",
+        headers=primary_headers,
+        json={"email": "timezone-assignee@example.test"},
+    )
+    assert invitation.status_code == 201, invitation.text
+    accepted = client.post(
+        "/api/v1/caregiver-access/invitations/accept",
+        json={
+            "token": invitation.json()["invitation_token"],
+            "email": "timezone-assignee@example.test",
+            "password": "timezone-assignee-password-456",
+            "name": "Assigned caregiver",
+        },
+    )
+    assert accepted.status_code == 201, accepted.text
+    assignee = accepted.json()
+    assignee_headers = {"Authorization": f"Bearer {assignee['access_token']}"}
+
+    due_at = datetime(2026, 1, 15, 16, 0, tzinfo=timezone.utc).isoformat()
+    created = client.post(
+        "/api/v1/reminders",
+        headers=primary_headers,
+        json={
+            "person_id": primary["person"]["id"],
+            "title": "Assigned caregiver timezone follow-up",
+            "due_at": due_at,
+            "assigned_to_caregiver_id": assignee["caregiver_id"],
+        },
+    )
+    assert created.status_code == 201, created.text
+    reminder_id = created.json()["id"]
+    now = datetime(2026, 1, 15, 17, 0, tzinfo=timezone.utc)
+
+    db = TestSessionLocal()
+    try:
+        db.add(CareNotificationPreference(
+            person_id=primary["person"]["id"],
+            caregiver_id=assignee["caregiver_id"],
+            reminders_enabled=True,
+            quiet_hours_enabled=True,
+            quiet_hours_start="09:00",
+            quiet_hours_end="18:00",
+            timezone_name="America/New_York",
+        ))
+        db.commit()
+        assert deliver_due_reminders(db=db, now=now) == 0
+        stored = db.query(CareReminder).filter_by(id=reminder_id).one()
+        assert stored.notification_deferred_until is not None
+        assert db.query(CareNotification).filter_by(
+            source_event_id=reminder_id,
+            caregiver_id=assignee["caregiver_id"],
+            category="reminder_due",
+        ).count() == 0
+    finally:
+        db.close()
+
+    changed = client.put(
+        "/api/v1/notifications/preferences",
+        headers=assignee_headers,
+        json={"timezone_name": "Asia/Tokyo"},
+    )
+    assert changed.status_code == 200, changed.text
+
+    db = TestSessionLocal()
+    try:
+        stored = db.query(CareReminder).filter_by(id=reminder_id).one()
+        assert stored.notification_deferred_until is None
+        assert deliver_due_reminders(db=db, now=now) == 1
+        notification = db.query(CareNotification).filter_by(
+            source_event_id=reminder_id,
+            caregiver_id=assignee["caregiver_id"],
+            category="reminder_due",
+        ).one()
+        assert notification.person_id == primary["person"]["id"]
+    finally:
+        db.close()
