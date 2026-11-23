@@ -6707,6 +6707,22 @@ def _emergency_response_for_message(user_text: str) -> tuple[str, str]:
     )
 
 
+def _caregiver_explicitly_requests_factual_answer(user_text: str) -> bool:
+    """Keep expressed emotion separate from a caregiver's explicit information request."""
+    value = (user_text or "").strip().casefold()
+    if "?" in value:
+        return True
+    return bool(re.search(
+        r"\\b(?:please explain|explain (?:the|what|how|why)|tell me (?:what|when|how|why|about)|"
+        r"show me|in detail|give me (?:the )?(?:full|detailed)|"
+        r"what (?:was|did|has|have|is|are|does|do)|"
+        r"how (?:many|often|long|much)|when (?:did|was|has|is)|"
+        r"where (?:did|was|is)|who (?:did|was|is)|"
+        r"can you (?:explain|tell|show|check|find)|could you (?:explain|tell|show|check|find))\\b",
+        value,
+    ))
+
+
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
@@ -6750,6 +6766,7 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     if (
         ("DISTRESS RESPONSE" in guidance or "GRIEF RESPONSE" in guidance or "SELF-BLAME RESPONSE" in guidance)
         and not critical_safety
+        and not _caregiver_explicitly_requests_factual_answer(user_text)
     ):
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         if len(sentences) > 2 or len(text.split()) > 70:
