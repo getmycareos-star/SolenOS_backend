@@ -9,10 +9,28 @@ from app.services.lcr_context import (
     MAX_TEXT_CHARS,
     _load_source_schema,
     _safe_value,
+    _exact_source_passages,
     build_lcr_context,
     format_lcr_context_for_prompt,
 )
 
+
+
+def test_exact_document_passage_offsets_map_casefold_expansions_to_original_text():
+    source = "x Straße target medication dose"
+    passages = _exact_source_passages(
+        source,
+        ["STRASSE"],
+        max_passages=1,
+        passage_chars=6,
+    )
+
+    assert len(passages) == 1
+    passage = passages[0]
+    assert passage["text"] == "Straße"
+    assert passage["source_character_start"] == source.index("Straße")
+    assert passage["source_character_end"] == source.index("Straße") + len("Straße")
+    assert source[passage["source_character_start"]:passage["source_character_end"]] == passage["text"]
 
 def test_reflected_uuid_values_are_normalized_for_lcr_sources():
     identifier = UUID("9a8d72d2-49f1-4d78-a8c9-5f1a5f0b1b9c")
