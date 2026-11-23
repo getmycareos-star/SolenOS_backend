@@ -6541,6 +6541,18 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"every day there's something new and i can't keep up)\b",
         text,
     )
+    unable_to_continue = re.search(
+        r"\\b(?:i can't continue|i cannot continue|i can't keep doing this|i cannot keep doing this|"
+        r"i can't do this any longer|i cannot do this any longer)\\b",
+        text,
+    )
+    pause_request = re.search(
+        r"\\b(?:please stop|stop for now|enough for now|i need to stop|i want to stop|"
+        r"i need a pause|i want a pause|let's pause|not now|"
+        r"i don't want to talk(?: about this)?|i do not want to talk(?: about this)?|"
+        r"leave it for now|that's enough)\\b",
+        text,
+    )
     distress = re.search(
         r"\b(?:i(?:'m| am) (?:really |very |so )?(?:angry|upset|frustrated|furious|fed up)|"
         r"i feel (?:really |very |so )?(?:angry|upset|frustrated|furious|fed up)|"
@@ -6600,6 +6612,13 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
 
+    if pause_request:
+        guidance.append(
+            "PAUSE REQUEST: The caregiver has asked to stop, pause, or not continue this topic. Respect that request. "
+            "Do not ask another question, restart the care workflow, repeat suggestions, or press for more details. "
+            "A brief acknowledgment and a clear pause are enough. Immediate danger still takes precedence and must "
+            "receive direct real-world safety guidance."
+        )
     if frustration:
         guidance.append(
             "CONTINUITY REPAIR: The caregiver is explicitly frustrated with repeated or failed system behavior. "
@@ -6609,7 +6628,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "that access failed; if the information is absent, say only that it is not present in the available "
             "record. Never claim the problem is fixed unless the relevant retrieval or action actually succeeded."
         )
-    if overload or standalone_overload:
+    if overload or standalone_overload or unable_to_continue:
         guidance.append(
             "LOW-CAPACITY RESPONSE: The caregiver explicitly signals overload or exhaustion. Keep the response "
             "short and grounded in the retrieved situation. Do not produce a checklist, broad care lecture, "
