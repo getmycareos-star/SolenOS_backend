@@ -403,6 +403,22 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         if evidence_id
     ))
     correction_evidence_ids = set()
+    corrected_event_ids: set[str] = set()
+    correction_lookup_complete = True
+    if selected:
+        try:
+            if not inspect(db.get_bind()).has_table("corrections"):
+                correction_lookup_complete = False
+            else:
+                with db.begin_nested():
+                    correction_rows = db.query(Correction).filter(
+                        Correction.person_id == person_id,
+                        Correction.target_type == "care_event",
+                        Correction.target_id.in_([str(row.id) for row in selected]),
+                    ).all()
+                corrected_event_ids = {str(row.target_id) for row in correction_rows}
+        except SQLAlchemyError:
+            correction_lookup_complete = False
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_observations"):
         source_observations = db.query(EvidenceObservation).filter(
             EvidenceObservation.person_id == person_id,
@@ -462,7 +478,11 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             "description": row.description or "",
             "tags": " ".join(str(tag) for tag in (row.tags or [])),
             "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
-            "source_correction_requires_review": bool(correction_evidence_ids.intersection(str(value) for value in (row.evidence_ids or []))),
+            "source_correction_requires_review": (
+                not correction_lookup_complete
+                or str(row.id) in corrected_event_ids
+                or bool(correction_evidence_ids.intersection(str(value) for value in (row.evidence_ids or [])))
+            ),
             "entered_by": names.get(str(row.created_by_caregiver_id)),
         } for row in selected],
         topic="unsteadiness",
