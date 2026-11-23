@@ -838,7 +838,10 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         int(match.group(1))
         for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
     })
-    is_paginated_pdf = (upload.mime_type or "").casefold() == "application/pdf"
+    is_paginated_pdf = (
+        (upload.mime_type or "").split(";", 1)[0].strip().casefold() == "application/pdf"
+        or (upload.filename or "").casefold().endswith(".pdf")
+    )
     # A PDF is one paginated source, so gaps between page markers are missing
     # pages. A standalone scan/photo may retain its original page label (for
     # example page 3 of a packet) without containing pages 1 and 2 itself.
