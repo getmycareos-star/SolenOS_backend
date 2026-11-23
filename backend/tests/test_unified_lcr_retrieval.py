@@ -2269,3 +2269,20 @@ def test_medication_lexical_expansion_retrieves_common_caregiver_paraphrases():
             expanded,
         ) > _retrieval_score(unrelated, query_term, direct, expanded)
 
+def test_curated_breathing_paraphrase_retrieves_differently_worded_symptom_report():
+    direct = ["shortness", "breath"]
+    expanded = _expanded_search_terms(direct)
+    matching = {
+        "title": "Overnight observation",
+        "description": "Caregiver noticed difficulty breathing during the night.",
+    }
+    unrelated = {
+        "title": "Clinic visit",
+        "description": "Caregiver recorded a routine appointment.",
+    }
+
+    assert "breathing" in expanded
+    assert _retrieval_score(matching, "shortness of breath", direct, expanded) > _retrieval_score(
+        unrelated, "shortness of breath", direct, expanded
+    )
+
