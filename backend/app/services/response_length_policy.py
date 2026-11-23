@@ -50,6 +50,11 @@ _EMOTIONAL = re.compile(
     r"i just want a break|i've had enough|i have had enough|i can't take this|i cannot take this)\b",
     re.I,
 )
+_STANDALONE_CAREGIVER_EMOTION = re.compile(
+    r"^(?:really |very |so )?(?:sad|angry|upset|lonely|anxious|scared|frightened|"
+    r"afraid|frustrated|furious|overwhelmed|exhausted|burnt out|burned out)[.!?]*$",
+    re.I,
+)
 _PATIENT_EMOTIONAL_REPORT = re.compile(
     r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
     r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
@@ -145,7 +150,9 @@ def resolve_response_length_policy(
     value = " ".join((message or "").casefold().split())
     if is_critical_safety_message(value):
         return _POLICIES["critical_safety"]
-    emotional_report = bool(_EMOTIONAL.search(value))
+    emotional_report = bool(
+        _EMOTIONAL.search(value) or _STANDALONE_CAREGIVER_EMOTION.fullmatch(value)
+    )
     patient_emotional_report = bool(_PATIENT_EMOTIONAL_REPORT.search(value))
     caregiver_first_person_distress = bool(
         _CAREGIVER_FIRST_PERSON_DISTRESS.search(value)
