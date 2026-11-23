@@ -536,7 +536,7 @@ async def ask_daily_care_qwen(
         "must retain source IDs and uncertainty. Do not propose a value that is unsupported by the supplied records. "
         "If there is no supported proposal, return an empty proposals array. Return only the required JSON."
     )
-    system_prompt += f" RESPONSE LENGTH: target {response_length_policy.target_words} words; hard maximum {response_length_policy.max_words}. Preserve source limitations and uncertainty; do not pad or speculate."
+    system_prompt += f" RESPONSE LENGTH: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. Preserve source limitations and uncertainty; do not pad or speculate."
     try:
         raw = await __import__("asyncio").to_thread(
             qwen_chat,
@@ -558,7 +558,7 @@ async def ask_daily_care_qwen(
                 }, ensure_ascii=False)},
             ],
             response_format=schema,
-            options={"temperature": 0, "num_predict": response_length_policy.token_budget},
+            options={"temperature": 0, "num_predict": min(1024, response_length_policy.token_budget + (256 if payload.prepare_lcr_proposals else 0))},
         )
         parsed = json.loads(raw)
         if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not isinstance(parsed.get("proposals"), list):
