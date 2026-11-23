@@ -864,7 +864,6 @@ def _lock_active_document_source(db: Session, evidence_id: str, person_id: str):
     upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
     if upload is None:
         raise HTTPException(status_code=404, detail="Original document bytes are unavailable")
-    _verified_content(upload)
     return evidence, upload
 
 
