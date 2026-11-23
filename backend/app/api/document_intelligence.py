@@ -642,12 +642,25 @@ def _response(analysis: CaptureAnalysis) -> dict:
     metadata = _metadata(analysis)
     intelligence = _intelligence(analysis)
     source_text = analysis.source_text or ""
-    page_count = _page_count(source_text)
     unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata)
     retryable_pages = _retryable_page_numbers(source_text)
     blocked_pages = _blocked_page_numbers(source_text)
     unreadable_pages = _unreadable_page_numbers(source_text)
-    processed_pages = [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
+    metadata_page_count = metadata.get("page_count")
+    page_count = (
+        metadata_page_count
+        if isinstance(metadata_page_count, int) and not isinstance(metadata_page_count, bool) and metadata_page_count > 0
+        else _page_count(source_text)
+    )
+    metadata_processed_pages = metadata.get("processed_page_numbers")
+    processed_pages = (
+        sorted({
+            page for page in metadata_processed_pages
+            if isinstance(page, int) and not isinstance(page, bool) and page > 0
+        })
+        if isinstance(metadata_processed_pages, list)
+        else [number for number in range(1, page_count + 1) if number not in unprocessed_pages]
+    )
     stored_observations = intelligence.get("observations") if isinstance(intelligence.get("observations"), list) else []
     all_observations = stored_observations
     extraction_complete = (
