@@ -1744,7 +1744,7 @@ def review_appointment_outcome_proposal(
         ).first()
         active_assertion = (
             existing_assertion is not None
-            and existing_assertion.assertion_status not in {"rejected", "superseded", "withdrawn"}
+            and existing_assertion.assertion_status not in {"rejected", "superseded", "retracted", "withdrawn"}
         )
         corrected_proposal = None
         if decision == "correct":
