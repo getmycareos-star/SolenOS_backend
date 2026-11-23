@@ -224,7 +224,14 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     # version shown to the caregiver so an old screen cannot approve a loop
     # after another caregiver has changed, closed, or replaced it.
     suggestion_source, separator, suggestion_source_id = payload.suggestion_id.partition(":")
-    if suggestion_source == "open_loop_records" and separator and suggestion_source_id:
+    if suggestion_source not in {"open_loop_records", "open-loop"}:
+        raise HTTPException(
+            status_code=409,
+            detail="This item is not a versioned saved follow-up. Refresh the care record and review the current follow-up before approving it.",
+        )
+    if suggestion_source == "open_loop_records":
+        if not separator or not suggestion_source_id:
+            raise HTTPException(status_code=409, detail="This follow-up reference is incomplete. Refresh the care record.")
         if payload.suggestion_version is None:
             raise HTTPException(
                 status_code=409,
