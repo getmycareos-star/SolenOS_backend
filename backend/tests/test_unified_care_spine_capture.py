@@ -20,9 +20,9 @@ from app.api.care_continuity import _build_situation_understanding_assessment
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
+from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship, CareStateRevision
 from app.models.collaboration import EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput, QwenSafetyEvaluation
 import app.api.daily_care_intelligence as daily_care_intelligence
@@ -759,3 +759,130 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
                 db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
                 db.commit()
         engine.dispose()
+
+def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pending_reports():
+    """Correction lineage is checked in PostgreSQL before direct Companion history recall."""
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    suffix = uuid.uuid4().hex
+    person_id = f"companion-lineage-person-{suffix}"
+    caregiver_id = f"companion-lineage-caregiver-{suffix}"
+    corrected_event_id = f"companion-lineage-corrected-{suffix}"
+    pending_event_id = f"companion-lineage-pending-{suffix}"
+    current_event_id = f"companion-lineage-current-{suffix}"
+    applied_correction_id = f"companion-lineage-applied-{suffix}"
+    pending_correction_id = f"companion-lineage-waiting-{suffix}"
+    relationship_id = f"companion-lineage-link-{suffix}"
+
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="PostgreSQL Companion lineage recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Family caregiver",
+                relationship="Family", person_id=person_id,
+            ))
+            db.flush()
+            db.add_all([
+                CareEvent(
+                    id=corrected_event_id, person_id=person_id,
+                    event_type="observation", status="recorded",
+                    occurred_at=datetime(2026, 2, 3, 9, 0, tzinfo=timezone.utc),
+                    title="Corrected sleep report",
+                    description="Caregiver reported that Mum slept poorly.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
+                CareEvent(
+                    id=pending_event_id, person_id=person_id,
+                    event_type="observation", status="recorded",
+                    occurred_at=datetime(2026, 2, 4, 9, 0, tzinfo=timezone.utc),
+                    title="Sleep report awaiting correction",
+                    description="Caregiver reported that Mum slept through the night.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
+                CareEvent(
+                    id=current_event_id, person_id=person_id,
+                    event_type="observation", status="recorded",
+                    occurred_at=datetime(2026, 2, 5, 9, 0, tzinfo=timezone.utc),
+                    title="Current sleep report",
+                    description="Caregiver reported that Mum slept well.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
+            ])
+            db.flush()
+            db.add_all([
+                Correction(
+                    id=applied_correction_id, person_id=person_id,
+                    target_type="care_event", target_id=corrected_event_id,
+                    original_text="Mum slept poorly.",
+                    corrected_text="Caregiver did not observe Mum sleeping poorly.",
+                    reason="The original report overstated what was observed.",
+                    caregiver_id=caregiver_id, processing_status="completed",
+                    processing_attempts=1,
+                ),
+                Correction(
+                    id=pending_correction_id, person_id=person_id,
+                    target_type="care_event", target_id=pending_event_id,
+                    original_text="Mum slept through the night.",
+                    corrected_text="Caregiver is unsure whether Mum slept through the night.",
+                    reason="The caregiver is checking the overnight notes.",
+                    caregiver_id=caregiver_id, processing_status="pending",
+                    processing_attempts=0,
+                ),
+            ])
+            db.add(CareRecordRelationship(
+                id=relationship_id, person_id=person_id,
+                source_type="correction", source_id=applied_correction_id,
+                relationship_type="corrects", target_type="care_event",
+                target_id=corrected_event_id,
+                provenance="Caregiver correction; original report retained.",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+            context = collaboration._care_history_recall_context_lines(
+                db, person_id, "What has the caregiver recorded about sleep?"
+            )
+            records = {
+                json.loads(line.partition(":")[2].strip())["event_id"]:
+                json.loads(line.partition(":")[2].strip())["record"]
+                for line in context["event_lines"]
+            }
+            assert context["correction_lineage_complete"] is True
+            assert records[corrected_event_id]["information_status"] == "historical_event"
+            assert records[corrected_event_id]["corrections"][0]["corrected_text"] == (
+                "Caregiver did not observe Mum sleeping poorly."
+            )
+            assert records[pending_event_id]["information_status"] == "event_correction_pending"
+            assert records[current_event_id]["information_status"] == "caregiver_reported"
+            assert records[current_event_id]["occurred_at"] is not None
+            assert records[current_event_id]["recorded_at"] is not None
+
+            answer = collaboration._care_history_extractive_answer(
+                "What has the caregiver recorded about sleep?", context["event_lines"]
+            )
+            assert answer is not None
+            assert "slept well" in answer.casefold()
+            assert "slept poorly" not in answer.casefold()
+            assert "slept through the night" not in answer.casefold()
+    finally:
+        with SessionLocal() as db:
+            db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(Correction).filter(
+                Correction.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(CareEvent).filter(
+                CareEvent.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(Caregiver).filter(
+                Caregiver.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
+
