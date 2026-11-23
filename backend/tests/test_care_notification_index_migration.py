@@ -17,8 +17,9 @@ def test_postgres_canonical_predicate_matches_declared_active_source_index():
     migration = _migration_module()
 
     postgres_rendered = (
-        "((status = 'active'::character varying) "
-        "AND (category = ANY (ARRAY['care_change'::character varying, 'care_attention'::character varying])) "
+        "(((status)::text = 'active'::text) "
+        "AND ((category)::text = ANY ((ARRAY['care_change'::character varying, "
+        "'care_attention'::character varying])::text[])) "
         "AND (source_event_id IS NOT NULL))"
     )
 
