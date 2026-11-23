@@ -84,11 +84,12 @@ def _split_top_level_and(value: str) -> list[str]:
 def _normalize_predicate(value):
     if value is None:
         return None
-    literal_values = []
+    literal_values = {}
 
     def preserve_literal(match):
-        token = f"__literal_{len(literal_values)}__"
-        literal_values.append(match.group(0))
+        literal = match.group(0)
+        token = "__literal_" + literal.encode("utf-8").hex() + "__"
+        literal_values[token] = literal
         return token
 
     expression = re.sub(r"'(?:''|[^'])*'", preserve_literal, str(value).strip())
@@ -110,8 +111,8 @@ def _normalize_predicate(value):
         clause = re.sub(r"\s*,\s*", ", ", clause)
         clauses.append(" ".join(clause.split()))
     normalized = " AND ".join(sorted(clauses))
-    for literal_index, literal_value in enumerate(literal_values):
-        normalized = normalized.replace(f"__literal_{literal_index}__", literal_value)
+    for token, literal_value in literal_values.items():
+        normalized = normalized.replace(token, literal_value)
     return normalized or None
 
 
