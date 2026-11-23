@@ -593,10 +593,15 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         if extraction_status == "partial":
             unreadable = metadata.get("unreadable_page_numbers") or []
             unprocessed = metadata.get("unprocessed_page_numbers") or []
-            return (
-                "document_extraction_partial",
-                "Only part of this document could be read. Unreadable or unprocessed pages remain unknown; do not treat this extraction as the complete document.",
-            )
+            page_gaps = []
+            if unreadable:
+                page_gaps.append("Unreadable pages: " + ", ".join(str(page) for page in unreadable) + ".")
+            if unprocessed:
+                page_gaps.append("Pages not yet processed: " + ", ".join(str(page) for page in unprocessed) + ".")
+            detail = "Only part of this document could be read. Unreadable or unprocessed pages remain unknown; do not treat this extraction as the complete document."
+            if page_gaps:
+                detail += " " + " ".join(page_gaps)
+            return ("document_extraction_partial", detail)
         if extraction_status == "failed":
             return (
                 "document_extraction_failed",
@@ -806,7 +811,7 @@ def build_lcr_context(
             if caregiver_id and "caregiver_id" in table.c:
                 statement = statement.where(table.c.caregiver_id == str(caregiver_id))
             if "extraction_status" in table.c:
-                statement = statement.where(table.c.extraction_status.in_(("available", "partial", "failed")))
+                statement = statement.where(table.c.extraction_status.in_(("available", "partial")))
             if "candidates" in table.c:
                 statement = statement.where(
                     table.c.candidates["kind"].as_string() == "document_extraction_v1"
