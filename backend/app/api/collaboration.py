@@ -3187,17 +3187,16 @@ def _is_casual_greeting(text: str) -> bool:
         "how are you", "how are you doing", "how are you today",
         "how's it going", "hows it going", "what's up", "whats up",
         "good morning", "good afternoon", "good evening", "good night",
-        "thanks", "thank you", "thank you so much", "bye", "goodbye", "see you",
     }
 
 
-def _greeting_reply_needs_revision(reply: str) -> bool:
-    """Greeting-only replies should mirror the user, not start a new interview."""
+def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
+    """Greeting replies stay within the selected first-time/returning contract."""
     words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     asks_a_question = "?" in (reply or "")
-    return not words or len(words) > 15 or repeats_automatic_question or asks_a_question
+    return not words or len(words) > max_words or repeats_automatic_question or asks_a_question
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -8031,7 +8030,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ),
         })
         greeting_only = _is_casual_greeting(user_text)
-        response_length_policy = resolve_response_length_policy(user_text)
+        has_returning_care_history = bool(
+            source_event_ids or source_appointment_ids or source_assertion_ids
+            or source_document_analysis_ids or source_evidence_ids or source_lcr_record_refs
+            or shared_lcr_lines
+        )
+        response_length_policy = resolve_response_length_policy(
+            user_text,
+            caregiver_stage="returning" if has_returning_care_history else None,
+            critical_safety=emergency,
+        )
         model_messages[0]["content"] += (
             f"\nRESPONSE LENGTH CONTRACT: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; "
             f"hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. "
@@ -8039,9 +8047,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if greeting_only:
             model_messages[0]["content"] += (
-                "\nThe current message is only a greeting or brief pleasantry. "
-                "Respond naturally in a few words, do not ask a question, and do not introduce a care topic. "
-                "Generate the wording for this exact message; do not reuse a stored response."
+                "\nThe current message is a greeting only. Give a warm, concise response in natural American English. "
+                "Do not ask a question or introduce a new care issue. Do not claim that a record was updated. "
+                "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
@@ -8619,10 +8627,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "role": "user",
                         "content": (
                             "Revise your previous response for the current greeting. "
-                            "Return only one natural sentence of at most 8 words. "
-                            "Do not ask a question, mention caregiving, introduce a topic, "
-                            "or describe your capabilities. Respond directly to the user's "
-                            "actual greeting. Do not explain these instructions."
+                            f"Return a natural greeting response with a target of {response_length_policy.target_words} words "
+                            f"and a hard maximum of {response_length_policy.max_words} words. "
+                            "Do not ask a question, introduce an unrelated care issue, or describe internal capabilities. "
+                            "Respond directly to the user's actual greeting. Do not explain these instructions."
                         ),
                     },
                 ]
@@ -8632,7 +8640,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": 48},
+                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -8647,7 +8655,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
-                    or _greeting_reply_needs_revision(reply)
+                    or _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024)
                 )
                 if not invalid_reply:
                     break
