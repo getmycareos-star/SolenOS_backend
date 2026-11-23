@@ -3374,7 +3374,7 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "What have we recorded about sleep?"},
+            json={"person_id": person_id, "text": "Can you help me understand the sleep information and what remains uncertain?"},
         )
         assert response.status_code == 200, response.text
         coverage = response.json()["lcr_context_coverage"]
