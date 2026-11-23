@@ -2464,6 +2464,10 @@ def test_emotional_disclosure_does_not_block_a_requested_factual_answer():
     )
     assert "DISTRESS RESPONSE" in collaboration._caregiver_interaction_guidance(user_text)
     assert not collaboration._caregiver_response_needs_revision(user_text, detailed_reply)
+    assert collaboration._caregiver_response_needs_revision(
+        "I'm sad. Are you there?",
+        detailed_reply,
+    )
 
 
 def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
