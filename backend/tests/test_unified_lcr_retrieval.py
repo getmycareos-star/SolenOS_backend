@@ -940,6 +940,16 @@ def test_numbered_multi_year_window_is_rolling_and_timezone_aware():
     assert window["end"] == "2026-11-16T07:59:59.999999+00:00"
 
 
+def test_written_number_multi_year_window_is_understood():
+    window = _temporal_window(
+        "What happened over the last two years?",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+    )
+    assert window is not None
+    assert window["basis"] == "explicit_rolling_past_2_years"
+    assert window["start"] == "2024-11-15T00:00:00+00:00"
+
+
 def test_numbered_multi_year_window_clamps_leap_day_and_rejects_unbounded_ranges():
     leap_window = _temporal_window(
         "Show me the past 2 years",
