@@ -5,7 +5,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import Column, DateTime, String, Table, Text, create_engine
+from sqlalchemy import Column, DateTime, String, Table, Text, create_engine, text
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -1165,6 +1165,79 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
         assert {item["id"] for item in conversation_context["items"]} == {"message-in-2025"}
         assert {item["id"] for item in exact_date_care_context["sources"]["events"]["items"]} == {"event-in-2025"}
         assert {item["id"] for item in exact_date_conversation_context["items"]} == {"message-in-2025"}
+    finally:
+        connection.close()
+        engine.dispose()
+
+
+def test_postgres_historical_scan_includes_delayed_report_and_recording_timestamps():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        window = _temporal_window(
+            "What happened in March 2025?",
+            now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+            timezone_name="UTC",
+        )
+        assert window is not None
+        with Session(bind=connection) as db:
+            person = Person(id="delayed-history-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="delayed-history-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+
+            # Exercise the production temporal predicate against PostgreSQL
+            # using the separate event-time, report-time and upload-time clocks.
+            db.execute(text("ALTER TABLE evidence ADD COLUMN reported_at TIMESTAMPTZ"))
+            db.execute(text("ALTER TABLE evidence ADD COLUMN uploaded_at TIMESTAMPTZ"))
+            db.execute(text("ALTER TABLE evidence ADD COLUMN occurred_at TIMESTAMPTZ"))
+            db.execute(text("""
+                INSERT INTO evidence (id, person_id, reported_at, uploaded_at, occurred_at)
+                VALUES
+                  ('reported-in-window', :person_id, '2025-03-12T10:00:00+00:00',
+                   '2026-01-02T10:00:00+00:00', NULL),
+                  ('uploaded-in-window', :person_id, NULL,
+                   '2025-03-14T10:00:00+00:00', NULL),
+                  ('outside-window', :person_id, '2024-12-20T10:00:00+00:00',
+                   '2026-01-02T10:00:00+00:00', NULL)
+            """), {"person_id": person.id})
+
+            db.add_all([
+                CareEvent(
+                    id="recorded-in-window", person_id=person.id,
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=datetime(2024, 12, 20, 9, tzinfo=UTC),
+                    recorded_at=datetime(2025, 3, 15, 9, tzinfo=UTC),
+                    title="Delayed care entry",
+                    description="The caregiver entered this earlier event in March.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                ),
+                CareEvent(
+                    id="outside-recording-window", person_id=person.id,
+                    event_type="daily_observation", status="recorded",
+                    occurred_at=datetime(2024, 12, 19, 9, tzinfo=UTC),
+                    recorded_at=datetime(2024, 12, 20, 9, tzinfo=UTC),
+                    title="Earlier care entry",
+                    description="This entry was recorded before March.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                ),
+            ])
+            db.flush()
+            context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id,
+                temporal_window=window, include_all_history=True,
+            )
+
+        evidence_ids = {item["id"] for item in context["sources"]["evidence"]["items"]}
+        event_ids = {item["id"] for item in context["sources"]["events"]["items"]}
+        assert evidence_ids == {"reported-in-window", "uploaded-in-window"}
+        assert event_ids == {"recorded-in-window"}
+        assert context["sources"]["evidence"]["candidate_scan_complete"] is True
+        assert context["sources"]["events"]["candidate_scan_complete"] is True
     finally:
         connection.close()
         engine.dispose()
