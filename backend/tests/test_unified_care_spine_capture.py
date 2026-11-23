@@ -238,11 +238,18 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             def fake_capture_extraction(source_text, *, source_event_id, source_evidence_id):
                 assert "Mum was unusually confused this afternoon and refused lunch." in source_text
                 return {
-                    "observations": [{
-                        "source_quote": "Mum was unusually confused this afternoon and refused lunch.",
-                        "observation": "unusually confused this afternoon and refused lunch",
-                        "review_status": "pending_review",
-                    }],
+                    "observations": [
+                        {
+                            "source_quote": "Mum was unusually confused this afternoon",
+                            "observation": "unusually confused this afternoon",
+                            "review_status": "pending_review",
+                        },
+                        {
+                            "source_quote": "refused lunch",
+                            "observation": "refused lunch",
+                            "review_status": "pending_review",
+                        },
+                    ],
                     "open_questions": [],
                 }
 
@@ -260,7 +267,15 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 ).one()
                 assert completed_job.status == "completed"
                 assert completed_analysis.extraction_status == "available"
-                assert completed_analysis.candidates["observations"][0]["review_status"] == "pending_review"
+                assert len(completed_analysis.candidates["observations"]) == 2
+                assert all(
+                    candidate["review_status"] == "pending_review"
+                    for candidate in completed_analysis.candidates["observations"]
+                )
+                assert all(
+                    candidate["source_quote"] in "Mum was unusually confused this afternoon and refused lunch."
+                    for candidate in completed_analysis.candidates["observations"]
+                )
                 assert completed_analysis.execution_status["review"] == "required"
                 assert completed_analysis.execution_status["projection"] == "verified"
                 assert completed_analysis.execution_status["longitudinal_retrieval"] == "verified"
@@ -290,7 +305,9 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             )
             assert analysis_response.status_code == 200, analysis_response.text
             assert analysis_response.json()["review_required"] is True
+            assert len(analysis_response.json()["candidates"]["observations"]) == 2
             assert analysis_response.json()["candidates"]["observations"][0]["review_status"] == "pending_review"
+            assert analysis_response.json()["candidates"]["observations"][1]["review_status"] == "pending_review"
             foreign_analysis_response = client.get(
                 f"/api/v1/capture/analyses/{analysis_id}",
                 headers={"Authorization": "Bearer " + other_token},
@@ -328,8 +345,11 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 f"/api/v1/capture/analyses/{analysis_id}", headers=headers
             )
             assert accepted_analysis.status_code == 200, accepted_analysis.text
-            assert accepted_analysis.json()["review_required"] is False
+            assert accepted_analysis.json()["review_required"] is True
             assert accepted_analysis.json()["candidates"]["observations"][0]["review_status"] == "accepted_by_caregiver"
+            assert accepted_analysis.json()["candidates"]["observations"][1]["review_status"] == "pending_review", (
+                "accepting one observation must not silently accept the other extracted observation"
+            )
 
             with SessionLocal() as db:
                 accepted_assertion = db.query(CareAssertion).filter_by(
