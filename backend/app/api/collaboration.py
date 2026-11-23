@@ -8519,7 +8519,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "was completed unless the backend confirmed it. Return only the revised caregiver-facing answer."
                     if caregiver_guidance else
                     "Revise your previous response for the current greeting. "
-                    "Return only one natural sentence of at most 8 words. "
+                    "Return only one natural sentence of at most 15 words. "
                     "Do not ask a question, mention caregiving, introduce a topic, "
                     "or describe your capabilities. Respond directly to the user's "
                     "actual greeting. Do not explain these instructions."
@@ -8632,7 +8632,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": 16},
+                        {"temperature": 0.1, "num_predict": 48},
                     )
                 except Exception as exc:
                     raise HTTPException(
