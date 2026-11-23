@@ -1109,6 +1109,7 @@ def build_lcr_context(
             bool(terms or temporal_window or include_all_history)
             and not missing_required
             and not missing_optional
+            and not failed_sources
             and all(
                 source.get("candidate_scan_complete") is True
                 and source.get("offset", 0) == 0
