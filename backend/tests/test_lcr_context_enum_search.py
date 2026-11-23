@@ -205,3 +205,22 @@ def test_unbounded_lexical_query_keeps_ordinary_number_words():
     from app.services.lcr_context import _query_search_terms
 
     assert _query_search_terms("two falls overnight") == ["two", "falls", "overnight"]
+
+
+def test_correction_original_and_corrected_text_are_searchable():
+    """Historical corrections must be retrievable by either side of the correction."""
+    metadata = MetaData()
+    table = Table(
+        "corrections",
+        metadata,
+        Column("original_text", Text),
+        Column("corrected_text", Text),
+        Column("reason", Text),
+    )
+
+    predicates = _text_search_predicates(table, "corrections", ["dosage"])
+    compiled = str(or_(*predicates).compile(dialect=postgresql.dialect()))
+
+    assert "corrections.original_text ILIKE" in compiled
+    assert "corrections.corrected_text ILIKE" in compiled
+    assert "corrections.reason ILIKE" in compiled
