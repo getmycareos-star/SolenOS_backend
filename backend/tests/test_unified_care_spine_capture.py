@@ -332,7 +332,13 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             review_response = client.post(
                 f"/api/v1/capture/analyses/{analysis_id}/review",
                 headers=headers,
-                json={"candidate_index": 0, "decision": "accept"},
+                json={
+                    "candidate_index": 0,
+                    "decision": "accept",
+                    "expected_source_quote": analysis_response.json()["candidates"]["observations"][0]["source_quote"],
+                    "expected_subject": analysis_response.json()["candidates"]["observations"][0]["subject"],
+                    "expected_observation": analysis_response.json()["candidates"]["observations"][0]["observation"],
+                },
             )
             assert review_response.status_code == 200, review_response.text
             review_body = review_response.json()
