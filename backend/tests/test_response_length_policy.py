@@ -1,5 +1,6 @@
 from app.services.response_length_policy import (
     count_response_words,
+    is_critical_safety_message,
     is_greeting_message,
     resolve_response_length_policy,
     response_exceeds_hard_maximum,
@@ -146,3 +147,20 @@ def test_questions_for_the_doctor_use_appointment_preparation_contract():
 def test_word_count_matches_whitespace_delimited_frontend_semantics():
     assert count_response_words("Mum's well-being is improving.") == 4
     assert count_response_words("  one\ntwo\nthree  ") == 3
+
+
+
+def test_critical_safety_classifier_is_shared_and_covers_emergency_language():
+    for message in (
+        "Mum is having a stroke.",
+        "He may be having a heart attack.",
+        "She is choking.",
+        "He is suicidal.",
+        "There is severe bleeding.",
+        "She is not waking up.",
+    ):
+        assert is_critical_safety_message(message), message
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "critical_safety"
+        assert policy.max_words is None
+        assert policy.token_budget == 1024
