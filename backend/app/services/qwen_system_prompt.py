@@ -239,8 +239,10 @@ def apply_solenos_system_contract(messages: list[dict]) -> list[dict]:
         else:
             non_system.append(message)
 
-    combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip() + "\n\n" + SOLENOS_IDENTITY_CONSTITUTION
+    combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip()
     if workflow_system:
         combined += "\n\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS\n" + "\n\n".join(workflow_system)
+    # Product identity is appended last so task prompts cannot redefine it.
+    combined += "\n\n" + SOLENOS_IDENTITY_CONSTITUTION
 
     return [{"role": "system", "content": combined}, *non_system]
