@@ -8,9 +8,9 @@ class CaptureCandidateReview(BaseModel):
     decision: Literal["accept", "correct", "reject"]
     corrected_subject: Optional[str] = Field(default=None, max_length=160)
     corrected_observation: Optional[str] = Field(default=None, max_length=500)
-    expected_source_quote: Optional[str] = Field(default=None, max_length=20000)
-    expected_subject: Optional[str] = Field(default=None, max_length=160)
-    expected_observation: Optional[str] = Field(default=None, max_length=500)
+    expected_source_quote: str = Field(max_length=20000)
+    expected_subject: str = Field(max_length=160)
+    expected_observation: str = Field(max_length=500)
 
     @model_validator(mode="after")
     def require_correction_text(self):
