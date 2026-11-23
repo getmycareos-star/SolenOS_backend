@@ -569,3 +569,70 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
+
+
+def test_daily_capture_delta_does_not_promote_server_recorded_time_to_event_time(monkeypatch):
+    """A server timestamp records when a note arrived, not when care occurred."""
+    from app.models.care_continuity import CareDeltaRun
+    from app.services import qwen_background_worker as worker
+
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    monkeypatch.setattr(worker, "SessionLocal", Session)
+    suffix = uuid.uuid4().hex
+    person_id = f"daily-time-person-{suffix}"
+    caregiver_id = f"daily-time-caregiver-{suffix}"
+    evidence_id = f"daily-time-evidence-{suffix}"
+    event_id = f"daily-time-event-{suffix}"
+    recorded_at = datetime.now(UTC)
+    server_assigned_occurred_at = recorded_at
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Daily Care time provenance test"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Family caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(Evidence(
+                id=evidence_id,
+                person_id=person_id,
+                type="note",
+                source_text="Caregiver reported that Mum slept poorly overnight.",
+                uploaded_by_caregiver_id=caregiver_id,
+                evidence_status="active",
+            ))
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="daily_observation",
+                status="recorded",
+                occurred_at=server_assigned_occurred_at,
+                recorded_at=recorded_at,
+                time_provenance="server_recorded_at",
+                title="Daily Care observation",
+                description="Caregiver reported that Mum slept poorly overnight.",
+                evidence_ids=[evidence_id],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        result = worker._reconcile_daily_capture_delta(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=event_id,
+            source_evidence_id=evidence_id,
+        )
+        assert result["status"] == "completed", result
+
+        with Session() as db:
+            saved_run = db.query(CareDeltaRun).filter(CareDeltaRun.id == result["run_id"]).one()
+            saved = json.loads(saved_run.delta_json)
+        assert saved["provenance"]["event_time_basis"] == "not_established"
+        assert saved["provenance"]["event_date"] is None
+    finally:
+        engine.dispose()
