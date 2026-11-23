@@ -679,10 +679,13 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
             "recorded_change_analysis",
             "This is a previously saved analysis of care information, not an independently verified fact or diagnosis. Preserve its source event, supporting evidence, and model label; do not treat it as proof that a real-world change occurred.",
         )
-    if source_name == "facts" and item.get("superseded_by_fact_id"):
+    if source_name == "facts" and (
+        item.get("superseded_by_fact_id")
+        or str(item.get("epistemic_status") or "").casefold() in {"withdrawn", "superseded"}
+    ):
         return (
-            "superseded_fact",
-            "This fact was replaced by a later record. Keep it in the history, but do not present it as current.",
+            "historical_fact",
+            "This fact was replaced or withdrawn. Keep it in the history, but do not present it as current.",
         )
     if source_name == "assertions":
         return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
