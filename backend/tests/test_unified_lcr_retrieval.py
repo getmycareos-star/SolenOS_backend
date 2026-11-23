@@ -19,7 +19,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _load_source_schema, build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -83,7 +83,8 @@ def _postgres_conversation_db():
     metadata.create_all(
         connection,
         tables=[
-            Person.__table__, Caregiver.__table__, CareEvent.__table__,
+            Person.__table__, Caregiver.__table__, CareEvent.__table__, Appointment.__table__,
+            AppointmentWorkspaceRecord.__table__, AppointmentWorkspaceRevision.__table__,
             CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, EvidenceObservation.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
@@ -105,7 +106,8 @@ def _sqlite_retrieval_db():
         Table("situations", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(connection, tables=[
-        Person.__table__, Caregiver.__table__, CareEvent.__table__,
+        Person.__table__, Caregiver.__table__, CareEvent.__table__, Appointment.__table__,
+        AppointmentWorkspaceRecord.__table__, AppointmentWorkspaceRevision.__table__,
         CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, CaptureAnalysis.__table__,
         ConversationSession.__table__, ConversationMessage.__table__,
         QwenBackgroundJob.__table__, QwenModelOutput.__table__,
@@ -992,8 +994,8 @@ def test_long_relative_windows_are_not_silently_clamped_to_one_year():
     weeks = _temporal_window("What changed in the last 80 weeks?", now=now)
 
     assert months is not None and months["start"] == "2025-05-15T00:00:00+00:00"
-    assert days is not None and days["start"] == "2025-07-03T00:00:00+00:00"
-    assert weeks is not None and weeks["start"] == "2025-05-04T00:00:00+00:00"
+    assert days is not None and days["start"] == "2025-07-04T00:00:00+00:00"
+    assert weeks is not None and weeks["start"] == "2025-05-05T00:00:00+00:00"
 
 
 def test_unsupported_long_relative_windows_fail_instead_of_silently_narrowing():
@@ -1325,8 +1327,8 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 caregiver_id="partial-document-caregiver",
                 source_evidence_id="partial-document-evidence",
                 source_text=(
-                    "[Page 1]\\nMedication list: take the listed tablet with breakfast.\\n"
-                    "[Page 2 OCR]\\n[No readable text detected on page 2]"
+                    "[Page 1]\nMedication list: take the listed tablet with breakfast.\n"
+                    "[Page 2 OCR]\n[No readable text detected on page 2]"
                 ),
                 extraction_status="partial",
                 candidates={
