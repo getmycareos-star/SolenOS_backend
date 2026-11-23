@@ -306,6 +306,22 @@ def database_schema_differences(bind=None):
             if value is None:
                 return None
             normalized = " ".join(str(value).strip().lower().split())
+            # PostgreSQL may wrap pg_get_expr() output in one or more
+            # redundant outer parentheses. Remove only fully enclosing pairs.
+            while normalized.startswith("(") and normalized.endswith(")"):
+                depth = 0
+                encloses_all = True
+                for position, character in enumerate(normalized):
+                    if character == "(":
+                        depth += 1
+                    elif character == ")":
+                        depth -= 1
+                        if depth == 0 and position != len(normalized) - 1:
+                            encloses_all = False
+                            break
+                if not encloses_all or depth != 0:
+                    break
+                normalized = normalized[1:-1].strip()
             return normalized or None
 
         def expected_index_predicate(index):
