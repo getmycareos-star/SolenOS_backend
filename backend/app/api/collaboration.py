@@ -6178,9 +6178,9 @@ def _care_history_recall_context_lines(
                 })
         except SQLAlchemyError:
             correction_lookup_complete = False
-            db.rollback()
 
     event_lines: list[str] = []
+    evidence_lineage_by_id: dict[str, tuple[str, str]] = {}
     linked_evidence_ids: list[str] = []
     for row in rows:
         caregiver_report = _care_history_event_text({"description": row.description})
@@ -6216,6 +6216,10 @@ def _care_history_recall_context_lines(
         else:
             information_status = "caregiver_reported"
             interpretation_limit = "This is a caregiver-reported account, not independent verification."
+        for evidence_id in evidence_ids:
+            existing_lineage = evidence_lineage_by_id.get(evidence_id)
+            if existing_lineage is None or information_status != "caregiver_reported":
+                evidence_lineage_by_id[evidence_id] = (information_status, interpretation_limit)
         event_lines.append(
             "Person-scoped caregiver care-history report: "
             + json.dumps({
@@ -6261,6 +6265,12 @@ def _care_history_recall_context_lines(
                         "evidence_kind": evidence.evidence_kind,
                         "epistemic_status": evidence.epistemic_status,
                         "evidence_status": getattr(evidence, "evidence_status", None),
+                        "information_status": evidence_lineage_by_id.get(
+                            str(evidence.id), ("source_evidence", "")
+                        )[0],
+                        "interpretation_limit": evidence_lineage_by_id.get(
+                            str(evidence.id), ("source_evidence", "")
+                        )[1],
                         "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
                         "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
                     },
@@ -6405,6 +6415,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             if not record.get("created_by_caregiver_id"):
                 continue
             if str(record.get("status") or "").strip().casefold() != "recorded":
+                continue
+            if str(record.get("information_status") or "").casefold() in {
+                "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
                 continue
             description = _care_history_event_text(record)
         elif source_type == "care_assertions":
