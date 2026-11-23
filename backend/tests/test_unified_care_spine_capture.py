@@ -451,8 +451,8 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 row for row in context["sources"]["evidence"]["items"]
                 if row["id"] == evidence_id
             ]
-            assert len(event_rows) == 1
-            assert len(evidence_rows) == 1
+            assert len(event_rows) == 1, context["sources"]["events"]
+            assert len(evidence_rows) == 1, context["sources"]["evidence"]
             assert event_rows[0]["evidence_ids"] == [evidence_id]
             assert event_rows[0]["occurred_at_timezone"] == "Africa/Lagos"
             assert event_rows[0]["occurred_at"] == reported_event_time.isoformat()
