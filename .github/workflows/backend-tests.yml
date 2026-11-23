@@ -347,6 +347,8 @@ jobs:
 
       - name: Verify care profile persistence across a new account session and record isolation on PostgreSQL
         run: python -m pytest backend/tests/test_care_profile_postgres.py -q -vv
+      - name: Verify caregiver invitations, revocation, shared access and responsibility transfers on PostgreSQL
+        run: SOLENOS_QWEN_WORKER_ENABLED=false python -m pytest backend/tests/test_caregiver_access_postgres.py -q -vv
       - name: Verify consent-gated caregiver feedback persistence and rollback on PostgreSQL
         run: python -m pytest backend/tests/test_feedback_postgres.py -q -vv
 
