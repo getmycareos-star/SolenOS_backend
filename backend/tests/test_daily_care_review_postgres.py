@@ -356,10 +356,13 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
     caregiver_id = f"daily-proposal-dedupe-caregiver-{suffix}"
     event_id = f"daily-proposal-dedupe-event-{suffix}"
     evidence_id = f"daily-proposal-dedupe-evidence-{suffix}"
-    analysis_ids = [f"daily-proposal-dedupe-analysis-{suffix}-{index}" for index in range(2)]
+    second_event_id = f"daily-proposal-dedupe-event-two-{suffix}"
+    second_evidence_id = f"daily-proposal-dedupe-evidence-two-{suffix}"
+    analysis_ids = [f"daily-proposal-dedupe-analysis-{suffix}-{index}" for index in range(3)]
     token = secrets.token_urlsafe(32)
     now = datetime.now(UTC)
     source_ids = [event_id, evidence_id]
+    second_source_ids = [second_event_id, second_evidence_id]
     proposed_value = "Mum woke twice overnight."
 
     try:
@@ -397,25 +400,56 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
                 source_type="caregiver_report",
                 occurred_at=now - timedelta(hours=2),
             ))
-            db.add(CareEvent(
-                id=event_id,
-                person_id=person_id,
-                event_type="structured_daily_capture",
-                status="recorded",
-                occurred_at=now - timedelta(hours=2),
-                title="Daily Care sleep observation",
-                description="Caregiver reported that Mum woke twice overnight.",
-                evidence_ids=[evidence_id],
-                created_by_caregiver_id=caregiver_id,
-                time_provenance="caregiver_reported",
-            ))
-            for analysis_id in analysis_ids:
+            db.add_all([
+                CareEvent(
+                    id=event_id,
+                    person_id=person_id,
+                    event_type="structured_daily_capture",
+                    status="recorded",
+                    occurred_at=now - timedelta(hours=2),
+                    title="Daily Care sleep observation",
+                    description="Caregiver reported that Mum woke twice overnight.",
+                    evidence_ids=[evidence_id],
+                    created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
+                Evidence(
+                    id=second_evidence_id,
+                    person_id=person_id,
+                    type="note",
+                    evidence_kind="caregiver_report",
+                    epistemic_status="caregiver_reported",
+                    source_text="Caregiver reported that Mum woke twice overnight again.",
+                    uploaded_by_caregiver_id=caregiver_id,
+                    reported_by_caregiver_id=caregiver_id,
+                    collected_by_caregiver_id=caregiver_id,
+                    reported_by_label="Caregiver",
+                    source_type="caregiver_report",
+                    occurred_at=now - timedelta(hours=1),
+                ),
+                CareEvent(
+                    id=second_event_id,
+                    person_id=person_id,
+                    event_type="structured_daily_capture",
+                    status="recorded",
+                    occurred_at=now - timedelta(hours=1),
+                    title="Second Daily Care sleep observation",
+                    description="Caregiver reported that Mum woke twice overnight again.",
+                    evidence_ids=[second_evidence_id],
+                    created_by_caregiver_id=caregiver_id,
+                    time_provenance="caregiver_reported",
+                ),
+            ])
+            for index, analysis_id in enumerate(analysis_ids):
+                proposal_source_ids = source_ids if index < 2 else second_source_ids
+                proposal_event_id = event_id if index < 2 else second_event_id
+                proposal_evidence_id = evidence_id if index < 2 else second_evidence_id
                 db.add(CaptureAnalysis(
                     id=analysis_id,
                     person_id=person_id,
                     caregiver_id=caregiver_id,
-                    source_event_id=event_id,
-                    source_evidence_id=evidence_id,
+                    source_event_id=proposal_event_id,
+                    source_evidence_id=proposal_evidence_id,
                     source_text="Caregiver reported that Mum woke twice overnight.",
                     extraction_status="available",
                     candidates={
@@ -424,7 +458,7 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
                             "title": "Sleep observation",
                             "field": "sleep",
                             "proposed_value": proposed_value,
-                            "source_ids": source_ids,
+                            "source_ids": proposal_source_ids,
                             "uncertainty": "Caregiver report; not independently verified.",
                             "reason": "Preserve the reported sleep observation in the longitudinal record.",
                             "review_status": "pending_review",
@@ -475,33 +509,49 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
             assert second_body["reused_existing_assertion"] is True
             assert second_body["assertion_id"] == assertion_id
 
+            third = client.post(
+                f"/api/v1/daily-care/intelligence/proposals/{analysis_ids[2]}/0/review",
+                headers=headers,
+                json={"decision": "accept"},
+            )
+            assert third.status_code == 200, third.text
+            third_body = third.json()
+            assert third_body["written_to_lcr"] is True
+            assert third_body["reused_existing_assertion"] is False
+            second_assertion_id = third_body["assertion_id"]
+            assert second_assertion_id != assertion_id
+
             current_care = client.get(
                 "/api/v1/care-continuity/current-care?limit_per_source=50",
                 headers=headers,
             )
             assert current_care.status_code == 200, current_care.text
-            assert sum(item.get("id") == assertion_id for item in current_care.json().get("items", [])) == 1
+            current_ids = {item.get("id") for item in current_care.json().get("items", [])}
+            assert assertion_id in current_ids
+            assert second_assertion_id in current_ids
 
         with Session(engine) as db:
             assertions = db.query(CareAssertion).filter(
                 CareAssertion.person_id == person_id,
                 CareAssertion.assertion_kind == "caregiver_reviewed_daily_care",
             ).all()
-            assert len(assertions) == 1
-            assert assertions[0].id == assertion_id
-            assert assertions[0].source_event_id == event_id
-            assert assertions[0].evidence_ids == [evidence_id]
-            assert assertions[0].asserted_value == proposed_value
+            assert len(assertions) == 2
+            assertions_by_source = {row.source_event_id: row for row in assertions}
+            assert assertions_by_source[event_id].id == assertion_id
+            assert assertions_by_source[event_id].evidence_ids == [evidence_id]
+            assert assertions_by_source[second_event_id].id == second_assertion_id
+            assert assertions_by_source[second_event_id].evidence_ids == [second_evidence_id]
+            assert all(row.asserted_value == proposed_value for row in assertions)
             saved_analyses = db.query(CaptureAnalysis).filter(
                 CaptureAnalysis.id.in_(analysis_ids)
             ).all()
-            assert len(saved_analyses) == 2
+            assert len(saved_analyses) == 3
             analyses_by_id = {row.id: row for row in saved_analyses}
-            assert all(
-                row.candidates["proposals"][0]["accepted_assertion_id"] == assertion_id
-                for row in saved_analyses
-            )
+            assert analyses_by_id[analysis_ids[0]].candidates["proposals"][0]["accepted_assertion_id"] == assertion_id
+            assert analyses_by_id[analysis_ids[1]].candidates["proposals"][0]["accepted_assertion_id"] == assertion_id
+            assert analyses_by_id[analysis_ids[2]].candidates["proposals"][0]["accepted_assertion_id"] == second_assertion_id
             assert analyses_by_id[analysis_ids[1]].review_history[-1]["reused_existing_assertion"] is True
+            assert analyses_by_id[analysis_ids[2]].review_history[-1]["reused_existing_assertion"] is False
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
