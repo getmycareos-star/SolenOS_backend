@@ -1498,6 +1498,18 @@ def test_lifecycle_decisions_reject_missing_and_stale_versions():
         json={"title": "Updated follow-up title"},
     )
     assert edited.status_code == 200, edited.text
+    missing_status_version = client.patch(
+        f"/api/v1/open-loops/{closable['id']}",
+        headers=headers,
+        json={"status": "in_progress"},
+    )
+    assert missing_status_version.status_code == 409, missing_status_version.text
+    stale_status_version = client.patch(
+        f"/api/v1/open-loops/{closable['id']}",
+        headers=headers,
+        json={"status": "in_progress", "expected_version": stale_version},
+    )
+    assert stale_status_version.status_code == 409, stale_status_version.text
     stale_close = client.post(
         f"/api/v1/open-loops/{closable['id']}/close",
         headers=headers,
