@@ -79,7 +79,7 @@ from app.services.document_binary_storage import (
 )
 
 
-from app.services.lcr_context import _expanded_search_terms
+from app.services.lcr_context import _expanded_search_terms, _information_status
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
@@ -7080,22 +7080,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         for event in recent_events:
             source_event_ids.append(str(event.id))
+            event_record = {
+                "event_id": str(event.id),
+                "event_type": event.event_type,
+                "status": event.status,
+                "title": event.title,
+                "description": (event.description or "")[:700],
+                "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+                "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
+                "evidence_ids": event.evidence_ids or [],
+                "time_provenance": event.time_provenance,
+                "confidence": event.confidence,
+            }
+            information_status, interpretation_limit = _information_status("events", event_record)
+            event_record["information_status"] = information_status
+            event_record["interpretation_limit"] = interpretation_limit or (
+                "Persisted care-event report; preserve its event status, time provenance, and linked evidence."
+            )
             event_context.append(
-                "LCR event evidence: "
-                + json.dumps({
-                    "event_id": str(event.id),
-                    "event_type": event.event_type,
-                    "status": event.status,
-                    "information_status": "recorded_care_event",
-                    "interpretation_limit": "Persisted care-event report; preserve its event status, time provenance, and linked evidence.",
-                    "title": event.title,
-                    "description": (event.description or "")[:700],
-                    "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
-                    "recorded_at": event.recorded_at.isoformat() if event.recorded_at else None,
-                    "evidence_ids": event.evidence_ids or [],
-                    "time_provenance": event.time_provenance,
-                    "confidence": event.confidence,
-                }, ensure_ascii=False)
+                "LCR event evidence: " + json.dumps(event_record, ensure_ascii=False)
             )
         source_context.extend(event_context)
 
