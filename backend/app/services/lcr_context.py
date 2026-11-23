@@ -1272,10 +1272,42 @@ def build_lcr_context(
                 # versa). Include the row when either available timestamp falls
                 # in the window; retain both timestamps in the returned record
                 # so the caregiver can see the distinction.
-                statement = statement.where(or_(*[
+                temporal_predicates = [
                     and_(column >= start_value, column <= end_value)
                     for column in temporal_columns
-                ]))
+                ]
+                if source_name == "document_extractions" and "source_evidence_id" in table.c:
+                    # The extraction job timestamp describes when SolenOS read
+                    # the document, not when the care event or document itself
+                    # belongs in the person's history. Include the linked,
+                    # person-scoped evidence source date as an independent clock.
+                    evidence_table = metadata.tables.get("evidence")
+                    if evidence_table is not None and {"id", "person_id"}.issubset(evidence_table.c.keys()):
+                        evidence_date_columns = [
+                            evidence_table.c[name]
+                            for name in (
+                                "occurred_at", "reported_at", "collected_at",
+                                "uploaded_at", "ingested_at", "created_at",
+                            )
+                            if name in evidence_table.c
+                        ]
+                        if evidence_date_columns:
+                            linked_source_in_window = select(1).select_from(evidence_table).where(
+                                and_(
+                                    evidence_table.c.id == table.c.source_evidence_id,
+                                    evidence_table.c.person_id == str(person_id),
+                                    or_(*[
+                                        and_(column >= start_value, column <= end_value)
+                                        for column in evidence_date_columns
+                                    ]),
+                                )
+                            ).exists()
+                            temporal_predicates.append(linked_source_in_window)
+                if temporal_predicates:
+                    statement = statement.where(or_(*temporal_predicates))
+                else:
+                    # Undated sources cannot satisfy an explicit temporal query.
+                    statement = statement.where(false())
             else:
                 # Undated sources cannot satisfy an explicit temporal query.
                 statement = statement.where(false())
