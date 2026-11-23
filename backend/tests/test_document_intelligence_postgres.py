@@ -856,6 +856,15 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         assert provenance["model_digest_status"] == "not_exposed_by_ollama_chat_response"
         assert understood.json()["processing_history"][-1] == provenance
 
+        missing_observation_snapshot = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={"candidate_index": 0, "decision": "reject", "expected_source_quote": quote_reject, "expected_subject": "Patient"},
+        )
+        assert missing_observation_snapshot.status_code == 422, missing_observation_snapshot.text
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # Rejecting a candidate and attempting to change it beyond the source quote
         # must not create an LCR assertion. New caregiver information belongs in
         # a separate caregiver-authored update, not a document-derived correction.
