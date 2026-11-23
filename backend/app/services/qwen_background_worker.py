@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -717,8 +718,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_st
     if (
         current_job is None
         or current_job.status == "cancelled"
-        or current_job.locked_at != lease_state.get("locked_at")
-        or lease_state.get("lost")
+        or not _qwen_job_lease_matches(current_job, lease_state)
     ):
         db.rollback()
         return True
@@ -788,8 +788,7 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_st
         if (
             current_job is None
             or current_job.status == "cancelled"
-            or current_job.locked_at != lease_state.get("locked_at")
-            or lease_state.get("lost")
+            or not _qwen_job_lease_matches(current_job, lease_state)
         ):
             db.rollback()
             return True
@@ -1160,31 +1159,56 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_st
     return True
 
 
+def _qwen_job_lease_matches(job, lease_state: dict) -> bool:
+    """Read lease ownership consistently with the heartbeat thread."""
+    if job is None:
+        return False
+    lock = lease_state.get("_lock")
+    if lock is None:
+        return not lease_state.get("lost") and job.locked_at == lease_state.get("locked_at")
+    with lock:
+        return not lease_state.get("lost") and job.locked_at == lease_state.get("locked_at")
+
+
 def _refresh_qwen_job_lease_once(
     job_id: str,
     person_id: str,
     caregiver_id: str,
     *,
     expected_locked_at: datetime,
+    lease_state: dict,
     now: datetime | None = None,
 ) -> bool:
-    """Renew only the exact lease instance this worker originally claimed."""
+    """Renew the exact lease instance and publish its timestamp atomically."""
     lease_db = SessionLocal()
+    lock = lease_state["_lock"]
     try:
-        updated = lease_db.query(QwenBackgroundJob).filter(
-            QwenBackgroundJob.id == job_id,
-            QwenBackgroundJob.person_id == person_id,
-            QwenBackgroundJob.caregiver_id == caregiver_id,
-            QwenBackgroundJob.status == "processing",
-            QwenBackgroundJob.locked_at == expected_locked_at,
-        ).update(
-            {QwenBackgroundJob.locked_at: now or datetime.now(timezone.utc)},
-            synchronize_session=False,
-        )
-        lease_db.commit()
-        return updated == 1
+        with lock:
+            if lease_state.get("lost") or lease_state.get("locked_at") != expected_locked_at:
+                return False
+            refreshed_at = now or datetime.now(timezone.utc)
+            updated = lease_db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.id == job_id,
+                QwenBackgroundJob.person_id == person_id,
+                QwenBackgroundJob.caregiver_id == caregiver_id,
+                QwenBackgroundJob.status == "processing",
+                QwenBackgroundJob.locked_at == expected_locked_at,
+            ).update(
+                {QwenBackgroundJob.locked_at: refreshed_at},
+                synchronize_session=False,
+            )
+            lease_db.commit()
+            if updated == 1:
+                # Publish only after commit, while holding the same lock used by
+                # processing code before it validates lease ownership.
+                lease_state["locked_at"] = refreshed_at
+                return True
+            lease_state["lost"] = True
+            return False
     except Exception:
         lease_db.rollback()
+        with lock:
+            lease_state["lost"] = True
         logger.exception("Could not refresh durable worker lease for job %s", job_id)
         return False
     finally:
@@ -1202,10 +1226,13 @@ async def _maintain_qwen_job_lease(
     """Renew this worker's lease; stop permanently if another worker reclaims it."""
     while True:
         await asyncio.sleep(interval_seconds)
-        expected_locked_at = lease_state.get("locked_at")
-        refreshed_at = datetime.now(timezone.utc)
+        with lease_state["_lock"]:
+            if lease_state.get("lost"):
+                return
+            expected_locked_at = lease_state.get("locked_at")
         if not isinstance(expected_locked_at, datetime):
-            lease_state["lost"] = True
+            with lease_state["_lock"]:
+                lease_state["lost"] = True
             return
         lease_alive = await asyncio.to_thread(
             _refresh_qwen_job_lease_once,
@@ -1213,12 +1240,10 @@ async def _maintain_qwen_job_lease(
             person_id,
             caregiver_id,
             expected_locked_at=expected_locked_at,
-            now=refreshed_at,
+            lease_state=lease_state,
         )
         if not lease_alive:
-            lease_state["lost"] = True
             return
-        lease_state["locked_at"] = refreshed_at
 
 
 def _run_qwen_support_assist(payload, request):
@@ -1275,7 +1300,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.add(QwenJobEvent(job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id, event_type="job_claimed", from_status=previous_status, to_status="processing", metadata_json={"attempt": job.attempt_count}))
         db.commit()
         db.refresh(job)
-        lease_state = {"locked_at": job.locked_at, "lost": False}
+        lease_state = {"locked_at": job.locked_at, "lost": False, "_lock": threading.Lock()}
         lease_task = asyncio.create_task(
             _maintain_qwen_job_lease(
                 str(job.id),
@@ -1622,8 +1647,7 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     db.rollback()
                     return True
                 if current is not None and lease_state and (
-                    lease_state.get("lost")
-                    or current.locked_at != lease_state.get("locked_at")
+                    not _qwen_job_lease_matches(current, lease_state)
                 ):
                     # A reclaimed worker must not requeue, fail, or otherwise
                     # overwrite the state owned by the newer lease holder.
