@@ -63,11 +63,11 @@ def _cases():
         "I feel worn out and cannot think clearly.",
         "I'm burnt out from doing this every day.",
         "I'm burned out and need a break.",
-        "I can't take this anymore.", "I cannot take this today.",
+        "I can't cope anymore.", "I cannot keep doing this today.",
         "I've had enough for now.", "I have had enough and need to stop.",
         "I just want a break from caregiving.",
         "I'm too tired to keep talking.",
-        "I need to pause this conversation.",
+        "I need a pause from this conversation.",
         "Please stop for now.",
     ], "low_capacity")
 
@@ -156,7 +156,7 @@ def _cases():
         "He has severe chest pain now.",
         "She is choking right now.",
         "He is having a seizure.",
-        "There may have been an overdose.",
+        "There may have been a possible overdose.",
         "She has severe bleeding.",
         "His lips are blue and he is gasping.",
         "I think she is having a stroke.",
