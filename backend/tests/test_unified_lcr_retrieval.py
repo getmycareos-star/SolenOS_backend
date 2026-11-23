@@ -1789,10 +1789,10 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 caregiver_id="partial-document-caregiver",
                 query="What is uncertain or unreadable in the documents?",
             )
-            passage_context = build_lcr_context(
+            passage_context = build_unified_lcr_context(
                 db,
                 "partial-document-person",
-                caregiver_id="partial-document-caregiver",
+                "partial-document-caregiver",
                 query="tablet breakfast",
             )
         documents = context["sources"]["document_extractions"]
