@@ -1339,6 +1339,17 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             list(living_care_record_context.get("failed_sources", []) or [])
             + source_retrieval_failures
         )),
+        "source_limits": [
+            {
+                "source_type": name,
+                "status": source.get("status"),
+                "interpretation_limit": source.get("interpretation_limit"),
+            }
+            for name, source in living_care_record_context.get("sources", {}).items()
+            if isinstance(source, dict)
+            and source.get("status") in {"failed", "partial", "unsearchable"}
+            and source.get("interpretation_limit")
+        ][:20],
         "missing_required_sources": living_care_record_context.get("missing_required_sources", []),
         "missing_optional_sources": living_care_record_context.get("missing_optional_sources", []),
         "retrieval_error": (
