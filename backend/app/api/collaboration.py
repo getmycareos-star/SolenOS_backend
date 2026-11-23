@@ -7982,19 +7982,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             and _care_history_requested_topics(user_text)
             and not emergency
         ):
-            care_history_direct_answer = _care_history_extractive_answer(
-                user_text, included_model_context_lines
+            care_history_direct_answer = (
+                _care_history_extractive_answer(user_text, included_model_context_lines)
+                if payload.language == "en"
+                else _localized_care_history_extractive_answer(
+                    user_text, included_model_context_lines, payload.language
+                )
             )
         care_history_direct_answer_used = bool(care_history_direct_answer)
-        caregiver_question_direct_answer = _caregiver_question_extractive_answer(
-            user_text, included_model_context_lines
+        caregiver_question_direct_answer = (
+            _caregiver_question_extractive_answer(user_text, included_model_context_lines)
+            if payload.language == "en" else None
         )
         # A literal "what did the caregiver record" request is a source lookup,
         # not a request for generated interpretation. Answer it from the exact
         # authorized caregiver-authored event text before invoking a slow model.
         # Keep broader "what has been recorded" questions on the normal synthesis
         # path unless inference fails, so this shortcut cannot replace reasoning.
-        if not caregiver_question_direct_answer and re.search(
+        if payload.language == "en" and not caregiver_question_direct_answer and re.search(
             r"\bwhat\s+did\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
             r"(?:record|log|save|note|enter)\b",
             user_text or "",
@@ -8103,8 +8108,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     user_text, document_fallback_context
                 )
             elif not emergency:
-                deterministic_reply = _care_history_extractive_answer(
-                    user_text, included_model_context_lines
+                deterministic_reply = (
+                    _care_history_extractive_answer(user_text, included_model_context_lines)
+                    if payload.language == "en"
+                    else _localized_care_history_extractive_answer(
+                        user_text, included_model_context_lines, payload.language
+                    )
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
             if (
@@ -8158,12 +8167,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 history_source_lines = list(dict.fromkeys(
                     medication_recall_context["event_lines"]
                 ))
-                deterministic_reply = _care_history_extractive_answer(
-                    user_text, history_source_lines
+                deterministic_reply = (
+                    _care_history_extractive_answer(user_text, history_source_lines)
+                    if payload.language == "en"
+                    else _localized_care_history_extractive_answer(
+                        user_text, history_source_lines, payload.language
+                    )
                 ) or (
                     "I can't confirm the prescribed dose from the records retrieved. "
                     "A caregiver report does not confirm the prescribed dose or current medication instructions. "
                     "Please check the prescription or contact the prescriber or pharmacist."
+                    if payload.language == "en"
+                    else (
+                        "No puedo confirmar la dosis prescrita a partir de los registros recuperados. "
+                        "Un informe de un cuidador no confirma la dosis prescrita ni las instrucciones actuales del medicamento. "
+                        "Comprueba la receta o consulta al profesional que la prescribió o al farmacéutico."
+                        if payload.language == "es"
+                        else "Je ne peux pas confirmer la dose prescrite à partir des dossiers récupérés. "
+                        "Le témoignage d’un aidant ne confirme pas la dose prescrite ni les instructions actuelles du médicament. "
+                        "Vérifiez l’ordonnance ou contactez le prescripteur ou le pharmacien."
+                    )
                 )
                 care_history_fallback_from_outage = bool(
                     deterministic_reply.startswith("The saved notes mention medication:")
@@ -8189,8 +8212,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     user_text, document_fallback_context
                 )
             elif not emergency:
-                deterministic_reply = _care_history_extractive_answer(
-                    user_text, included_model_context_lines
+                deterministic_reply = (
+                    _care_history_extractive_answer(user_text, included_model_context_lines)
+                    if payload.language == "en"
+                    else _localized_care_history_extractive_answer(
+                        user_text, included_model_context_lines, payload.language
+                    )
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
 
@@ -8305,9 +8332,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 *event_context,
                 *shared_lcr_lines,
             ]))
-        care_history_extractive_answer = _care_history_extractive_answer(
-            user_text,
-            history_source_lines,
+        care_history_extractive_answer = (
+            _care_history_extractive_answer(user_text, history_source_lines)
+            if payload.language == "en"
+            else _localized_care_history_extractive_answer(
+                user_text, history_source_lines, payload.language
+            )
         )
         if medication_dose_recall_fallback_used:
             # Medication recall is answered from the caregiver-authored report,
@@ -8316,10 +8346,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             reply = care_history_extractive_answer or (
                 "I can't confirm the prescribed dose from the records retrieved. "
                 "Please check the prescription or ask the prescriber or pharmacist."
+                if payload.language == "en"
+                else (
+                    "No puedo confirmar la dosis prescrita. Comprueba la receta o consulta al profesional que la prescribió o al farmacéutico."
+                    if payload.language == "es"
+                    else "Je ne peux pas confirmer la dose prescrite. Vérifiez l’ordonnance ou contactez le prescripteur ou le pharmacien."
+                )
             )
             medication_dose_recall_source_quote_used = bool(
                 care_history_extractive_answer
-                and care_history_extractive_answer.startswith("The saved notes mention medication:")
+                and (
+                    care_history_extractive_answer.startswith("The saved notes mention medication:")
+                    if payload.language == "en"
+                    else "«" in care_history_extractive_answer
+                )
             )
             care_history_extractive_fallback_used = medication_dose_recall_source_quote_used
             # Public provenance must describe only the direct medication-event
