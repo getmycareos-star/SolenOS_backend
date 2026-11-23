@@ -18,7 +18,7 @@ class ResponseLengthPolicy:
 _POLICIES = {
     "first_time_greeting": ResponseLengthPolicy("first_time_greeting", 25, 40, 112),
     "returning_greeting": ResponseLengthPolicy("returning_greeting", 30, 55, 160),
-    "simple_acknowledgement": ResponseLengthPolicy("simple_acknowledgement", 10, 15, 48),
+    "simple_acknowledgement": ResponseLengthPolicy("simple_acknowledgement", 10, 15, 64),
     "simple_factual_answer": ResponseLengthPolicy("simple_factual_answer", 35, 60, 192),
     "explanation": ResponseLengthPolicy("explanation", 100, 180, 448),
     "complex_care_history": ResponseLengthPolicy("complex_care_history", 150, 250, 768),
