@@ -6713,12 +6713,12 @@ def _caregiver_explicitly_requests_factual_answer(user_text: str) -> bool:
     if "?" in value:
         return True
     return bool(re.search(
-        r"\\b(?:please explain|explain (?:the|what|how|why)|tell me (?:what|when|how|why|about)|"
+        r"\b(?:please explain|explain (?:the|what|how|why)|tell me (?:what|when|how|why|about)|"
         r"show me|in detail|give me (?:the )?(?:full|detailed)|"
         r"what (?:was|did|has|have|is|are|does|do)|"
         r"how (?:many|often|long|much)|when (?:did|was|has|is)|"
         r"where (?:did|was|is)|who (?:did|was|is)|"
-        r"can you (?:explain|tell|show|check|find)|could you (?:explain|tell|show|check|find))\\b",
+        r"can you (?:explain|tell|show|check|find)|could you (?:explain|tell|show|check|find))\b",
         value,
     ))
 
