@@ -143,7 +143,7 @@ def _source(evidence_id: str, person_id: str, caregiver_id: str, db: Session):
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
         Evidence.type == "document",
-    ).with_for_update().first()
+    ).first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
     upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
@@ -578,11 +578,39 @@ def _analysis_for_evidence(evidence_id: str, person_id: str, caregiver_id: str, 
     rows = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
         CaptureAnalysis.source_evidence_id == evidence_id,
-    ).order_by(CaptureAnalysis.created_at.desc()).with_for_update().all()
+    ).order_by(CaptureAnalysis.created_at.desc()).all()
     for row in rows:
         if isinstance(row.candidates, dict) and row.candidates.get("kind") == "document_extraction_v1":
             return row
     raise HTTPException(status_code=409, detail="Run server-side extraction before document understanding")
+
+
+def _lock_document_source_and_analysis(
+    db: Session,
+    evidence_id: str,
+    person_id: str,
+    analysis_id: str,
+    expected_binary_sha256: str,
+):
+    """Hold source/analysis locks only for the short review-state persistence phase."""
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.type == "document",
+    ).with_for_update().first()
+    if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
+        raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
+    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
+    if upload is None or upload.sha256 != expected_binary_sha256:
+        raise HTTPException(status_code=409, detail="The original document changed while it was being reviewed")
+    analysis = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.id == analysis_id,
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.source_evidence_id == evidence_id,
+    ).populate_existing().with_for_update().first()
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="Document extraction no longer exists")
+    return evidence, upload, analysis
 
 
 def _intelligence(analysis: CaptureAnalysis) -> dict:
@@ -883,6 +911,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     evidence, upload = _source(evidence_id, person_id, caregiver_id, db)
     analysis = _analysis_for_evidence(evidence_id, person_id, caregiver_id, db)
     metadata = _metadata(analysis)
+    original_candidates = copy.deepcopy(metadata)
     duplicate_of_evidence_id = _duplicate_of(evidence)
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The extraction does not match the preserved original file")
