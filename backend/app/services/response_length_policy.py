@@ -43,7 +43,8 @@ _ACK = re.compile(
 _EMOTIONAL = re.compile(
     r"\b(?:exhausted|tired|worn out|drained|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
     r"frightened|panicking|terrified|at my limit|falling apart|i'm struggling|"
-    r"i am struggling|need a break|no sleep|up all night|"
+    r"i am struggling|need a break|no sleep|up all night|can't continue|cannot continue|"
+    r"can't keep doing this|cannot keep doing this|"
     r"i(?:'m| am) (?:really |very |so )?(?:sad|angry|upset|lonely|anxious|grieving|frustrated|furious)|"
     r"i feel (?:really |very |so )?(?:sad|angry|upset|alone|lonely|scared|afraid|anxious|helpless|frustrated|furious)|"
     r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying|"
@@ -67,8 +68,9 @@ _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
     r"\b(?:i(?:'m| am| feel| have)|i've|i just want|i want|i need)\b.{0,60}\b(?:exhausted|overwhelmed|"
     r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
     r"lonely|anxious|grieving|frustrated|furious|helpless|hopeless|at my limit|falling apart|"
-    r"can't cope|cannot cope|can't take this|cannot take this|can't stop crying|"
-    r"break|have had enough|had enough|struggling|"
+    r"can't cope|cannot cope|can't continue|cannot continue|can't keep doing this|"
+    r"cannot keep doing this|need to stop|need a pause|can't take this|cannot take this|"
+    r"can't stop crying|break|have had enough|had enough|struggling|"
     r"been crying|can't stop crying|feel like crying)\b",
     re.I,
 )
