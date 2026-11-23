@@ -352,9 +352,20 @@ def _history_bundle(
             "has_more": source.get("has_more", False),
             "selection": source.get("selection"),
             "limit": source.get("limit", 50),
+            "interpretation_limit": source.get("interpretation_limit"),
         }
         for name, source in lcr_context["sources"].items()
     }
+    source_limits = [
+        {
+            "source_type": name,
+            "status": source.get("status"),
+            "interpretation_limit": source.get("interpretation_limit"),
+        }
+        for name, source in lcr_context["sources"].items()
+        if source.get("status") in {"failed", "partial", "unsearchable"}
+        and source.get("interpretation_limit")
+    ][:20]
     return {
         "records": records,
         "counts": {
@@ -374,6 +385,7 @@ def _history_bundle(
             "query_applied": lcr_context["query_applied"],
             "missing_required_sources": lcr_context["missing_required_sources"],
             "missing_optional_sources": lcr_context["missing_optional_sources"],
+            "source_limits": source_limits,
             "sources": source_summary,
         },
         "oldest_record_at": min(
