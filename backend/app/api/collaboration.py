@@ -6132,6 +6132,98 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
     return answer
 
 
+def _localized_care_history_extractive_answer(
+    user_text: str,
+    context_lines: list[str],
+    language: Literal["es", "fr"],
+) -> str:
+    """Quote saved caregiver reports with a localized wrapper; never translate the source."""
+    topics = _care_history_requested_topics(user_text)
+    if not topics and not _CARE_HISTORY_INTENT_PATTERN.search(user_text or ""):
+        return ""
+    topic_names = {
+        "es": {
+            "sleep": "el sueño", "lunch": "el almuerzo", "dinner": "la cena",
+            "breakfast": "el desayuno", "appetite": "el apetito", "mobility": "la movilidad",
+            "mood": "el estado de ánimo", "hydration": "la hidratación",
+            "medication": "los medicamentos", "falls": "las caídas", "pain": "el dolor",
+        },
+        "fr": {
+            "sleep": "le sommeil", "lunch": "le déjeuner", "dinner": "le dîner",
+            "breakfast": "le petit-déjeuner", "appetite": "l’appétit", "mobility": "la mobilité",
+            "mood": "l’humeur", "hydration": "l’hydratation",
+            "medication": "les médicaments", "falls": "les chutes", "pain": "la douleur",
+        },
+    }
+    candidates: list[tuple[int, str, set[str]]] = []
+    for order, line in enumerate(context_lines):
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            record_payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(record_payload, dict) or record_payload.get("source_type") != "events":
+            continue
+        record = record_payload.get("record") if isinstance(record_payload.get("record"), dict) else {}
+        if not record.get("created_by_caregiver_id"):
+            continue
+        if str(record.get("status") or "").strip().casefold() != "recorded":
+            continue
+        description = _care_history_event_text(record)
+        if not description:
+            continue
+        terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
+        matched = {label for label, variants in topics if terms & variants}
+        if topics and not matched:
+            continue
+        candidates.append((order, re.sub(r"\s+", " ", description).strip(), matched))
+
+    candidates.sort(key=lambda item: item[0])
+    selected: list[tuple[int, str, set[str]]] = []
+    covered: set[str] = set()
+    for candidate in candidates:
+        if not topics or candidate[2] - covered:
+            selected.append(candidate)
+            covered.update(candidate[2])
+        if len(selected) >= 3 or (topics and len(covered) == len(topics)):
+            break
+
+    missing = [label for label, _ in topics if label not in covered]
+    names = topic_names[language]
+    selected_topics = [names.get(label, label) for label, _ in topics if label in covered]
+    missing_topics = [names.get(label, label) for label in missing]
+    quoted = " ; ".join(f"«{description}»" for _, description, _ in selected)
+    if language == "es":
+        if selected:
+            lead = (
+                "Las notas guardadas mencionan " + " y ".join(selected_topics) + ". El texto original dice: "
+                if topics else "El texto original de las notas guardadas dice: "
+            )
+            answer = lead + quoted
+        else:
+            answer = "No pude confirmar una nota de cuidado coincidente en los registros recuperados."
+        if missing_topics:
+            answer += ". No pude confirmar " + " ni ".join(missing_topics) + " en las notas recuperadas."
+        if topics and "medication" in {label for label, _ in topics} and selected:
+            answer += " Es un reporte de un cuidador, no una confirmación de la receta actual."
+    else:
+        if selected:
+            lead = (
+                "Les notes enregistrées mentionnent " + " et ".join(selected_topics) + ". Le texte original indique : "
+                if topics else "Le texte original des notes enregistrées indique : "
+            )
+            answer = lead + quoted
+        else:
+            answer = "Je n’ai pas pu confirmer de note de soins correspondante dans les dossiers récupérés."
+        if missing_topics:
+            answer += ". Je n’ai pas pu confirmer " + " ni ".join(missing_topics) + " dans les notes retrouvées."
+        if topics and "medication" in {label for label, _ in topics} and selected:
+            answer += " Il s’agit d’un témoignage d’un aidant, pas d’une confirmation de l’ordonnance actuelle."
+    return answer
+
+
 def _caregiver_question_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
     """Quote a saved professional question when the caregiver asks what to raise."""
     intent = re.search(
