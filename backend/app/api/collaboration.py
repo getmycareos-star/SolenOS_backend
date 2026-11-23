@@ -6451,7 +6451,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"why do i have to repeat|i said this already|you forgot|"
         r"this is ridiculous|you are not listening|this is useless|"
         r"you(?:'re| are) (?:useless|stupid)|you keep getting this wrong|"
-        r"this keeps failing|i(?:'m| am) (?:really |very |so )?(?:furious|frustrated|fed up)|i feel (?:really |very |so )?(?:furious|frustrated|fed up))\b",
+        r"this keeps failing)\b",
         text,
     )
     overload = re.search(
@@ -6465,7 +6465,8 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
     distress = re.search(
-        r"\b(?:i(?:'m| am) (?:really |very |so )?(?:angry|upset)|i feel (?:really |very |so )?(?:angry|upset)|"
+        r"\b(?:i(?:'m| am) (?:really |very |so )?(?:angry|upset|frustrated|furious|fed up)|"
+        r"i feel (?:really |very |so )?(?:angry|upset|frustrated|furious|fed up)|"
         r"i just want a break|i've had enough|i have had enough|"
         r"i can't take this|i cannot take this|i feel hopeless|"
         r"i(?:'m| am) (?:really |very |so )?(?:sad|lonely|scared|frightened|afraid|anxious|grieving)|"
@@ -6479,7 +6480,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     )
     standalone_distress = re.fullmatch(
         r"(?:really |very |so )?(?:sad|angry|upset|lonely|scared|frightened|afraid|anxious|"
-        r"helpless|frustrated|furious)[.!?]*",
+        r"helpless|frustrated|furious|fed up)[.!?]*",
         text,
     )
     correction = re.search(
