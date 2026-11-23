@@ -830,6 +830,14 @@ def _exact_source_passages(
         clusters,
         key=lambda item: (-len(item["terms"]), item["start"]),
     )[:max(1, max_passages)]
+    page_markers = [
+        (match.start(), int(match.group(1)), match.group(0))
+        for match in re.finditer(
+            r"\\[\\s*Page\\s+(\\d+)(?:\\s+[^\\]]*)?\\s*\\]",
+            source_text,
+            re.IGNORECASE,
+        )
+    ]
     passages = []
     for cluster in ranked:
         start = max(0, cluster["start"] - passage_chars // 3)
@@ -837,12 +845,20 @@ def _exact_source_passages(
         if end < cluster["end"]:
             end = cluster["end"]
             start = max(0, end - passage_chars)
-        passages.append({
+        passage = {
             "text": source_text[start:end],
             "source_character_start": start,
             "source_character_end": end,
             "matched_terms": sorted(cluster["terms"]),
-        })
+        }
+        source_page = next(
+            (marker for marker in reversed(page_markers) if marker[0] <= cluster["start"]),
+            None,
+        )
+        if source_page is not None:
+            passage["page_number"] = source_page[1]
+            passage["page_label"] = source_page[2]
+        passages.append(passage)
     passages.sort(key=lambda item: item["source_character_start"])
     return passages
 
