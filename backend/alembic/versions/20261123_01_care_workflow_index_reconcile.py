@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 
 from alembic import op
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 revision = "20261123_01_care_workflow_index_reconcile"
 down_revision = "20261122_01_qwen_job_event_update_guard"
@@ -60,9 +60,31 @@ def _is_usable_lookup_index(index: dict, column_name: str) -> bool:
     )
 
 
+def _valid_postgres_index_names(bind) -> set[str] | None:
+    """Return only indexes PostgreSQL can actually use for query plans."""
+    if bind.dialect.name != "postgresql":
+        return None
+    rows = bind.execute(text("""
+        SELECT index_class.relname
+        FROM pg_index AS index_data
+        JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
+        JOIN pg_class AS table_class ON table_class.oid = index_data.indrelid
+        JOIN pg_namespace AS table_schema ON table_schema.oid = table_class.relnamespace
+        WHERE table_schema.nspname = current_schema()
+          AND index_data.indisvalid
+          AND index_data.indisready
+    """)).scalars()
+    return {str(name) for name in rows}
+
+
 def _has_required_index(bind, table_name: str, column_name: str) -> bool:
+    valid_names = _valid_postgres_index_names(bind)
     return any(
         _is_usable_lookup_index(index, column_name)
+        and (
+            valid_names is None
+            or str(index.get("name") or "") in valid_names
+        )
         for index in inspect(bind).get_indexes(table_name)
     )
 
