@@ -417,6 +417,43 @@ def ensure_upcoming_appointment_workspace(request: Request, db: Session = Depend
     return {"created": True, "reason": "prepared_for_existing_appointment_date_unknown" if appointment_date_unknown else "prepared_for_existing_appointment", "workspace": _record_out(row, db)}
 
 
+def _apply_lcr_event_correction_lineage(event_items: list[dict], lcr_context: dict) -> list[dict]:
+    """Carry canonical LCR correction state into the legacy appointment event list.
+
+    A direct event query is retained for older UI consumers, but it is not
+    allowed to imply currentness independently of the correction-aware LCR.
+    Events absent from that projection are preserved as history with unknown
+    currentness rather than silently treated as current.
+    """
+    sources = lcr_context.get("sources") if isinstance(lcr_context, dict) else {}
+    sources = sources if isinstance(sources, dict) else {}
+    event_source = sources.get("events") if isinstance(sources.get("events"), dict) else {}
+    canonical_items = event_source.get("items") if isinstance(event_source.get("items"), list) else []
+    canonical_by_id = {
+        str(item.get("id")): item for item in canonical_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    for event in event_items:
+        canonical = canonical_by_id.get(str(event.get("source_id") or ""))
+        if canonical is None:
+            event["correction_lineage_status"] = "failed"
+            event["information_status"] = "event_currentness_unknown"
+            event["interpretation_limit"] = (
+                "The current Living Care Record projection did not confirm this event's correction history. "
+                "Keep it as history; do not present it as the latest account."
+            )
+            continue
+        event["correction_lineage_status"] = canonical.get("correction_lineage_status", "failed")
+        event["information_status"] = canonical.get("information_status", "event_currentness_unknown")
+        event["interpretation_limit"] = canonical.get(
+            "interpretation_limit",
+            "The event's currentness could not be established from the Living Care Record.",
+        )
+        event["corrections"] = canonical.get("superseded_by_corrections", [])
+        event["pending_corrections"] = canonical.get("pending_corrections", [])
+    return event_items
+
+
 @router.get("/preparation-brief")
 def get_appointment_preparation_brief(request: Request, window_days: int = 90, db: Session = Depends(get_db)):
     """Return a bounded, source-linked LCR preparation view without inferring clinical meaning."""
@@ -748,6 +785,9 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         "time_provenance": item.time_provenance,
         "evidence_ids": item.evidence_ids or [],
     } for item in events]
+    event_items = _apply_lcr_event_correction_lineage(
+        event_items, living_care_record_context,
+    )
     appointment_items = [{
         "source_table": "appointments",
         "source_id": str(item.id),
@@ -1245,6 +1285,10 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     appointment_recorded_events = [
         item for item in event_items
         if str(item.get("event_type", "")).casefold() in {"appointment", "clinic_visit"}
+        and str(item.get("information_status") or "").casefold() not in {
+            "historical_event", "event_correction_pending", "event_currentness_unknown",
+            "unprocessed_capture",
+        }
     ]
     # The shared projection is not the only retrieval dependency. Legacy
     # person-scoped sources below are queried independently; any failed source
