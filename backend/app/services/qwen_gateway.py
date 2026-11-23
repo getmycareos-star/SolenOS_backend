@@ -195,6 +195,7 @@ def qwen_chat(
     retry_deadline = None
     last_startup_error = None
     first_attempt = True
+    transient_http_retry_used = False
     try:
         while True:
             if first_attempt:
@@ -211,6 +212,23 @@ def qwen_chat(
                 with urllib.request.urlopen(request, timeout=attempt_timeout) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 break
+            except urllib.error.HTTPError as exc:
+                # A short, single retry covers transient Ollama startup/overload
+                # responses without creating an unbounded inference retry loop.
+                # Missing models and request errors remain immediate failures.
+                if exc.code in {429, 500, 502, 503, 504} and not transient_http_retry_used:
+                    transient_http_retry_used = True
+                    retry_after = None
+                    try:
+                        retry_after = float(exc.headers.get("Retry-After", "0.5"))
+                    except (AttributeError, TypeError, ValueError):
+                        retry_after = 0.5
+                    retry_delay = max(0.0, min(retry_after, 2.0))
+                    exc.close()
+                    if retry_delay:
+                        time.sleep(retry_delay)
+                    continue
+                raise
             except urllib.error.URLError as exc:
                 reason = getattr(exc, "reason", exc)
                 retryable_startup_failure = isinstance(
