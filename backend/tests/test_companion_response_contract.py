@@ -2027,6 +2027,22 @@ def test_companion_never_asks_multiple_questions_in_one_reply():
         "I hear that you're exhausted. We can take this one concern at a time.",
     )
 
+def test_critical_safety_response_is_not_shortened_by_caregiver_distress_limits():
+    emergency_reply = (
+        "Call emergency services now. Stay with her and follow the dispatcher's instructions. "
+        "Tell them when her breathing stopped, what you observed, and any known medical conditions or medications. "
+        "Do not give her food or drink."
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "I'm scared. Mum is not breathing.",
+        emergency_reply,
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "I'm overwhelmed and Mum is not breathing.",
+        emergency_reply,
+    )
+
+
 def test_companion_recognizes_common_care_document_names():
     assert collaboration._is_document_question("What does the discharge summary say about walking?")
     assert collaboration._is_document_question("Can you find the care plan?")
