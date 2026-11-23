@@ -2882,6 +2882,14 @@ def _collect_full_lcr_context_pages(
     merged["retrieval_projection_complete"] = (
         not merged.get("missing_required_sources")
         and not merged.get("missing_optional_sources")
+        and not any(
+            source.get("status") in {
+                "failed", "partial", "unsearchable",
+                "unavailable_schema", "unavailable_scope",
+            }
+            for name, source in merged_sources.items()
+            if name != "companion_conversation"
+        )
         and all(
             source.get("candidate_scan_complete") is True
             and source.get("has_more") is False
