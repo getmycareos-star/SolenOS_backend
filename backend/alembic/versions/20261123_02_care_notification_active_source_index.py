@@ -24,8 +24,36 @@ COLUMNS = ("person_id", "caregiver_id", "category", "source_event_id")
 PREDICATE = "status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"
 
 
-def _normalize_predicate(value) -> str:
-    return " ".join(str(value or "").replace('"', "").replace("(", " ( ").replace(")", " ) ").split()).lower()
+def _normalize_predicate(value):
+    if value is None:
+        return None
+    normalized = " ".join(str(value).strip().split())
+    while normalized.startswith("(") and normalized.endswith(")"):
+        depth = 0
+        encloses_all = True
+        for position, character in enumerate(normalized):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0 and position != len(normalized) - 1:
+                    encloses_all = False
+                    break
+        if not encloses_all or depth != 0:
+            break
+        normalized = normalized[1:-1].strip()
+    return normalized or None
+
+
+def _postgres_index_is_valid(bind, index_name: str) -> bool:
+    return bool(bind.execute(text("""
+        SELECT index_data.indisvalid AND index_data.indisready AND index_data.indislive
+        FROM pg_index AS index_data
+        JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
+        JOIN pg_namespace AS index_schema ON index_schema.oid = index_class.relnamespace
+        WHERE index_schema.nspname = current_schema()
+          AND index_class.relname = :index_name
+    """), {"index_name": index_name}).scalar())
 
 
 def _has_exact_index(bind) -> bool:
@@ -44,15 +72,7 @@ def _has_exact_index(bind) -> bool:
         ):
             if bind.dialect.name != "postgresql":
                 return True
-            valid = bind.execute(text("""
-                SELECT index_data.indisvalid AND index_data.indisready AND index_data.indislive
-                FROM pg_index AS index_data
-                JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
-                JOIN pg_namespace AS index_schema ON index_schema.oid = index_class.relnamespace
-                WHERE index_schema.nspname = current_schema()
-                  AND index_class.relname = :index_name
-            """), {"index_name": index.get("name")}).scalar()
-            if valid:
+            if _postgres_index_is_valid(bind, str(index.get("name") or "")):
                 return True
     return False
 
@@ -86,6 +106,15 @@ def upgrade() -> None:
 
     if _has_exact_index(bind):
         return
+
+    if bind.dialect.name == "postgresql":
+        same_name = next(
+            (index for index in inspector.get_indexes(TABLE) if index.get("name") == INDEX_NAME),
+            None,
+        )
+        if same_name is not None and not _postgres_index_is_valid(bind, INDEX_NAME):
+            with op.get_context().autocommit_block():
+                op.execute(text('DROP INDEX CONCURRENTLY IF EXISTS "' + INDEX_NAME + '"'))
 
     duplicates = bind.execute(text("""
         SELECT person_id, caregiver_id, category, source_event_id, COUNT(*) AS row_count
