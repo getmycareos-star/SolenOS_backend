@@ -898,7 +898,7 @@ def get_claim_assessment_impact(
 
     if _claim_changed_after(claim, latest.created_at):
         reasons.append("claim_assertion_changed_after_assessment")
-    if claim.assertion_status in {"superseded", "rejected"}:
+    if claim.assertion_status in {"superseded", "rejected", "withdrawn"}:
         reasons.append("claim_is_no_longer_current")
     if _has_correction_after("care_event", claim.source_event_id, latest.created_at):
         reasons.append("source_event_corrected_after_assessment")
@@ -954,7 +954,7 @@ def get_claim_assessment_impact(
                         prerequisite_claim,
                         dependent_assessment.created_at if dependent_assessment else None,
                     )
-                    or prerequisite_claim.assertion_status in {"superseded", "rejected"}
+                    or prerequisite_claim.assertion_status in {"superseded", "rejected", "withdrawn"}
                     or _has_correction_after(
                         "care_event",
                         prerequisite_claim.source_event_id,
@@ -2021,8 +2021,8 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
         fields.setdefault(str(row.field).strip().lower(), []).append(row)
     name_claims = fields.get("medication_name") or fields.get("name") or []
     status_claims = fields.get("medication_status") or fields.get("status") or []
-    name_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in name_claims if row.assertion_status not in {"rejected", "superseded", "retracted"}}
-    status_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in status_claims if row.assertion_status not in {"rejected", "superseded", "retracted"}}
+    name_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in name_claims if row.assertion_status not in {"rejected", "superseded", "retracted", "withdrawn"}}
+    status_values = {" ".join(str(row.asserted_value or "").casefold().split()) for row in status_claims if row.assertion_status not in {"rejected", "superseded", "retracted", "withdrawn"}}
     if len(name_values) > 1 or len(status_values) > 1:
         raise HTTPException(status_code=409, detail="Conflicting medication reports must be resolved before review")
     name_claim = name_claims[0] if name_claims else None
@@ -2031,7 +2031,7 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
         raise HTTPException(status_code=404, detail="Medication report not found or incomplete in this care record")
     if str(status_claim.asserted_value).strip().casefold() != "active":
         raise HTTPException(status_code=409, detail="Only an explicitly reported active medication can be reviewed as current")
-    if any(row.assertion_status in {"rejected", "superseded", "retracted"} for row in rows):
+    if any(row.assertion_status in {"rejected", "superseded", "retracted", "withdrawn"} for row in rows):
         raise HTTPException(status_code=409, detail="This medication report is no longer reviewable; create a new report instead")
 
     previous_defer = db.info.get("defer_document_review_commit")
