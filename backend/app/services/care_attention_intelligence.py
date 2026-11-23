@@ -185,7 +185,7 @@ def _pattern_reviews(records: list[dict[str, Any]], baseline_items: list[dict[st
             continue
         if str(item.get("id") or "") in superseded_ids:
             continue
-        if _text(item.get("assertion_status")) in {"rejected", "superseded", "retracted"}:
+        if _text(item.get("assertion_status")) in {"rejected", "superseded", "retracted", "withdrawn"}:
             continue
         if item.get("hedge_marker") or item.get("ambiguity_note"):
             continue
