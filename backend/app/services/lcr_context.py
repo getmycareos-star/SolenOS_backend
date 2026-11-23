@@ -810,7 +810,7 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
         else:
             observed_pages = {
                 int(match.group(1))
-                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text or "")
+                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or "")
             }
         explicit_unprocessed = value.get("unprocessed_page_numbers")
         unprocessed = {
