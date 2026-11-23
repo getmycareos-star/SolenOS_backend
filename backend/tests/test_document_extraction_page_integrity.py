@@ -193,3 +193,18 @@ def test_document_review_response_never_counts_a_failed_page_as_processed():
     assert response["extraction_processed_page_numbers"] == [1, 3]
     assert response["extraction_unprocessed_page_numbers"] == [2]
     assert response["interpretation_blocked"] is True
+
+
+def test_pdf_filename_still_enforces_missing_pages_when_mime_type_is_generic():
+    upload = _upload()
+    upload.mime_type = "application/octet-stream"
+    status, metadata = _extraction_metadata(
+        upload,
+        "[Page 1 OCR]\nFirst page.\n[Page 3 OCR]\nThird page.",
+        "pdf_ocr",
+    )
+
+    assert status == "partial"
+    assert metadata["page_count"] == 3
+    assert metadata["processed_page_numbers"] == [1, 3]
+    assert metadata["unprocessed_page_numbers"] == [2]
