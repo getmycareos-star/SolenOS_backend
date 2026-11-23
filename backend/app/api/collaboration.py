@@ -5963,9 +5963,9 @@ _CARE_HISTORY_TOPIC_GROUPS = {
         "liquide",
     },
     "medication": {
-        "medication", "medicine", "dose", "tablet", "pill", "prescribed", "medicamento",
-        "medicación", "medicina", "dosis", "pastilla", "comprimido", "médicament", "médicaments",
-        "comprimé", "pilule", "ordonnance",
+        "medication", "medicine", "dose", "tablet", "pill", "prescribed", "prescription",
+        "prescriber", "prescribing", "medicamento", "medicación", "medicina", "dosis",
+        "pastilla", "comprimido", "médicament", "médicaments", "comprimé", "pilule", "ordonnance",
     },
     "falls": {
         "fall", "fell", "fallen", "slipped", "slip", "caída", "caídas", "cayó", "resbaló",
@@ -6297,94 +6297,13 @@ def _medication_dose_recall_context_lines(
     *,
     limit: int = 20,
 ) -> dict[str, Any]:
-    """Fetch person-scoped caregiver medication reports directly from persisted LCR events.
-
-    Medication recall is a narrow, source-bound lookup. It must not depend on
-    lexical ranking in the general Companion context, which can omit the exact
-    uncertain report while retaining an older medication assertion.
-    """
-    bounded_limit = max(1, min(int(limit), 50))
-    query = (
-        db.query(CareEvent)
-        .filter(
-            CareEvent.person_id == person_id,
-            CareEvent.status == "recorded",
-            CareEvent.created_by_caregiver_id.isnot(None),
-            or_(
-                CareEvent.description.ilike("%medicat%"),
-                CareEvent.description.ilike("%dose%"),
-                CareEvent.description.ilike("%tablet%"),
-                CareEvent.description.ilike("%pill%"),
-                CareEvent.description.ilike("%prescrib%"),
-                CareEvent.description.ilike("%prescription%"),
-                CareEvent.description.ilike("%medicine%"),
-            ),
-        )
-        .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+    """Use the same correction-aware source lookup for medication recall."""
+    return _care_history_recall_context_lines(
+        db,
+        person_id,
+        "What has the caregiver recorded about medication dose medicine prescription?",
+        limit=max(1, min(int(limit), 50)),
     )
-    rows = query.limit(bounded_limit + 1).all()
-    has_more = len(rows) > bounded_limit
-    rows = rows[:bounded_limit]
-
-    event_lines: list[str] = []
-    linked_evidence_ids: list[str] = []
-    for row in rows:
-        caregiver_report = _care_history_event_text({"description": row.description})
-        if not caregiver_report:
-            continue
-        evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
-        linked_evidence_ids.extend(evidence_ids)
-        event_lines.append(
-            "Person-scoped caregiver medication report: "
-            + json.dumps({
-                "source_type": "events",
-                "event_id": str(row.id),
-                "record": {
-                    "id": str(row.id),
-                    "status": row.status,
-                    "created_by_caregiver_id": str(row.created_by_caregiver_id or ""),
-                    "description": caregiver_report,
-                    "event_type": row.event_type,
-                    "title": row.title,
-                    "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
-                    "evidence_ids": evidence_ids,
-                },
-            }, ensure_ascii=False, default=str)
-        )
-
-    evidence_lines: list[str] = []
-    if linked_evidence_ids:
-        evidence_rows = (
-            db.query(EvidenceModel)
-            .filter(
-                EvidenceModel.person_id == person_id,
-                EvidenceModel.id.in_(list(dict.fromkeys(linked_evidence_ids))),
-            )
-            .all()
-        )
-        for evidence in evidence_rows:
-            evidence_lines.append(
-                "Original evidence linked to the caregiver medication report: "
-                + json.dumps({
-                    "source_type": "evidence",
-                    "evidence_id": str(evidence.id),
-                    "record": {
-                        "id": str(evidence.id),
-                        "source_text": evidence.source_text,
-                        "source_type": evidence.source_type,
-                        "evidence_kind": evidence.evidence_kind,
-                        "epistemic_status": evidence.epistemic_status,
-                        "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
-                        "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
-                    },
-                }, ensure_ascii=False, default=str)
-            )
-
-    return {
-        "event_lines": event_lines,
-        "evidence_lines": evidence_lines,
-        "has_more": has_more,
-    }
 
 
 def _care_history_extractive_answer(user_text: str, context_lines: list[str]) -> str | None:
