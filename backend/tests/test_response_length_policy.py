@@ -96,10 +96,10 @@ def test_critical_terms_are_recognized_after_policy_regex_refactor():
     assert resolve_response_length_policy("He is having a seizure").intent == "critical_safety"
 
 
-def test_good_night_uses_the_same_bounded_greeting_contract():
+def test_good_night_is_a_bounded_acknowledgement_not_a_greeting():
     policy = resolve_response_length_policy("Good night!")
-    assert policy.intent == "first_time_greeting"
-    assert (policy.target_words, policy.max_words) == (25, 40)
+    assert policy.intent == "simple_acknowledgement"
+    assert (policy.target_words, policy.max_words) == (10, 15)
 
 
 def test_greeting_with_there_is_classified_as_greeting():
