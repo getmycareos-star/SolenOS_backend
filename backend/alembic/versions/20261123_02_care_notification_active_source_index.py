@@ -159,8 +159,17 @@ def upgrade() -> None:
                 or index.get("filter_definition")
             ) == _normalize_predicate(PREDICATE)
         ):
+            observed_predicate = (
+                (index.get("dialect_options") or {}).get("postgresql_where")
+                or (index.get("dialect_options") or {}).get("sqlite_where")
+                or index.get("filter_definition")
+            )
             raise RuntimeError(
-                f"Cannot safely create {INDEX_NAME}: an index with that name has a different definition"
+                f"Cannot safely create {INDEX_NAME}: existing index definition differs; "
+                f"columns={index.get('column_names')!r}, unique={index.get('unique')!r}, "
+                f"predicate={observed_predicate!r}, "
+                f"normalized={_normalize_predicate(observed_predicate)!r}, "
+                f"expected={_normalize_predicate(PREDICATE)!r}"
             )
 
     if _has_exact_index(bind):
