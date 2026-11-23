@@ -428,7 +428,9 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 # Companion uses this shared retrieval composition. It must
                 # retrieve the same committed source IDs from a fresh session.
                 context = build_unified_lcr_context(
-                    db, person_id, caregiver_id, limit_per_source=50
+                    db, person_id, caregiver_id,
+                    query="confused lunch",
+                    limit_per_source=50,
                 )
                 situation = _build_situation_understanding_assessment(db, person_id)
                 situation_event = next(
