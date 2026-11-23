@@ -1,5 +1,6 @@
 from app.services.response_length_policy import (
     count_response_words,
+    is_greeting_message,
     resolve_response_length_policy,
     response_exceeds_hard_maximum,
 )
@@ -103,3 +104,13 @@ def test_good_night_uses_the_same_bounded_greeting_contract():
 def test_greeting_with_there_is_classified_as_greeting():
     policy = resolve_response_length_policy("Hi there.")
     assert policy.intent == "first_time_greeting"
+
+
+
+def test_shared_greeting_detector_matches_orientation_and_companion_boundaries():
+    assert is_greeting_message("Hi!")
+    assert is_greeting_message("Good morning, SolenOS")
+    assert is_greeting_message("How are you today?")
+    assert not is_greeting_message("Thanks")
+    assert not is_greeting_message("Goodbye")
+    assert not is_greeting_message("Hi, I am exhausted.")
