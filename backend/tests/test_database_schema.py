@@ -154,3 +154,12 @@ def test_schema_type_contract_only_enforces_explicit_numeric_precision():
     assert _schema_column_types_compatible(Float(), Numeric(8, 4), "postgresql")
     assert _schema_column_types_compatible(Numeric(8, 4), Numeric(8, 4), "postgresql")
     assert not _schema_column_types_compatible(Numeric(8, 4), Numeric(10, 4), "postgresql")
+
+
+def test_notification_delivery_attempt_references_uuid_notification_id_width():
+    from app.models.notifications import CareNotification, NotificationDeliveryAttempt
+
+    notification_id = NotificationDeliveryAttempt.__table__.c.notification_id
+    assert notification_id.type.length == 36
+    assert next(iter(notification_id.foreign_keys)).target_fullname == "care_notifications.id"
+    assert CareNotification.__table__.c.id.primary_key is True
