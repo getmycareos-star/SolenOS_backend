@@ -95,6 +95,7 @@ jobs:
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
       DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
+      POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -260,21 +261,28 @@ jobs:
               db.commit()
           engine.dispose()
 
-          container_rows = subprocess.check_output(
-              ["docker", "ps", "-a", "--format", "{{.ID}} {{.Image}}"],
-              text=True,
-          ).strip().splitlines()
-          containers = [
-              row.split(maxsplit=1)[0]
-              for row in container_rows
-              if len(row.split(maxsplit=1)) == 2 and "postgres" in row.split(maxsplit=1)[1].lower()
-          ]
-          if not containers:
-              raise SystemExit(
-                  "PostgreSQL service container was not found; "
-                  f"visible containers: {container_rows}"
-              )
-          subprocess.run(["docker", "restart", containers[0]], check=True)
+          # Use the exact GitHub Actions service-container ID. Docker image
+          # listing is not a stable way to identify service containers across
+          # runner implementations and can return an empty list even while the
+          # PostgreSQL service is healthy and accepting connections.
+          container_id = os.environ.get("POSTGRES_CONTAINER_ID", "").strip()
+          if not container_id:
+              container_rows = subprocess.check_output(
+                  ["docker", "ps", "-a", "--format", "{{.ID}} {{.Image}}"],
+                  text=True,
+              ).strip().splitlines()
+              containers = [
+                  row.split(maxsplit=1)[0]
+                  for row in container_rows
+                  if len(row.split(maxsplit=1)) == 2 and "postgres" in row.split(maxsplit=1)[1].lower()
+              ]
+              if not containers:
+                  raise SystemExit(
+                      "PostgreSQL service container ID is unavailable; "
+                      f"visible containers: {container_rows}"
+                  )
+              container_id = containers[0]
+          subprocess.run(["docker", "restart", container_id], check=True)
 
           last_error = None
           for _ in range(30):
