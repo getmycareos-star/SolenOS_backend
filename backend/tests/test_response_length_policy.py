@@ -282,3 +282,9 @@ def test_caregiver_distress_still_wins_when_patient_emotion_is_also_reported():
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent == "low_capacity_support", message
+
+
+def test_single_word_caregiver_emotions_use_low_capacity_support():
+    for message in ("Sad", "Angry.", "Frustrated", "Overwhelmed", "Furious!"):
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "low_capacity_support", message
