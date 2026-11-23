@@ -208,7 +208,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert own_document_analysis_id in document_ids
             assert peer_document_analysis_id not in document_ids
 
-        reported_event_time = datetime.now(timezone.utc) - timedelta(hours=2)
+        reported_event_time = datetime.now(timezone.utc) - timedelta(seconds=30)
         with TestClient(app) as client:
             response = client.post(
                 "/api/v1/daily/log",
