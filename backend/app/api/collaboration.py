@@ -5301,7 +5301,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         source_appointment_ids,
         source_handoff_ids,
         source_notification_ids,
-        source_assertion_ids,
         source_lcr_context_ids,
         source_freshness_assessment_ids,
         validated_aggregates,
