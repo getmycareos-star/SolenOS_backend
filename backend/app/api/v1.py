@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, date, timezone, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import json
 import logging
 import hashlib
@@ -616,6 +617,14 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     if not caregiver:
         raise HTTPException(status_code=403, detail="Caregiver is not linked to this care record")
 
+    event_timezone = payload.get("occurred_at_timezone") or caregiver.timezone or "UTC"
+    if not isinstance(event_timezone, str) or not event_timezone.strip() or len(event_timezone) > 80:
+        raise HTTPException(status_code=422, detail="occurred_at_timezone must be a valid IANA time zone")
+    try:
+        ZoneInfo(event_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=422, detail="occurred_at_timezone must be a valid IANA time zone")
+
     occurred_at = datetime.now(timezone.utc)
     event_time_provenance = "server_recorded_at"
     supplied_event_time = payload.get("occurred_at")
@@ -888,6 +897,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                             time_provenance="caregiver_reported_at",
                             reported_at=datetime.fromisoformat(existing_quick["caregiver_reported_at"].replace("Z", "+00:00")),
                             occurred_at=existing_event.occurred_at,
+                            occurred_at_timezone=existing_event.occurred_at_timezone,
                             ingestion_key=ingestion_key,
                         )
                         db.add(evidence)
@@ -932,6 +942,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             time_provenance="caregiver_reported_at",
             reported_at=datetime.fromisoformat(quick_check_in["caregiver_reported_at"].replace("Z", "+00:00")),
             occurred_at=occurred_at,
+            occurred_at_timezone=event_timezone,
             ingestion_key=f"daily-checkin:{caregiver_id}:{quick_check_in['idempotency_key']}"[:128],
         )
         db.add(evidence)
@@ -966,6 +977,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             collection_method="caregiver_form",
             time_provenance=event_time_provenance,
             occurred_at=occurred_at,
+            occurred_at_timezone=event_timezone,
             ingestion_key=(
                 f"daily-capture:{caregiver_id}:{capture_idempotency_key}"[:128]
                 if capture_idempotency_key else None
@@ -979,6 +991,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         event_type=event_type,
         status="recorded",
         occurred_at=occurred_at,
+        occurred_at_timezone=event_timezone,
         title=title,
         description=json.dumps(detail, ensure_ascii=False, default=str),
         evidence_ids=[evidence.id] if evidence is not None else [],
