@@ -31,9 +31,10 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "events": {
         "table": "care_events",
         "required": True,
-        "fields": ["id", "event_type", "status", "occurred_at", "recorded_at", "title", "description",
-                   "evidence_ids", "time_provenance", "location_provenance", "created_by_caregiver_id",
-                   "significance_verdict", "attention_candidate", "follow_up_candidate", "situation_id"],
+        "fields": ["id", "event_type", "status", "occurred_at", "occurred_at_timezone", "recorded_at",
+                   "title", "description", "location", "evidence_ids", "time_provenance",
+                   "location_provenance", "created_by_caregiver_id", "significance_verdict",
+                   "attention_candidate", "follow_up_candidate", "situation_id"],
         "order": ["occurred_at", "recorded_at", "created_at"],
     },
     "evidence": {
