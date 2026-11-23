@@ -276,6 +276,8 @@ def test_caregiver_distress_still_wins_when_patient_emotion_is_also_reported():
         "Mum was overwhelmed after lunch, and I'm exhausted from trying to help.",
         "Mum has seemed sad this week, and I've been crying.",
         "She is frightened at night, and I just want a break.",
+        "Mum was overwhelmed, and I am too.",
+        "My dad is exhausted, and I feel the same.",
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent == "low_capacity_support", message
