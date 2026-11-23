@@ -2296,6 +2296,11 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
 
 
 def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
+    for message in ("Sad.", "Angry.", "Frustrated."):
+        assert "DISTRESS RESPONSE" in collaboration._caregiver_interaction_guidance(message)
+    for message in ("Overwhelmed.", "Tired."):
+        assert "LOW-CAPACITY RESPONSE" in collaboration._caregiver_interaction_guidance(message)
+
     assert collaboration._caregiver_response_needs_revision(
         "I'm sad",
         "I'm sorry this feels so heavy. Let's create a plan and checklist for the next seven days. "
