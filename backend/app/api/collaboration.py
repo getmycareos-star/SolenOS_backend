@@ -6568,6 +6568,7 @@ def _build_retrieval_receipt(
             "candidate_scan_complete": bool(source.get("candidate_scan_complete")),
             "has_more": bool(source.get("has_more")),
             "selection_truncated": bool(source.get("selection_truncated")),
+            "interpretation_limit": source.get("interpretation_limit"),
         }
     context_payload = "\n".join(included_context_lines)
     context_hash = hashlib.sha256(context_payload.encode("utf-8")).hexdigest()
@@ -6613,6 +6614,16 @@ def _build_retrieval_receipt(
         "missing_required_sources": missing_required,
         "missing_optional_sources": missing_optional,
         "source_gaps": source_gaps,
+        "source_limits": [
+            {
+                "source_type": name,
+                "status": source.get("status"),
+                "interpretation_limit": source.get("interpretation_limit"),
+            }
+            for name, source in source_receipts.items()
+            if source.get("status") in {"failed", "partial", "unsearchable"}
+            and source.get("interpretation_limit")
+        ][:20],
         "pages_fetched": coverage.get("pages_fetched"),
         "temporal_window": coverage.get("temporal_window"),
         "sources": source_receipts,
