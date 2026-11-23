@@ -892,11 +892,15 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
     try:
         import app.api.collaboration as collaboration
 
-        monkeypatch.setattr(
-            collaboration,
-            "qwen_chat",
-            lambda messages, **kwargs: "I can help organize the recorded information and identify what still needs review.",
-        )
+        captured = []
+
+        def fake_qwen(messages, **kwargs):
+            captured.append((messages, kwargs))
+            if "empty-context emergency-readiness request" in messages[0]["content"]:
+                return "Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver."
+            return "I can help organize the recorded information and identify what still needs review."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
         headers = {"Authorization": f"Bearer {token}"}
         workflows = [
             "daily_capture", "add_record", "document", "living_care_record",
@@ -907,7 +911,10 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
             "reminders_notifications", "care_coordination", "companion",
             "caregiver_feedback", "sharing_export", "roles_access", "account_recovery",
             "settings_security", "record_lifecycle", "offline_sync", "ai_reliability",
-            "audit_review",
+            "audit_review", "care_transition", "incident_follow_through",
+            "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker",
+            "critical_information_completeness", "personal_preferences_distress_context",
+            "caregiver_strain_support", "document_validity_renewal",
         ]
         before = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert before.status_code == 200, before.text
@@ -927,6 +934,20 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
             assert data["written_to_lcr"] is False
             assert data["persistence"] == "read_only_assistance"
             assert data["authority"] == "solenos_care_record_and_caregiver"
+            from app.services.response_length_policy import resolve_workflow_response_length_policy
+            policy = resolve_workflow_response_length_policy(
+                workflow,
+                f"Help me organize the {workflow.replace('_', ' ')} details.",
+            )
+            prompt = captured[-1][0][0]["content"]
+            expected_length = (
+                f"Target {policy.target_words} words; hard maximum {policy.max_words} words."
+                if policy.max_words is not None
+                else "Use a situation-dependent length; do not omit material safety information to meet a generic word count."
+            )
+            assert expected_length in prompt, workflow
+            expected_tokens = 40 if workflow == "emergency_readiness" else policy.token_budget
+            assert captured[-1][1]["options"]["num_predict"] == expected_tokens, workflow
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
