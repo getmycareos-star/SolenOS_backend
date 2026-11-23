@@ -13,6 +13,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
 
 from app.main import app
+from app.models.care import CareEvent, Evidence
 from app.models.collaboration import ConversationMessage, ConversationSession
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -66,6 +67,27 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
     ]
     now = datetime.now(timezone.utc)
     with Session() as db:
+        db.add(Evidence(
+            id=f"evidence-{suffix}",
+            person_id=person_id,
+            type="note",
+            source_text="Original caregiver source for Companion history authorization.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+        ))
+        db.flush()
+        db.add(CareEvent(
+            id=f"event-{suffix}",
+            person_id=person_id,
+            event_type="observation",
+            occurred_at=now,
+            title="Caregiver source event",
+            description="A source event linked to Companion history.",
+            evidence_ids=[f"evidence-{suffix}"],
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.flush()
         db.add(ConversationSession(
             id=session_id,
             person_id=person_id,
