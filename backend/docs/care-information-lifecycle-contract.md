@@ -162,7 +162,7 @@ All work is committed directly to `main`, in small, reviewable commits. Before e
 
 This contract is written against the current `main` branches only. A pull request is not part of production/main until its changes are present on `main` and verified there. In particular, inspect migrations and the Alembic graph before selectively porting any closed or abandoned work: revision IDs and schema repairs may already exist on main under different filenames. Never merge or cherry-pick an entire stale branch simply because its PR description sounds relevant.
 
-## 12. Verified main-branch baseline (2026-11-15)
+## 12. Verified main-branch baseline (revalidated 2026-11-23; exact-current-main CI pending)
 
 The following are code-level findings from the current `main` snapshots, not assumptions based on PR descriptions:
 
@@ -170,7 +170,8 @@ The following are code-level findings from the current `main` snapshots, not ass
 
 - The backend already has `Evidence`, `CareEvent`, `CareAssertion`, `EvidenceObservation`, `EvidenceReviewRecord`, `EvidenceClaimAssessment`, and `CareStateRevision`.
 - Structured evidence-observation corrections already use append-only supersession through `supersedes_observation_id` and `correction_rationale`, and validate the source passage against the original evidence.
-- `POST /corrections` already validates target ownership, persists a correction receipt, and invokes the shared `execute_care_continuity_reconciliation` coordinator.
+- `POST /corrections` validates target ownership and now persists an idempotent correction receipt with a per-person unique idempotency key and request fingerprint, processing status/attempt count, processing lease, retry time, error code, and execution-stage JSON. The correction processor commits the receipt before reconciliation, requires the coordinator's explicit `staged_in_caller_transaction` receipt before marking completion, and commits domain changes plus completion state together.
+- `process_pending_corrections_once` and the lifespan-owned `correction_recovery_loop` recover pending receipts and expired processing leases; the explicit person-scoped retry route can override backoff, while an idempotent POST replay respects the persisted retry time. The Timeline correction UI reuses a stable idempotency key, polls status, and exposes retry while processing remains pending.
 - The shared coordinator calls `reconcile_person_change_intelligence` and deliberately leaves transaction ownership with the API caller.
 - Daily Care already has durable extraction jobs and execution-status metadata; extraction completion and current-care projection verification are represented separately in the capture workflow.
 - Follow-ups already use the persisted Open Loops model and expose event history; the UI distinguishes a caregiver update from a verified resolution.
@@ -179,22 +180,20 @@ The following are code-level findings from the current `main` snapshots, not ass
 
 ### Verified gaps requiring implementation and proof
 
-1. **Correction execution status is not durably stored on the correction row.** The current `Correction` model stores target, original/corrected text, reason, caregiver and creation time. The `POST /corrections` handler builds a `care_continuity_execution` object on the returned ORM instance after the correction has been committed. On reconciliation failure it returns `status=pending` and `retry_required=true`, but that execution receipt is not a persisted field on `Correction`. A process restart therefore cannot recover the pending state from that row alone.
-2. **Correction retry/idempotency is incomplete.** The current correction request schema does not establish a stable caller idempotency key, and the route does not expose a durable correction-processing retry contract. A retry after an ambiguous response must not create a second correction or repeat side effects.
-3. **Cross-consumer freshness is not yet proven.** The main audit records that the persisted Delta history is visible in the primary LCR, but the full create/correct/reconcile/restart/retrieve journey across Care Record, Timeline, Follow-ups, Documents, and Companion still needs a PostgreSQL-backed test and deployed verification.
-4. **Screen ownership is not yet fully enforced in UI.** Existing Daily Care, Care Record, Timeline and Follow-ups components have some overlapping summaries/history/attention displays. This is acceptable only for small contextual previews; each full workflow and full history must have one owning screen, with links to that owner.
-5. **The existing mainline must be treated as canonical.** Backend PR #506 is closed without merge. Its branch contains migrations with revision IDs `20261115_01_situation_states` and `20261115_02_repair_caregiver_transfers`; current backend `main` already contains those revision IDs under filenames `20261115_01_situation_trajectory_states.py` and `20261115_02_repair_responsibility_transfer_table.py`. Do not cherry-pick or recreate those migrations. Backend PR #504 is still open and is not part of `main`; its multilingual Companion work must not be treated as implemented unless separately verified on main.
+1. **Correction durability is implemented on current main; end-to-end verification remains pending.** PostgreSQL coverage now exercises durable pending receipts, idempotent submission, retry backoff, explicit retry, expired processing-lease recovery, and cross-person denial. The recovery test stubs the expensive domain/coordinator calls, so it proves the receipt/recovery boundary, not every real downstream side effect. The exact latest-main backend and PostgreSQL workflows must pass before this is marked verified.
+2. **Cross-consumer freshness is not yet proven.** The full create/correct/reconcile/restart/retrieve journey across Care Record, Timeline, Follow-ups, Documents, and Companion still needs PostgreSQL-backed assertions that compare the persisted current-care revision and source lineage after a fresh application session.
+3. **Screen ownership is not yet fully enforced in UI.** Existing Daily Care, Care Record, Timeline and Follow-ups components have some overlapping summaries/history/attention displays. This is acceptable only for small contextual previews; each full workflow and full history must have one owning screen, with links to that owner.
+4. **The existing mainline must be treated as canonical.** Backend PR #506 is closed without merge. Its branch contains migrations with revision IDs `20261115_01_situation_states` and `20261115_02_repair_caregiver_transfers`; current backend `main` already contains those revision IDs under filenames `20261115_01_situation_trajectory_states.py` and `20261115_02_repair_responsibility_transfer_table.py`. Do not cherry-pick or recreate those migrations. Backend PR #504 is still open and is not part of `main`; its multilingual Companion work must not be treated as implemented unless separately verified on main.
 
 ### Immediate implementation priority
 
-The next code change should address correction durability before broad UI rearrangement:
+The next implementation slice is cross-consumer freshness and screen ownership, not a parallel correction subsystem:
 
-- Add persisted processing state to the existing correction record (or prove an existing durable execution ledger can own it).
-- Add a stable idempotency contract for correction submission.
-- Make reconciliation retryable from persisted correction/source IDs without creating duplicate correction history or duplicate derived state.
-- Expose a person-scoped correction status/read endpoint or include durable status in the correction-history response.
-- Add PostgreSQL tests for success, injected reconciliation failure, process/session restart, retry, duplicate submission, and cross-person denial.
-- Only then update all frontend projections to refresh from the durable server revision/status.
+- Run the exact-current-main backend/PostgreSQL workflows, including the correction recovery test, and repair every failing assertion.
+- Add a real-domain PostgreSQL correction recovery test that does not stub `LearningEngine.apply_correction` or the reconciliation coordinator; verify one append-only correction relationship, one replacement assertion where applicable, and no duplicate side effects after an expired processing lease.
+- Verify a correction against a CareEvent and a CareAssertion across a fresh application session: current Care Record projection, Timeline history, linked Follow-ups, and Companion retrieval must all reflect the corrected supported understanding while preserving the original report.
+- Verify the server revision/freshness receipt is consumed by each frontend projection; pending/stale state must never be displayed as a completed update.
+- Enforce the single owning workflow for Daily Care, Timeline, Follow-ups, Documents, and Companion, with contextual previews linking to the owner.
 
-Do not claim this gap is fixed by the documentation commit.
+Correction receipt durability and idempotency are implemented on current main, but they remain **verification pending** until the exact current-main PostgreSQL and browser workflows pass.
 
