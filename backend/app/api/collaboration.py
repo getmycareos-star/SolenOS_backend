@@ -5294,7 +5294,16 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "was retrieved, say that the requested history was not found in the supplied context."
         )
     empty_context_emergency_readiness = payload.workflow == "emergency_readiness" and not context_lines
-    max_predict = 40 if empty_context_emergency_readiness else 96
+    response_length_policy = resolve_workflow_response_length_policy(payload.workflow, payload.text)
+    response_token_budget = min(
+        1024,
+        40 if empty_context_emergency_readiness else response_length_policy.token_budget,
+    )
+    response_length_instruction = (
+        f"Target {response_length_policy.target_words} words; hard maximum {response_length_policy.max_words} words."
+        if response_length_policy.max_words is not None
+        else "Use a situation-dependent length; do not omit material safety information to meet a generic word count."
+    )
     empty_context_output_constraint = (
         " For this empty-context emergency-readiness request, output exactly this one sentence and nothing else: "
         "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.'"
@@ -5307,7 +5316,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
         "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
         "Never expose internal record identifiers, UUIDs, source IDs or opaque keys; refer to records by human-readable titles, dates and statuses. "
-        "Keep the response to 35 words or fewer. Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+        f"RESPONSE LENGTH CONTRACT: {response_length_instruction} Preserve material source distinctions, uncertainty, conflicts and missing-history limits. "
+        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
@@ -5321,7 +5331,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     reply = await asyncio.to_thread(
         qwen_chat,
         [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
-        options={"temperature": 0, "num_predict": max_predict},
+        options={"temperature": 0, "num_predict": response_token_budget},
     )
     internal_source_ids = {
         str(identifier)
@@ -5365,12 +5375,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
-        if _companion_reply_needs_revision(candidate):
-            words = re.findall(r"[a-z0-9]+(?:['’][a-z0-9]+)*", (candidate or "").casefold())
+        if _companion_reply_needs_revision(candidate, response_length_policy.max_words):
+            words = re.findall(r"[^\\W_]+(?:['’][^\\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
             if not words:
                 reasons.append("empty_response")
-            if len(words) > 55:
-                reasons.append(f"word_count_over_55:{len(words)}")
+            if response_length_policy.max_words is not None and count_response_words(candidate) > response_length_policy.max_words:
+                reasons.append(
+                    f"word_count_over_{response_length_policy.max_words}:{count_response_words(candidate)}"
+                )
             if any(words[index] == words[index + 1] == words[index + 2] for index in range(len(words) - 2)):
                 reasons.append("triple_repetition")
             normalized = " ".join(words)
@@ -5397,7 +5409,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 {
                     "role": "system",
                     "content": (
-                        "Revise the draft into a clear, natural, accessible response of 35 words or fewer. "
+                        "Revise the draft into a clear, natural, accessible response. "
+                        + response_length_instruction + " "
                         "Never expose internal record identifiers, UUIDs, source IDs or opaque keys. "
                         "Preserve only claims directly supported by the exact caregiver text or authorized context. "
                         "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
@@ -5428,7 +5441,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     ),
                 },
             ],
-            options={"temperature": 0, "num_predict": 96},
+            options={"temperature": 0, "num_predict": response_token_budget},
         )
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
