@@ -512,8 +512,28 @@ def test_daily_care_acceptance_rolls_back_when_shared_reconciliation_fails(monke
         db.close()
 
 
-def test_daily_care_history_search_finds_paraphrased_sleep_observations():
+def test_daily_care_history_search_finds_paraphrased_sleep_observations(monkeypatch):
     """A sleep query must retrieve reports phrased as waking/being awake."""
+    original_builder = daily_qwen.build_lcr_context
+
+    def include_unsearchable_source(*args, **kwargs):
+        context = original_builder(*args, **kwargs)
+        context["sources"]["legacy_optional"] = {
+            "status": "unsearchable",
+            "items": [],
+            "candidate_count": None,
+            "returned_count": 0,
+            "candidate_scan_complete": False,
+            "has_more": False,
+            "interpretation_limit": "This source cannot be searched for this topic; no absence conclusion is supported.",
+        }
+        context["schema_status"] = "partial"
+        context["history_coverage"] = "partial_source_history"
+        context["retrieval_scan_complete"] = False
+        context["retrieval_projection_complete"] = False
+        return context
+
+    monkeypatch.setattr(daily_qwen, "build_lcr_context", include_unsearchable_source)
     client = TestClient(app)
     session = create_session(client, "Paraphrased history caregiver")
     exact_id = add_event(
@@ -552,6 +572,13 @@ def test_daily_care_history_search_finds_paraphrased_sleep_observations():
     event_coverage = bundle["lcr_context"]["sources"]["events"]
     assert event_coverage["candidate_scan_complete"] is True
     assert event_coverage["candidate_count"] >= 2
+    assert bundle["lcr_context"]["history_coverage"] == "partial_source_history"
+    assert any(
+        item["source_type"] == "legacy_optional"
+        and "cannot be searched for this topic" in item["interpretation_limit"]
+        for item in bundle["lcr_context"]["source_limits"]
+    )
+    assert "cannot be searched for this topic" in bundle["lcr_context"]["sources"]["legacy_optional"]["interpretation_limit"]
 
 
 def test_companion_history_filter_keeps_semantic_paraphrases():
