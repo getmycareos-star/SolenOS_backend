@@ -838,9 +838,16 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         int(match.group(1))
         for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
     })
-    total_pages = max(observed_pages, default=1)
+    is_paginated_pdf = (upload.mime_type or "").casefold() == "application/pdf"
+    # A PDF is one paginated source, so gaps between page markers are missing
+    # pages. A standalone scan/photo may retain its original page label (for
+    # example page 3 of a packet) without containing pages 1 and 2 itself.
+    total_pages = max(observed_pages, default=1) if is_paginated_pdf else max(len(observed_pages), 1)
     unreadable_pages = _unreadable_page_numbers(source_text)
-    missing_page_numbers = sorted(set(range(1, total_pages + 1)) - set(observed_pages))
+    missing_page_numbers = (
+        sorted(set(range(1, total_pages + 1)) - set(observed_pages))
+        if is_paginated_pdf else []
+    )
     unprocessed_pages = sorted(set(_unprocessed_page_numbers(source_text)) | set(missing_page_numbers))
     processed_pages = sorted(set(observed_pages) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
