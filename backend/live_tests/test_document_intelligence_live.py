@@ -147,7 +147,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": reject_index, "decision": "reject", "expected_source_quote": candidates[reject_index]["source_quote"], "expected_subject": candidates[reject_index]["subject"], "expected_observation": candidates[reject_index]["observation"]},
+            json={"candidate_index": reject_index, "decision": "reject", "expected_source_quote": candidates[reject_index]["source_quote"], "expected_subject": candidates[reject_index]["subject"], "expected_observation": candidates[reject_index]["observation"], "expected_review_status": candidates[reject_index]["review_status"]},
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
@@ -161,7 +161,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": mobility_index, "decision": "accept", "expected_source_quote": candidates[mobility_index]["source_quote"], "expected_subject": candidates[mobility_index]["subject"], "expected_observation": candidates[mobility_index]["observation"]},
+            json={"candidate_index": mobility_index, "decision": "accept", "expected_source_quote": candidates[mobility_index]["source_quote"], "expected_subject": candidates[mobility_index]["subject"], "expected_observation": candidates[mobility_index]["observation"], "expected_review_status": candidates[mobility_index]["review_status"]},
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -189,7 +189,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         historical_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": historical_index, "decision": "accept", "expected_source_quote": candidates[historical_index]["source_quote"], "expected_subject": candidates[historical_index]["subject"], "expected_observation": candidates[historical_index]["observation"]},
+            json={"candidate_index": historical_index, "decision": "accept", "expected_source_quote": candidates[historical_index]["source_quote"], "expected_subject": candidates[historical_index]["subject"], "expected_observation": candidates[historical_index]["observation"], "expected_review_status": candidates[historical_index]["review_status"]},
         )
         assert historical_review.status_code == 200, historical_review.text
         assert historical_review.json()["written_to_lcr"] is True
@@ -206,7 +206,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         tentative_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": tentative_index, "decision": "accept", "expected_source_quote": candidates[tentative_index]["source_quote"], "expected_subject": candidates[tentative_index]["subject"], "expected_observation": candidates[tentative_index]["observation"]},
+            json={"candidate_index": tentative_index, "decision": "accept", "expected_source_quote": candidates[tentative_index]["source_quote"], "expected_subject": candidates[tentative_index]["subject"], "expected_observation": candidates[tentative_index]["observation"], "expected_review_status": candidates[tentative_index]["review_status"]},
         )
         assert tentative_review.status_code == 200, tentative_review.text
         assert tentative_review.json()["written_to_lcr"] is True
@@ -223,7 +223,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         denial_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=headers,
-            json={"candidate_index": denial_index, "decision": "accept", "expected_source_quote": candidates[denial_index]["source_quote"], "expected_subject": candidates[denial_index]["subject"], "expected_observation": candidates[denial_index]["observation"]},
+            json={"candidate_index": denial_index, "decision": "accept", "expected_source_quote": candidates[denial_index]["source_quote"], "expected_subject": candidates[denial_index]["subject"], "expected_observation": candidates[denial_index]["observation"], "expected_review_status": candidates[denial_index]["review_status"]},
         )
         assert denial_review.status_code == 200, denial_review.text
         assert denial_review.json()["written_to_lcr"] is True
@@ -293,7 +293,7 @@ def test_live_qwen_document_understanding_is_verbatim_review_gated_and_persisted
         duplicate_review = client.post(
             f"/api/v1/documents/intelligence/{duplicate_analysis_id}/review",
             headers=headers,
-            json={"candidate_index": duplicate_mobility_index, "decision": "accept", "expected_source_quote": duplicate_candidates[duplicate_mobility_index]["source_quote"], "expected_subject": duplicate_candidates[duplicate_mobility_index]["subject"], "expected_observation": duplicate_candidates[duplicate_mobility_index]["observation"]},
+            json={"candidate_index": duplicate_mobility_index, "decision": "accept", "expected_source_quote": duplicate_candidates[duplicate_mobility_index]["source_quote"], "expected_subject": duplicate_candidates[duplicate_mobility_index]["subject"], "expected_observation": duplicate_candidates[duplicate_mobility_index]["observation"], "expected_review_status": duplicate_candidates[duplicate_mobility_index]["review_status"]},
         )
         assert duplicate_review.status_code == 200, duplicate_review.text
         assert duplicate_review.json()["source_record_ref"]["record_id"] == assertion_id
