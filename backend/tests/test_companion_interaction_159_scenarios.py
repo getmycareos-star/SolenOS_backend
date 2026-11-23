@@ -253,7 +253,10 @@ def test_companion_interaction_scenario_has_expected_deterministic_boundary(
             assert "conversation responses do not write care facts" not in guidance
     elif expected == "privacy_boundary":
         assert not is_critical_safety_message(message), case_id
-        assert "conversation responses do not write care facts" not in guidance
+        if "correcting" in message.casefold():
+            assert "CORRECTION HANDLING" in guidance, {case_id: guidance}
+        else:
+            assert "conversation responses do not write care facts" not in guidance
 
 
 def test_companion_interaction_corpus_has_exact_minimum_distribution():
