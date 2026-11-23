@@ -2436,6 +2436,26 @@ def test_grief_self_blame_and_positive_moments_have_distinct_response_guidance()
     )
 
 
+def test_caregiver_guilt_and_gratitude_are_recognized_without_crisis_reframing():
+    for message in (
+        "I feel guilty that I didn't visit yesterday.",
+        "I blame myself for losing my temper.",
+        "I should have been there for her.",
+        "I feel like I failed him.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "SELF-BLAME RESPONSE" in guidance, message
+
+    for message in (
+        "I'm grateful we had a calm afternoon.",
+        "I feel thankful for the help today.",
+        "I'm glad we got through today.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "POSITIVE MOMENT RESPONSE" in guidance, message
+        assert "Do not reframe it as a crisis" in guidance
+
+
 def test_caregiver_interaction_guidance_prioritizes_frustration_repair_over_defense():
     guidance = collaboration._caregiver_interaction_guidance(
         "You keep asking me the same questions. I've already told you this."
