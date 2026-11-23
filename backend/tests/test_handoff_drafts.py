@@ -2353,3 +2353,48 @@ def test_handoff_draft_snapshot_reads_require_document_permission(client):
 
     # Drafts contain document-derived snapshots; manage_handoffs is insufficient.
     assert test_client.get("/api/v1/handoff-drafts", headers=headers).status_code == 403
+
+
+
+def test_qwen_handoff_repairs_total_summary_word_count_and_revalidates(monkeypatch):
+    import json
+    import app.api.handoff_drafts as handoff_drafts
+
+    monkeypatch.setattr(handoff_drafts, "get_ollama_config", lambda: ("http://ollama", "qwen-test", 30))
+    calls = []
+
+    def capture(messages, **kwargs):
+        calls.append((messages, kwargs))
+        summary = (
+            "The caregiver reported a quiet morning with no other detail."
+            if len(calls) == 2
+            else "supported detail " * 260
+        )
+        return json.dumps({"items": [{
+            "section": "Recent observations and changes",
+            "source_ref": "care_events:quiet-morning",
+            "summary": summary,
+            "supporting_quote": "Caregiver reported a quiet morning.",
+        }]})
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", capture)
+    result = handoff_drafts._generate_grounded_handoff(
+        [{
+            "source_table": "care_events",
+            "source_id": "quiet-morning",
+            "source_type": "care_event",
+            "epistemic_status": "caregiver_reported",
+            "record_status": "recorded",
+            "event_at": None,
+            "recorded_at": None,
+            "text": "Caregiver reported a quiet morning.",
+        }],
+        "family_transition",
+        "family",
+    )
+
+    assert result["status"] == "generated"
+    assert len(calls) == 2
+    assert "total word count" in calls[1][0][-1]["content"].lower()
+    assert "Preserve every supported distinction" in calls[1][0][-1]["content"]
+    assert result["sections"][0]["summary"] == "The caregiver reported a quiet morning with no other detail."
