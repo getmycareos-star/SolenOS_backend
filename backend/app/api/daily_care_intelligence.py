@@ -32,6 +32,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context, _expanded_search_terms
+from app.services.response_length_policy import resolve_response_length_policy, response_exceeds_hard_maximum
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 logger = logging.getLogger(__name__)
