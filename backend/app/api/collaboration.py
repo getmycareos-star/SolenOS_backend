@@ -6444,11 +6444,11 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"why do i have to repeat|i said this already|you forgot|"
         r"this is ridiculous|you are not listening|this is useless|"
         r"you(?:'re| are) (?:useless|stupid)|you keep getting this wrong|"
-        r"this keeps failing|i(?:'m| am) (?:furious|frustrated|fed up))\b",
+        r"this keeps failing|i(?:'m| am) (?:really |very |so )?(?:furious|frustrated|fed up)|i feel (?:really |very |so )?(?:furious|frustrated|fed up))\b",
         text,
     )
     overload = re.search(
-        r"\b(?:i(?:'m| am) overwhelmed|i(?:'m| am) exhausted|"
+        r"\b(?:i(?:'m| am) (?:really |very |so )?overwhelmed|i(?:'m| am) (?:really |very |so )?exhausted|i feel (?:really |very |so )?(?:overwhelmed|exhausted|burnt out|burned out)|"
         r"i(?:'m| am) so tired|i can't keep up|i cannot keep up|"
         r"i (?:really )?(?:don't|do not) even know what i'm supposed to do anymore|"
         r"i don't know what to do anymore|everything is too much|"
@@ -6458,11 +6458,11 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
     distress = re.search(
-        r"\b(?:i(?:'m| am) angry|i(?:'m| am) upset|"
+        r"\b(?:i(?:'m| am) (?:really |very |so )?(?:angry|upset)|i feel (?:really |very |so )?(?:angry|upset)|"
         r"i just want a break|i've had enough|i have had enough|"
         r"i can't take this|i cannot take this|i feel hopeless|"
-        r"i(?:'m| am) (?:sad|lonely|scared|frightened|afraid|anxious|grieving)|"
-        r"i feel (?:sad|alone|lonely|scared|frightened|afraid|anxious|helpless)|"
+        r"i(?:'m| am) (?:really |very |so )?(?:sad|lonely|scared|frightened|afraid|anxious|grieving)|"
+        r"i feel (?:really |very |so )?(?:sad|alone|lonely|scared|frightened|afraid|anxious|helpless)|"
         r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying)\b",
         text,
     )
