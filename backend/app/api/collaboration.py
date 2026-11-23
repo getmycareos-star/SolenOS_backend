@@ -5302,7 +5302,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     response_length_policy = resolve_workflow_response_length_policy(payload.workflow, payload.text)
     response_token_budget = min(
         1024,
-        40 if empty_context_emergency_readiness else response_length_policy.token_budget,
+        64 if empty_context_emergency_readiness else response_length_policy.token_budget,
     )
     response_length_instruction = (
         f"Target {response_length_policy.target_words} words; hard maximum {response_length_policy.max_words} words."
