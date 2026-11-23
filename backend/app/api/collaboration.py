@@ -6903,13 +6903,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ) from exc
 
     lowered = user_text.casefold()
-    emergency_pattern = re.compile(
-        r"\b(?:not breathing|cannot breathe|can't breathe|unconscious|unresponsive|"
-        r"severe bleeding|chest pain with difficulty breathing|stroke symptoms|"
-        r"overdose|suicidal|trying to kill myself|immediate danger)\b",
-        re.IGNORECASE,
-    )
-    emergency = bool(emergency_pattern.search(user_text))
+    # Use the shared safety classifier rather than a narrower route-local list.
+    # Otherwise indirect but already-recognized emergencies (for example face
+    # drooping, sudden weakness, choking, collapse, or blue lips) can fall
+    # through to ordinary model inference instead of the immediate safety path.
+    emergency = is_critical_safety_message(user_text)
     # Do not run a second inference as a preflight. The actual Companion
     # inference below is authoritative and already executes in a worker thread.
     # A short readiness probe here duplicated model work, could reject slow but
