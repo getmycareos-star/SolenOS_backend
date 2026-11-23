@@ -47,7 +47,7 @@ _EMOTIONAL = re.compile(
     r"i(?:'m| am) (?:really |very |so )?(?:sad|angry|upset|lonely|anxious|grieving|frustrated|furious)|"
     r"i feel (?:really |very |so )?(?:sad|angry|upset|alone|lonely|scared|afraid|anxious|helpless|frustrated|furious)|"
     r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying|"
-    r"i've had enough|i have had enough|i can't take this|i cannot take this)\b",
+    r"i just want a break|i've had enough|i have had enough|i can't take this|i cannot take this)\b",
     re.I,
 )
 _CRITICAL = re.compile(
