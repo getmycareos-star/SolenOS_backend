@@ -1038,3 +1038,43 @@ def test_document_extraction_metadata_does_not_trust_stale_pdf_manifest():
     )
 
     assert metadata["unprocessed_page_numbers"] == [2]
+
+
+def test_unfiltered_full_history_uses_exact_count_and_ordered_page():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc)
+    with engine.begin() as connection:
+        connection.execute(events.insert(), [
+            {
+                "id": f"event-{index:03d}",
+                "person_id": "person-a",
+                "event_type": "daily_capture",
+                "status": "recorded",
+                "occurred_at": now - timedelta(minutes=index),
+                "recorded_at": now - timedelta(minutes=index),
+                "created_at": now - timedelta(minutes=index),
+                "title": f"Care update {index}",
+                "description": f"Saved care update {index}",
+                "evidence_ids": "[]",
+            }
+            for index in range(260)
+        ])
+
+    with Session(engine) as db:
+        context = build_lcr_context(
+            db,
+            "person-a",
+            limit_per_source=10,
+            include_all_history=True,
+        )
+
+    source = context["sources"]["events"]
+    assert source["candidate_count"] == 260
+    assert source["candidate_scan_complete"] is True
+    assert source["returned_count"] == 10
+    assert source["has_more"] is True
+    assert source["selection"] == "full_history_exact_count_ordered_page"
+    assert context["retrieval_strategy"] == "person_scoped_exact_count_ordered_history"
+    assert source["items"][0]["id"] == "event-000"
