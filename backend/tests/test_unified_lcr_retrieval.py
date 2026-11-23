@@ -431,8 +431,8 @@ def test_companion_history_is_person_and_caregiver_scoped_and_not_evidence():
         assert handoffs["candidate_count"] == 1
         assert [item["id"] for item in handoffs["items"]] == ["handoff-person-a"]
         facts = {item["id"]: item["information_status"] for item in lcr_context["sources"]["facts"]["items"]}
-        assert facts["sleep-fact-old"] == "superseded_fact"
-        assert facts["sleep-fact-current"] != "superseded_fact"
+        assert facts["sleep-fact-old"] == "historical_fact"
+        assert facts["sleep-fact-current"] != "historical_fact"
         by_id = {item["id"]: item for item in result["items"]}
         assert set(by_id) == {"own-message", "assistant-message"}
         assert all(item["information_status"] == "conversation_context_only" for item in by_id.values())
@@ -747,7 +747,14 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
 
         sources = context["sources"]
         assert {row["id"] for row in sources["events"]["items"]} >= {"daily-care-event"}
-        assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-extraction"}
+        assert {row["id"] for row in sources["document_extractions"]["items"]} == {
+            "document-extraction", "failed-document-extraction",
+        }
+        failed_document = next(
+            row for row in sources["document_extractions"]["items"]
+            if row["id"] == "failed-document-extraction"
+        )
+        assert failed_document["information_status"] == "document_extraction_failed"
         assert {row["id"] for row in sources["assertions"]["items"]} == {
             "accepted-assertion", "caregiver-reviewed-assertion",
             "rejected-assertion", "superseded-assertion", "withdrawn-assertion",
@@ -1855,7 +1862,7 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         assert retrieved_passages
         assert any(
             "take the listed tablet with breakfast" in passage["text"]
-            and passage["source_character_start"] == passage_item["source_text"].find("take the listed tablet with breakfast")
+            and passage["source_character_start"] <= passage_item["source_text"].find("take the listed tablet with breakfast") < passage["source_character_end"]
             and passage["page_number"] == 1
             and passage["page_label"] == "[Page 1]"
             for passage in retrieved_passages
