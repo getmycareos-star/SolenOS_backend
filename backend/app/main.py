@@ -1647,11 +1647,11 @@ async def generate_lcr_orientation(
         sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()])
         word_count = len(candidate.split())
         max_words = response_length_policy.max_words
-        max_sentences = 2 if is_greeting else (8 if max_words is None or max_words > 180 else 5 if max_words > 60 else 3)
-        max_chars = 4000 if max_words is None else max(700, max_words * 16)
+        max_sentences = None if max_words is None else (2 if is_greeting else (8 if max_words > 180 else 5 if max_words > 60 else 3))
+        max_chars = None if max_words is None else max(700, max_words * 16)
         if (
-            not candidate or len(candidate) > max_chars or (max_words is not None and word_count > max_words)
-            or sentence_count > max_sentences
+            not candidate or (max_chars is not None and len(candidate) > max_chars) or (max_words is not None and word_count > max_words)
+            or (max_sentences is not None and sentence_count > max_sentences)
             or (is_greeting and word_count < 8)
             or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
         ):
