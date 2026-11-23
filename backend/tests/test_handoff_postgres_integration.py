@@ -74,6 +74,7 @@ def _accept_consent(client, person_id, caregiver_id, access_token):
 def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(monkeypatch):
     import app.api.handoff_drafts as handoff_drafts
     from app.models.care import CareEvent, Evidence
+    from app.models.care_continuity import CareAssertion
     from app.models.capture_analysis import CaptureAnalysis
     from app.models.collaboration import EvidenceUpload
     from app.models.privacy_delivery import (
@@ -426,6 +427,12 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert shared_snapshot["partial_sources"] == []
     assert len(shared_snapshot["source_references"]) == 2
 
+    db = SessionLocal()
+    try:
+        assertions_before_ack = db.query(CareAssertion).filter_by(person_id=owner["person"]["id"]).count()
+    finally:
+        db.close()
+
     accepted = client.post(f"/api/v1/handoffs/{handoff_id}/accept", headers=recipient_headers)
     assert accepted.status_code == 200, accepted.text
     acknowledged = client.post(
@@ -435,6 +442,20 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     )
     assert acknowledged.status_code == 200, acknowledged.text
     assert acknowledged.json()["acknowledged"] is True
+    acknowledged_again = client.post(
+        f"/api/v1/handoffs/{handoff_id}/acknowledge",
+        headers=recipient_headers,
+        json={"acknowledgement": "Received the handoff."},
+    )
+    assert acknowledged_again.status_code == 200, acknowledged_again.text
+    assert acknowledged_again.json()["acknowledged"] is True
+    db = SessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=owner["person"]["id"]).count() == assertions_before_ack, (
+            "handoff acknowledgement must not alter the authoritative LCR"
+        )
+    finally:
+        db.close()
 
     revoked = client.post(f"/api/v1/handoffs/{handoff_id}/revoke", headers=owner_headers)
     assert revoked.status_code == 200, revoked.text
