@@ -2311,6 +2311,22 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
+def test_self_harm_emergency_response_directs_to_immediate_human_support():
+    reply, note = collaboration._emergency_response_for_message(
+        "I don't want to live anymore."
+    )
+    assert "911" in reply
+    assert "988" in reply
+    assert "nearest emergency department" in reply
+    assert "trusted person" in reply
+    assert "human support is needed now" in note
+
+    ordinary_emergency, _ = collaboration._emergency_response_for_message(
+        "Mum is unresponsive and not breathing."
+    )
+    assert "local emergency services" in ordinary_emergency
+
+
 def test_companion_prompt_keeps_interaction_dimensions_independent():
     contract = collaboration.COMPANION_INTERACTION_INTERPRETATION_CONTRACT
     for dimension in (
