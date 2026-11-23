@@ -343,55 +343,82 @@ def database_schema_differences(bind=None):
                 + "; ".join(", ".join(columns) for columns in sorted(missing_unique_constraints))
             )
 
+        def strip_outer_predicate_parentheses(value):
+            value = value.strip()
+            while value.startswith("(") and value.endswith(")"):
+                depth = 0
+                in_string = False
+                encloses_all = True
+                position = 0
+                while position < len(value):
+                    character = value[position]
+                    if character == "'":
+                        if in_string and position + 1 < len(value) and value[position + 1] == "'":
+                            position += 2
+                            continue
+                        in_string = not in_string
+                    elif not in_string and character == "(":
+                        depth += 1
+                    elif not in_string and character == ")":
+                        depth -= 1
+                        if depth == 0 and position != len(value) - 1:
+                            encloses_all = False
+                            break
+                    position += 1
+                if not encloses_all or depth != 0 or in_string:
+                    break
+                value = value[1:-1].strip()
+            return value
+
+        def split_top_level_and(value):
+            clauses = []
+            depth = 0
+            in_string = False
+            start_position = 0
+            position = 0
+            while position < len(value):
+                character = value[position]
+                if character == "'":
+                    if in_string and position + 1 < len(value) and value[position + 1] == "'":
+                        position += 2
+                        continue
+                    in_string = not in_string
+                elif not in_string and character == "(":
+                    depth += 1
+                elif not in_string and character == ")":
+                    depth -= 1
+                elif not in_string and depth == 0 and value[position:position + 5] == " and ":
+                    clauses.append(value[start_position:position].strip())
+                    position += 5
+                    start_position = position
+                    continue
+                position += 1
+            clauses.append(value[start_position:].strip())
+            return [clause for clause in clauses if clause]
+
         def normalize_index_predicate(value):
             if value is None:
                 return None
-            normalized = " ".join(str(value).strip().split())
-            # PostgreSQL's pg_get_expr() adds casts and rewrites IN lists as
-            # = ANY (ARRAY[...]). Those are equivalent to the ORM predicate
-            # for these string columns, so normalize them before comparison.
-            normalized = re.sub(
-                r"::(?:character varying|varchar|text)(?:\[\])?",
+            expression = " ".join(str(value).strip().split()).casefold().replace('"', "")
+            expression = re.sub(
+                r"::(?:character varying|double precision|timestamp with time zone|timestamp without time zone|[a-z_][a-z0-9_]*)(?:\[\])?",
                 "",
-                normalized,
-                flags=re.IGNORECASE,
+                expression,
             )
-            normalized = re.sub(
-                r"(\b[a-z_][a-z0-9_\.]*\b)\s*=\s*ANY\s*\(\s*\(*\s*ARRAY\s*\[(.*?)\]\s*\)*\s*\)",
-                r"\1 IN (\2)",
-                normalized,
-                flags=re.IGNORECASE,
-            )
-            normalized = re.sub(
-                r"\(\s*([a-z_][a-z0-9_\.]*)\s*(=\s*[^()]+|IS\s+NOT\s+NULL)\s*\)",
-                r"\1 \2",
-                normalized,
-                flags=re.IGNORECASE,
-            )
-            normalized = re.sub(
-                r"\(\s*([a-z_][a-z0-9_\.]*\s+IN\s*\([^()]*\))\s*\)",
-                r"\1",
-                normalized,
-                flags=re.IGNORECASE,
-            )
-            normalized = " ".join(normalized.split())
-            # PostgreSQL may wrap pg_get_expr() output in one or more
-            # redundant outer parentheses. Remove only fully enclosing pairs.
-            while normalized.startswith("(") and normalized.endswith(")"):
-                depth = 0
-                encloses_all = True
-                for position, character in enumerate(normalized):
-                    if character == "(":
-                        depth += 1
-                    elif character == ")":
-                        depth -= 1
-                        if depth == 0 and position != len(normalized) - 1:
-                            encloses_all = False
-                            break
-                if not encloses_all or depth != 0:
-                    break
-                normalized = normalized[1:-1].strip()
-            return normalized or None
+            expression = strip_outer_predicate_parentheses(expression)
+            clauses = []
+            for clause in split_top_level_and(expression):
+                clause = strip_outer_predicate_parentheses(clause)
+                clause = re.sub(
+                    r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*\)",
+                    lambda match: "IN (" + match.group(1) + ")",
+                    clause,
+                )
+                clause = re.sub(r"\(\s*([a-z_][a-z0-9_]*)\s*\)", r"\1", clause)
+                clause = re.sub(r"\s*=\s*", " = ", clause)
+                clause = re.sub(r"\s*,\s*", ", ", clause)
+                clauses.append(" ".join(clause.split()))
+            return " AND ".join(sorted(clauses)) or None
 
         def expected_index_predicate(index):
             dialect_options = index.dialect_options.get(target.dialect.name, {})
