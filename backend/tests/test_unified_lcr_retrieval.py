@@ -2245,3 +2245,25 @@ def test_postgres_query_coverage_is_incomplete_when_a_present_source_is_unsearch
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
 
+def test_medication_lexical_expansion_retrieves_common_caregiver_paraphrases():
+    cases = [
+        ("meds", "The caregiver recorded the evening medication dose."),
+        ("prescription", "The family reviewed the evening medication schedule."),
+        ("prescribed", "The note says the person takes the evening medicine."),
+    ]
+    unrelated = {
+        "title": "Clinic transport",
+        "description": "The caregiver recorded the trip to the clinic.",
+    }
+
+    for query_term, matching_record in cases:
+        direct = [query_term]
+        expanded = _expanded_search_terms(direct)
+        assert "medication" in expanded or "medicine" in expanded
+        assert _retrieval_score(
+            {"title": "Care update", "description": matching_record["description"]},
+            query_term,
+            direct,
+            expanded,
+        ) > _retrieval_score(unrelated, query_term, direct, expanded)
+
