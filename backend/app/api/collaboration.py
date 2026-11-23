@@ -4825,8 +4825,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     }
     anchored_event = None
     if payload.source_event_id:
-        if payload.workflow not in event_workflows:
-            raise HTTPException(status_code=422, detail="A saved care event can only be used with a care-record workflow.")
+        if payload.workflow != "living_care_record":
+            raise HTTPException(status_code=422, detail="A saved care event reference can only be used for Living Care Record interpretation.")
         anchored_event = db.query(CareEvent).filter(
             CareEvent.id == payload.source_event_id,
             CareEvent.person_id == person_id,
