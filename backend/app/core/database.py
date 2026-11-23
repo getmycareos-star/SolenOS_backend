@@ -316,7 +316,7 @@ def database_schema_differences(bind=None):
         def normalize_index_predicate(value):
             if value is None:
                 return None
-            normalized = " ".join(str(value).strip().lower().split())
+            normalized = " ".join(str(value).strip().split())
             # PostgreSQL may wrap pg_get_expr() output in one or more
             # redundant outer parentheses. Remove only fully enclosing pairs.
             while normalized.startswith("(") and normalized.endswith(")"):
