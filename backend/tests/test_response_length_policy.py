@@ -174,3 +174,24 @@ def test_historical_diagnosis_mentions_do_not_disable_ordinary_length_contracts(
     ):
         assert not is_critical_safety_message(message), message
         assert resolve_response_length_policy(message).max_words is not None
+
+
+
+def test_every_response_intent_has_a_bounded_generation_budget():
+    cases = (
+        ("Hello", "new", None, 112),
+        ("Hello", "returning", None, 160),
+        ("Thanks", None, None, 48),
+        ("When was the last visit?", None, None, 192),
+        ("Please explain what changed.", None, None, 448),
+        ("Please show the full care history and timeline.", None, None, 768),
+        ("Has her sleep worsened over time?", None, None, 640),
+        ("What does this document mean?", None, None, 512),
+        ("Prepare an appointment briefing.", None, None, 768),
+        ("Prepare a care handoff.", None, None, 768),
+        ("I'm exhausted and overwhelmed.", None, None, 192),
+        ("Mum is not breathing.", None, None, 1024),
+    )
+    for message, stage, hint, expected_budget in cases:
+        policy = resolve_response_length_policy(message, caregiver_stage=stage, intent_hint=hint)
+        assert policy.token_budget == expected_budget, message
