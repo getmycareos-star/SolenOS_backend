@@ -1188,21 +1188,22 @@ def _refresh_qwen_job_lease_once(
         with lock:
             if lease_state.get("lost") or lease_state.get("locked_at") != expected_locked_at:
                 return False
-            refreshed_at = now or datetime.now(timezone.utc)
-            updated = lease_db.query(QwenBackgroundJob).filter(
-                QwenBackgroundJob.id == job_id,
-                QwenBackgroundJob.person_id == person_id,
-                QwenBackgroundJob.caregiver_id == caregiver_id,
-                QwenBackgroundJob.status == "processing",
-                QwenBackgroundJob.locked_at == expected_locked_at,
-            ).update(
-                {QwenBackgroundJob.locked_at: refreshed_at},
-                synchronize_session=False,
-            )
-            lease_db.commit()
-            if updated == 1:
-                # Publish only after commit, while holding the same lock used by
-                # processing code before it validates lease ownership.
+        refreshed_at = now or datetime.now(timezone.utc)
+        updated = lease_db.query(QwenBackgroundJob).filter(
+            QwenBackgroundJob.id == job_id,
+            QwenBackgroundJob.person_id == person_id,
+            QwenBackgroundJob.caregiver_id == caregiver_id,
+            QwenBackgroundJob.status == "processing",
+            QwenBackgroundJob.locked_at == expected_locked_at,
+        ).update(
+            {QwenBackgroundJob.locked_at: refreshed_at},
+            synchronize_session=False,
+        )
+        lease_db.commit()
+        with lock:
+            if updated == 1 and not lease_state.get("lost") and lease_state.get("locked_at") == expected_locked_at:
+                # Publish after commit. Do not hold the state lock while waiting
+                # on PostgreSQL: processing transactions may lock this same row.
                 lease_state["locked_at"] = refreshed_at
                 return True
             lease_state["lost"] = True
