@@ -1532,7 +1532,13 @@ def main():
             "POST",
             f"/api/v1/capture/analyses/{daily_analysis_id}/review",
             token=token_a,
-            body={"candidate_index": 0, "decision": "accept"},
+            body={
+                "candidate_index": 0,
+                "decision": "accept",
+                "expected_source_quote": daily_capture_payload["notes"],
+                "expected_subject": "sleep",
+                "expected_observation": "Generated suggestion: interrupted sleep.",
+            },
         )
         require(status == 409, f"Repeated acceptance must not create a duplicate assertion: {status}: {repeated_acceptance}")
 
