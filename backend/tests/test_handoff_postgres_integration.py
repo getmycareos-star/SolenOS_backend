@@ -189,6 +189,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 candidates={
                     "kind": "document_extraction_v1",
                     "binary_sha256": document_sha,
+                    "source_text_sha256": document_sha,
                     "extraction_method": "server_utf8_text",
                 },
                 review_history=[],
@@ -203,6 +204,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 candidates={
                     "kind": "document_extraction_v1",
                     "binary_sha256": shared_document_sha,
+                    "source_text_sha256": shared_document_sha,
                     "extraction_method": "server_utf8_text",
                 },
                 review_history=[],
