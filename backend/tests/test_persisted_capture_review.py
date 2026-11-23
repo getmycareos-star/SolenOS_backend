@@ -563,7 +563,13 @@ def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(mon
     invalid_index = client.post(
         f"/api/v1/capture/analyses/{analysis_id}/review",
         headers={"Authorization": f"Bearer {first['access_token']}"},
-        json={"candidate_index": 4, "decision": "accept"},
+        json={
+            "candidate_index": 4,
+            "decision": "accept",
+            "expected_source_quote": "Caregiver report about sleep.",
+            "expected_subject": "sleep",
+            "expected_observation": "Caregiver report about sleep.",
+        },
     )
     assert invalid_index.status_code == 404, invalid_index.text
 
