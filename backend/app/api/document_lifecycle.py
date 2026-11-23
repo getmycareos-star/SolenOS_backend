@@ -815,7 +815,9 @@ def _response(analysis: CaptureAnalysis) -> dict:
         | missing_page_numbers
     )
     unreadable_pages = _unreadable_page_numbers(page_text)
-    processed_pages = sorted(observed_pages - set(unprocessed_pages) - set(unreadable_pages))
+    # OCR may have processed a page even when it could not read its contents.
+    # Keep attempted-page coverage separate from readability status.
+    processed_pages = sorted(observed_pages - set(unprocessed_pages))
     extraction_complete = (
         analysis.extraction_status == "available"
         and not unprocessed_pages
@@ -856,7 +858,10 @@ def _response(analysis: CaptureAnalysis) -> dict:
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
-        "written_to_lcr": extraction_complete and any(
+        # Accepted observations from an earlier complete extraction remain
+        # in the LCR even when a later OCR retry is partial. This flag reports
+        # persisted history, not whether the current extraction can be reviewed.
+        "written_to_lcr": any(
             isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
             for item in stored_observations
         ),
