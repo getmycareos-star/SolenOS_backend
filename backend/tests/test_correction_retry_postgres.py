@@ -449,3 +449,128 @@ def test_postgres_correction_recovery_loop_reclaims_pending_and_expired_processi
             # and violating the append-only history foreign key.
             db.commit()
         engine.dispose()
+
+
+
+def test_postgres_real_care_event_correction_recovery_preserves_one_append_only_link():
+    """Exercise the real correction domain and reconciliation path on PostgreSQL."""
+    from app.models.care_continuity import CareRecordRelationship
+
+    database_url = os.environ["DATABASE_URL"]
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    suffix = uuid.uuid4().hex[:8]
+    person_id = f"realcorr-person-{suffix}"
+    caregiver_id = f"realcorr-caregiver-{suffix}"
+    event_id = f"realcorr-event-{suffix}"
+    raw_token = f"real-correction-token-{uuid.uuid4().hex}"
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    original_text = "Caregiver reports that Mum seemed unusually tired this afternoon."
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Real correction integration person"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Real correction caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(CaregiverAccessGrant(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                role="family",
+                access_scope="full_record",
+                status="active",
+                permissions=["view_lcr", "add_evidence", "correct_records"],
+            ))
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="caregiver_report",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc),
+                title="Afternoon tiredness report",
+                description=original_text,
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.add(AnonymousSession(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                token_hash=token_hash,
+                expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            ))
+            db.commit()
+
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {raw_token}"}
+        payload = {
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "target_type": "care_event",
+            "target_id": event_id,
+            "original_text": original_text,
+            "corrected_text": "Caregiver clarifies that tiredness was only a possibility and was not confirmed.",
+            "reason": "The first description overstated what the caregiver observed.",
+            "idempotency_key": f"real-correction-{suffix}",
+        }
+
+        response = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["processing_status"] == "completed", body
+        correction_id = body["id"]
+
+        # A fresh database session proves that the source was retained and the
+        # correction relationship was committed with the completed receipt.
+        with Session() as db:
+            original = db.query(CareEvent).filter(
+                CareEvent.id == event_id,
+                CareEvent.person_id == person_id,
+            ).one()
+            assert original.description == original_text
+            links = db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id,
+                CareRecordRelationship.source_type == "correction",
+                CareRecordRelationship.source_id == correction_id,
+                CareRecordRelationship.relationship_type == "corrects",
+                CareRecordRelationship.target_type == "care_event",
+                CareRecordRelationship.target_id == event_id,
+            ).all()
+            assert len(links) == 1
+            receipt = db.query(Correction).filter(
+                Correction.id == correction_id,
+                Correction.person_id == person_id,
+            ).one()
+            assert receipt.processing_status == "completed"
+            assert receipt.processing_attempts == 1
+
+        # An identical replay must not repeat domain effects or create another
+        # correction receipt / relationship.
+        replay = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == correction_id
+        assert replay.json()["processing_attempts"] == 1
+        with Session() as db:
+            assert db.query(Correction).filter(
+                Correction.person_id == person_id,
+                Correction.idempotency_key == payload["idempotency_key"],
+            ).count() == 1
+            assert db.query(CareRecordRelationship).filter(
+                CareRecordRelationship.person_id == person_id,
+                CareRecordRelationship.source_type == "correction",
+                CareRecordRelationship.source_id == correction_id,
+                CareRecordRelationship.relationship_type == "corrects",
+                CareRecordRelationship.target_type == "care_event",
+                CareRecordRelationship.target_id == event_id,
+            ).count() == 1
+    finally:
+        # Care-state revisions are append-only and may reference this person;
+        # retain the uniquely scoped parent rows rather than deleting history.
+        engine.dispose()
