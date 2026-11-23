@@ -1004,7 +1004,27 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 db.rollback()
                 raise HTTPException(status_code=409, detail="The document extraction changed while retrying")
             if dict(current_row.candidates) != metadata or current_row.source_text != (row.source_text or ""):
-                db.rollback()
+                # A newer retry may have committed a replacement analysis when
+                # the previous analysis already carried intelligence or review
+                # history. Returning the superseded row would make the stale
+                # request appear current even though it correctly avoided a write.
+                current_metadata = (
+                    dict(current_row.candidates)
+                    if isinstance(current_row.candidates, dict) else {}
+                )
+                replacement_id = current_metadata.get("superseded_by_analysis_id")
+                if replacement_id:
+                    replacement = db.query(CaptureAnalysis).filter(
+                        CaptureAnalysis.id == str(replacement_id),
+                        CaptureAnalysis.person_id == person_id,
+                        CaptureAnalysis.source_evidence_id == evidence_id,
+                    ).first()
+                    if replacement is not None:
+                        db.commit()
+                        db.refresh(replacement)
+                        return _response(replacement)
+                db.commit()
+                db.refresh(current_row)
                 return _response(current_row)
             row = current_row
             metadata = dict(row.candidates) if isinstance(row.candidates, dict) else {}
