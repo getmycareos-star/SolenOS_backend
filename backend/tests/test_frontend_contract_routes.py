@@ -1004,6 +1004,10 @@ def test_qwen_lcr_assist_uses_shared_projection_and_scopes_document_extractions(
         assert response.status_code == 200, response.text
         assert response.json()["written_to_lcr"] is False
         assert response.json()["review_required"] is True
+        coverage = response.json()["lcr_context_coverage"]
+        assert coverage["retrieval_scan_complete"] in {True, False}
+        assert coverage["retrieval_projection_complete"] in {True, False}
+        assert isinstance(coverage["sources"], dict)
         assert captured, "Qwen must receive the authorized LCR context"
         prompt = captured[0][0]["content"]
         assert "Breakfast intake was lower than usual" in prompt
