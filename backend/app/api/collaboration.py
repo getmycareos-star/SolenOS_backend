@@ -126,6 +126,11 @@ def _should_fetch_full_lcr_context_pages(context: dict, care_journey_request: bo
     return bool(care_journey_request or context.get("temporal_window"))
 
 
+def _lcr_history_page_limit(care_journey_request: bool) -> int:
+    """Use the same explicit, fail-closed page ceiling for broad and temporal history."""
+    return MAX_TEMPORAL_LCR_HISTORY_PAGES
+
+
 def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict) -> dict:
     """Attach the only approved set of caregiver-facing questions to Companion context."""
     rows = db.query(OpenQuestion).filter(
@@ -7460,7 +7465,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
                     limit_per_source=200 if care_journey_request else 50,
-                    max_pages=1 if care_journey_request else MAX_TEMPORAL_LCR_HISTORY_PAGES,
+                    max_pages=_lcr_history_page_limit(care_journey_request),
                 )
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
