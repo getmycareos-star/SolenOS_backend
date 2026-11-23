@@ -21,6 +21,7 @@ from app.models.action import Action, ActionLifecycleAudit
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import Caregiver, Evidence
 from app.models.care_continuity import CareActionOutcome
+from app.models.open_loop import OpenLoopRecord
 from app.models.reminder import CareReminder
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.privacy_delivery import AuditLogEvent
@@ -88,6 +89,7 @@ class ApprovedActionCreate(BaseModel):
     explicit_approval: Literal[True]
     idempotency_key: str = Field(min_length=16, max_length=128)
     suggestion_id: str = Field(min_length=1, max_length=160)
+    suggestion_version: Optional[int] = Field(default=None, ge=1)
     title: str = Field(min_length=3, max_length=500)
     action_type: Literal[
         "schedule", "call", "attend", "monitor", "ask", "obtain", "submit",
@@ -217,6 +219,30 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
         raise HTTPException(status_code=422, detail="Select an explicit due date to create a reminder")
     if not payload.create_reminder and payload.reminder_due_at is not None:
         raise HTTPException(status_code=422, detail="A reminder due date requires explicit reminder creation")
+
+    # Open-loop suggestions are mutable source records. Require the exact
+    # version shown to the caregiver so an old screen cannot approve a loop
+    # after another caregiver has changed, closed, or replaced it.
+    suggestion_source, separator, suggestion_source_id = payload.suggestion_id.partition(":")
+    if suggestion_source == "open_loop_records" and separator and suggestion_source_id:
+        if payload.suggestion_version is None:
+            raise HTTPException(
+                status_code=409,
+                detail="This follow-up has no saved version to verify. Refresh the care record before approving it.",
+            )
+        current_suggestion = db.query(OpenLoopRecord).filter(
+            OpenLoopRecord.id == suggestion_source_id,
+            OpenLoopRecord.person_id == scoped_person_id,
+        ).with_for_update().first()
+        if current_suggestion is None:
+            raise HTTPException(status_code=409, detail="This follow-up is no longer available. Refresh the care record.")
+        if int(current_suggestion.version or 0) != payload.suggestion_version:
+            raise HTTPException(status_code=409, detail="This follow-up changed after it was shown. Refresh and review the latest details.")
+        if str(current_suggestion.status or "").casefold() in {
+            "resolved", "completed", "closed", "reconciled", "withdrawn",
+            "retracted", "superseded", "cancelled",
+        }:
+            raise HTTPException(status_code=409, detail="This follow-up is no longer open for approval. Refresh the care record.")
 
     evidence_ids = payload.evidence_ids
     evidence_rows = db.query(Evidence).filter(
