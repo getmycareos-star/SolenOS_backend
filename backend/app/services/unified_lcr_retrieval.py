@@ -138,6 +138,7 @@ def _temporal_window(
         calendar.month_abbr[index].casefold(): index
         for index in range(1, 13)
     })
+    month_lookup["sept"] = 9
     month_pattern = "|".join(
         re.escape(name)
         for name in sorted(month_lookup, key=len, reverse=True)
