@@ -11,6 +11,8 @@ class CaptureCandidateReview(BaseModel):
     expected_source_quote: str = Field(max_length=20000)
     expected_subject: str = Field(max_length=160)
     expected_observation: str = Field(max_length=500)
+    expected_corrected_subject: str = Field(default="", max_length=160)
+    expected_corrected_observation: str = Field(default="", max_length=500)
 
     @model_validator(mode="after")
     def require_correction_text(self):
