@@ -1026,7 +1026,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
         accepted = client.post(
             f"/api/v1/documents/intelligence/{understood.json()['analysis_id']}/review",
             headers=auth,
-            json=review_payload(analysis_id, 0, "accept"),
+            json=review_payload(understood.json()["analysis_id"], 0, "accept"),
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -1049,7 +1049,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
         second_accepted = client.post(
             f"/api/v1/documents/intelligence/{second_understood.json()['analysis_id']}/review",
             headers=auth,
-            json=review_payload(analysis_id, 0, "accept"),
+            json=review_payload(second_understood.json()["analysis_id"], 0, "accept"),
         )
         assert second_accepted.status_code == 200, second_accepted.text
         assert second_accepted.json()["written_to_lcr"] is True
