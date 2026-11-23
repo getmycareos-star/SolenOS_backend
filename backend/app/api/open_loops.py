@@ -1066,8 +1066,8 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key, payload)
     if replay is not None:
-    _require_expected_version(loop, payload.expected_version)
         return {"accepted": True, "verification": "verified", "loop": replay}
+    _require_expected_version(loop, payload.expected_version)
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
     blockers = db.query(OpenLoopDependency).filter(
@@ -1156,8 +1156,8 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key, payload)
     if replay is not None:
-    _require_expected_version(loop, payload.expected_version)
         return {"accepted": True, "verification": "cancelled_not_resolved", "loop": replay}
+    _require_expected_version(loop, payload.expected_version)
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
     before = _snapshot(loop)
@@ -1179,8 +1179,8 @@ def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key, payload)
     if replay is not None:
-    _require_expected_version(loop, payload.expected_version)
         return replay
+    _require_expected_version(loop, payload.expected_version)
     if loop.status not in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Only closed or cancelled loops can be reopened")
     before = _snapshot(loop)
