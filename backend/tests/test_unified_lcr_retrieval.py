@@ -1213,6 +1213,65 @@ def test_withdrawn_or_superseded_evidence_never_reads_as_current():
         assert "do not treat it as current evidence" in explanation
 
 
+def test_postgres_lcr_keeps_failed_and_pending_document_extractions_visible():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            person = Person(id="document-status-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="document-status-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add_all([
+                CaptureAnalysis(
+                    id="failed-document-status",
+                    person_id=person.id,
+                    caregiver_id=caregiver.id,
+                    source_evidence_id="failed-document-evidence",
+                    source_text="",
+                    extraction_status="failed",
+                    candidates={
+                        "kind": "document_extraction_v1",
+                        "filename": "unreadable-clinic-scan.pdf",
+                    },
+                    review_history=[],
+                ),
+                CaptureAnalysis(
+                    id="pending-document-status",
+                    person_id=person.id,
+                    caregiver_id=caregiver.id,
+                    source_evidence_id="pending-document-evidence",
+                    source_text="",
+                    extraction_status="processing",
+                    candidates={
+                        "kind": "document_extraction_v1",
+                        "filename": "processing-clinic-scan.pdf",
+                    },
+                    review_history=[],
+                ),
+            ])
+            db.flush()
+            context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id, include_all_history=True,
+            )
+
+        extractions = {
+            item["id"]: item
+            for item in context["sources"]["document_extractions"]["items"]
+        }
+        assert extractions["failed-document-status"]["information_status"] == "document_extraction_failed"
+        assert extractions["pending-document-status"]["information_status"] == "document_extraction_pending"
+        assert "failed-document-status" in str(context["sources"]["document_extractions"])
+        assert "pending-document-status" in str(context["sources"]["document_extractions"])
+    finally:
+        connection.close()
+        engine.dispose()
+
+
 def test_postgres_lcr_marks_superseded_observation_versions_as_historical():
     engine, connection, schema = _postgres_conversation_db()
     try:
