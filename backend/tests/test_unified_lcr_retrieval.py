@@ -634,6 +634,14 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 evidence_ids=[], assertion_status="superseded",
                 observed_at=now - timedelta(days=8), created_by_caregiver_id="caregiver-a",
             )
+            withdrawn = CareAssertion(
+                id="withdrawn-assertion", person_id="person-a", subject_type="person",
+                subject_id="person-a", field="sleep_pattern", assertion_kind="reported_state",
+                asserted_value="Previously verified sleep claim", source_label="Caregiver withdrawal",
+                source_text="This previously verified sleep claim was withdrawn.",
+                evidence_ids=[], assertion_status="withdrawn", epistemic_state="verified",
+                observed_at=now - timedelta(days=2), created_by_caregiver_id="caregiver-a",
+            )
             caregiver_reviewed = CareAssertion(
                 id="caregiver-reviewed-assertion", person_id="person-a", subject_type="person",
                 subject_id="person-a", field="sleep_pattern", assertion_kind="caregiver_reviewed_daily_care_observation",
@@ -694,7 +702,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 id="other-caregiver-session", person_id="person-a", caregiver_id="caregiver-b", status="active"
             )
             db.add_all([
-                event, *longitudinal_events, accepted, pending, rejected, superseded,
+                event, *longitudinal_events, accepted, pending, rejected, superseded, withdrawn,
                 caregiver_reviewed, extraction, other_caregiver_extraction,
                 failed_extraction, other_person_event, other_person_assertion,
                 other_person_extraction, prior_session, other_caregiver_session, other_person_session,
@@ -734,7 +742,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert {row["id"] for row in sources["document_extractions"]["items"]} == {"document-extraction"}
         assert {row["id"] for row in sources["assertions"]["items"]} == {
             "accepted-assertion", "caregiver-reviewed-assertion",
-            "rejected-assertion", "superseded-assertion",
+            "rejected-assertion", "superseded-assertion", "withdrawn-assertion",
         }
         historical_assertions = {
             row["id"]: row["information_status"]
@@ -742,6 +750,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         }
         assert historical_assertions["rejected-assertion"] == "historical_assertion"
         assert historical_assertions["superseded-assertion"] == "historical_assertion"
+        assert historical_assertions["withdrawn-assertion"] == "historical_assertion"
         assert "pending-assertion" not in str(sources["assertions"])
         assert "failed-document-extraction" not in str(sources["document_extractions"])
         assert "other-caregiver-document" not in str(sources["document_extractions"])
