@@ -759,7 +759,7 @@ def review_daily_care_lcr_proposal(
             ).first()
         active_assertion = (
             accepted_assertion is not None
-            and accepted_assertion.assertion_status not in {"rejected", "superseded"}
+            and accepted_assertion.assertion_status not in {"rejected", "superseded", "withdrawn"}
         )
         return {
             "analysis_id": analysis_id,
