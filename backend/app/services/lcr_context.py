@@ -734,6 +734,16 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "document_extraction_failed",
                 "The original document is saved, but text extraction failed. No care details can be established from this extraction.",
             )
+        if extraction_status in {"pending", "processing", "queued", "running"}:
+            return (
+                "document_extraction_pending",
+                "The original document is saved, but text extraction has not finished. Its care details are not yet available; do not treat the missing text as an empty document.",
+            )
+        if extraction_status in {"unavailable", "unknown", "not_started"}:
+            return (
+                "document_extraction_unavailable",
+                "The original document is saved, but an extraction result is not available. Do not treat the missing text as evidence that the document contains no care information.",
+            )
         interpretation_status = str(metadata.get("interpretation_status") or "").casefold()
         if interpretation_status == "partial":
             return (
@@ -1086,8 +1096,8 @@ def build_lcr_context(
         if source_name == "document_extractions":
             if caregiver_id and "caregiver_id" in table.c:
                 statement = statement.where(table.c.caregiver_id == str(caregiver_id))
-            if "extraction_status" in table.c:
-                statement = statement.where(table.c.extraction_status.in_(("available", "partial")))
+            # Keep failed and still-processing extractions visible. Hiding them
+            # makes a saved but unreadable document look like no document exists.
             if "candidates" in table.c:
                 statement = statement.where(
                     table.c.candidates["kind"].as_string() == "document_extraction_v1"
