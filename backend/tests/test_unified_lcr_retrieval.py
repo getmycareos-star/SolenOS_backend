@@ -1170,6 +1170,17 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
         engine.dispose()
 
 
+def test_invalidated_or_superseded_care_events_remain_historical():
+    for event_status in ("invalidated", "superseded", "withdrawn", "deleted"):
+        status, explanation = _information_status("events", {"status": event_status})
+        assert status == "historical_event"
+        assert "do not present it as current care information" in explanation
+
+    status, explanation = _information_status("events", {"status": "unparsed_raw"})
+    assert status == "unprocessed_capture"
+    assert "not an accepted care event" in explanation
+
+
 def test_withdrawn_or_superseded_evidence_never_reads_as_current():
     for item in (
         {"evidence_status": "withdrawn", "epistemic_status": "caregiver_reported"},
