@@ -767,6 +767,7 @@ class QwenBackgroundJobCreate(BaseModel):
     task_text: str = Field(min_length=1, max_length=1800)
     context_text: str = Field(default="", max_length=3000)
     evidence_ids: list[str] = Field(default_factory=list, max_length=10)
+    source_event_id: Optional[str] = Field(default=None, max_length=128)
     appointment_id: Optional[str] = Field(default=None, max_length=128)
 
 
@@ -4822,6 +4823,17 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "professional_summary", "open_loops", "two_week_review", "decision_outcome",
         "medication_day", "care_coordination", "caregiver_feedback", "sharing_export", "audit_review", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support", "document_validity_renewal",
     }
+    anchored_event = None
+    if payload.source_event_id:
+        if payload.workflow not in event_workflows:
+            raise HTTPException(status_code=422, detail="A saved care event can only be used with a care-record workflow.")
+        anchored_event = db.query(CareEvent).filter(
+            CareEvent.id == payload.source_event_id,
+            CareEvent.person_id == person_id,
+        ).first()
+        if anchored_event is None:
+            raise HTTPException(status_code=404, detail="The saved care update could not be found in this Care Record.")
+
     if payload.workflow in event_workflows:
         events_query = db.query(CareEvent).filter(CareEvent.person_id == person_id)
         if payload.workflow == "medication_day":
@@ -4833,9 +4845,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             events_query = events_query.filter(
                 CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14)
             )
-        events = events_query.order_by(CareEvent.occurred_at.desc()).limit(
-            20 if payload.workflow == "two_week_review" else 8
-        ).all()
+        event_limit = 20 if payload.workflow == "two_week_review" else 8
+        events = events_query.order_by(CareEvent.occurred_at.desc()).limit(event_limit).all()
+        if anchored_event is not None:
+            events = [anchored_event] + [event for event in events if str(event.id) != str(anchored_event.id)]
+            events = events[:event_limit]
         for event in events:
             if payload.workflow == "medication_day":
                 occurred = event.occurred_at.isoformat() if event.occurred_at else "unknown"
