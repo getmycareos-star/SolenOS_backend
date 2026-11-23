@@ -335,9 +335,9 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 json={
                     "candidate_index": 0,
                     "decision": "accept",
-                    "expected_source_quote": analysis_response.json()["candidates"]["observations"][0]["source_quote"],
-                    "expected_subject": analysis_response.json()["candidates"]["observations"][0]["subject"],
-                    "expected_observation": analysis_response.json()["candidates"]["observations"][0]["observation"],
+                    "expected_source_quote": analysis_response.json()["candidates"]["observations"][0].get("source_quote") or "",
+                    "expected_subject": analysis_response.json()["candidates"]["observations"][0].get("subject") or "",
+                    "expected_observation": analysis_response.json()["candidates"]["observations"][0].get("observation") or "",
                 },
             )
             assert review_response.status_code == 200, review_response.text
