@@ -108,6 +108,29 @@ def test_qwen_gateway_distinguishes_timeout(monkeypatch):
     assert error.value.detail["reason"] == "socket_timeout"
 
 
+def test_qwen_gateway_classifies_truncated_http_response(monkeypatch):
+    import http.client
+
+    configure_gateway(monkeypatch)
+
+    class TruncatedResponse(FakeResponse):
+        def read(self):
+            raise http.client.IncompleteRead(b'{"message":')
+
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: TruncatedResponse(b""),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "invalid_upstream_response"
+    assert error.value.detail["reason"] == "IncompleteRead"
+
+
 def test_qwen_gateway_rejects_malformed_response_json(monkeypatch):
     configure_gateway(monkeypatch)
     monkeypatch.setattr(
