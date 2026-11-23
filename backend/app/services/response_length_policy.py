@@ -40,45 +40,22 @@ _ACK = re.compile(
     r"that helps|good night|goodbye|bye|see you)[.! ]*$",
     re.I,
 )
-_EMOTIONAL = re.compile(
-    r"\b(?:exhausted|tired|worn out|drained|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
-    r"frightened|panicking|terrified|at my limit|falling apart|i'm struggling|"
-    r"i am struggling|need a break|need a pause|need to stop|please stop|stop for now|"
-    r"enough for now|not now|leave it for now|that's enough|don't want to talk|do not want to talk|"
-    r"no sleep|up all night|can't continue|cannot continue|can't keep doing this|cannot keep doing this|"
-    r"i(?:'m| am) (?:really |very |so )?(?:sad|angry|upset|lonely|anxious|grieving|frustrated|furious)|"
-    r"i feel (?:really |very |so )?(?:sad|angry|upset|alone|lonely|scared|afraid|anxious|helpless|frustrated|furious)|"
-    r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying|"
-    r"i just want a break|i've had enough|i have had enough|i can't take this|i cannot take this)\b",
+_LOW_CAPACITY_SIGNAL = re.compile(
+    r"\\b(?:i(?:'m| am) (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
+    r"i feel (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
+    r"i (?:really )?(?:can't|cannot) (?:cope|continue|keep up|keep doing this|manage|do this anymore)|"
+    r"i (?:need|want) (?:a break|a pause|to stop)|i just want a break|"
+    r"i don't know what to do anymore|everything is too much|"
+    r"please stop|stop for now|enough for now|not now|leave it for now|that's enough|"
+    r"i don't want to talk(?: about this)?|i do not want to talk(?: about this)?|"
+    r"i've had enough|i have had enough)\\b",
     re.I,
 )
-_STANDALONE_CAREGIVER_EMOTION = re.compile(
-    r"^(?:really |very |so )?(?:sad|angry|upset|lonely|anxious|scared|frightened|"
-    r"afraid|frustrated|furious|overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*$",
+_STANDALONE_LOW_CAPACITY = re.compile(
+    r"^(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*$",
     re.I,
 )
-_PATIENT_EMOTIONAL_REPORT = re.compile(
-    r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
-    r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
-    r".{0,40}\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been|has seemed|have seemed)\b"
-    r".{0,24}\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
-    r"helpless|frustrated|furious|overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out|grieving|panicking|terrified|falling apart)\b",
-    re.I,
-)
-_CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
-    r"\b(?:i(?:'m| am| feel| have)|i've|i just want|i want|i need)\b.{0,60}\b(?:exhausted|overwhelmed|"
-    r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
-    r"lonely|anxious|grieving|frustrated|furious|helpless|hopeless|at my limit|falling apart|"
-    r"can't cope|cannot cope|can't continue|cannot continue|can't keep doing this|"
-    r"cannot keep doing this|need to stop|need a pause|can't take this|cannot take this|"
-    r"can't stop crying|break|have had enough|had enough|struggling|"
-    r"been crying|can't stop crying|feel like crying)\b",
-    re.I,
-)
-_CAREGIVER_SHARED_DISTRESS = re.compile(
-    r"\b(?:i(?:'m| am) (?:too|also|as well)|i feel the same|me too|same here)\b",
-    re.I,
-)
+
 _SELF_HARM_CRITICAL = re.compile(
     r"\b(?:suicidal|suicide attempt|suicide plan|thinking about suicide|"
     r"trying to kill myself|kill myself|end my life|want to die|"
@@ -183,15 +160,11 @@ def resolve_response_length_policy(
     value = " ".join((message or "").casefold().split())
     if is_critical_safety_message(value):
         return _POLICIES["critical_safety"]
-    emotional_report = bool(
-        _EMOTIONAL.search(value) or _STANDALONE_CAREGIVER_EMOTION.fullmatch(value)
-    )
-    patient_emotional_report = bool(_PATIENT_EMOTIONAL_REPORT.search(value))
-    caregiver_first_person_distress = bool(
-        _CAREGIVER_FIRST_PERSON_DISTRESS.search(value)
-        or (patient_emotional_report and _CAREGIVER_SHARED_DISTRESS.search(value))
-    )
-    if emotional_report and (not patient_emotional_report or caregiver_first_person_distress):
+    # Emotion and capacity are separate. Sadness, grief, fear, anger, or
+    # loneliness alone must not shorten an answer the caregiver explicitly wants.
+    # Only explicit overload, inability to continue, or a request to pause selects
+    # the low-capacity response budget.
+    if _LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value):
         return _POLICIES["low_capacity_support"]
 
     if intent_hint:
