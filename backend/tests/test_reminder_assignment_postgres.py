@@ -483,3 +483,94 @@ def test_postgres_follow_up_approval_rejects_stale_open_loop_version():
     )
     assert unversioned.status_code == 409, unversioned.text
     assert "not a versioned saved follow-up" in unversioned.json()["detail"]
+
+
+def test_postgres_follow_up_deferral_rejects_missing_and_stale_versions():
+    suffix = uuid.uuid4().hex[:12]
+    client = TestClient(app)
+    created = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": f"Versioned deferral person {suffix}", "caregiver_name": "Primary caregiver"},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    person_id = body["person"]["id"]
+    caregiver_id = body["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+
+    evidence = client.post(
+        "/api/v1/evidence",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "type": "caregiver_report",
+            "source_text": "The caregiver asked to confirm the clinic appointment.",
+            "uploaded_by_caregiver_id": caregiver_id,
+        },
+    )
+    assert evidence.status_code == 200, evidence.text
+    evidence_id = evidence.json()["id"]
+    loop_id = f"versioned-deferral-{suffix}"
+    with SessionLocal() as db:
+        db.add(OpenLoopRecord(
+            id=loop_id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            loop_type="follow_up",
+            title="Confirm the clinic appointment",
+            description="The caregiver asked to confirm the clinic appointment.",
+            status="open",
+            source_fingerprint=f"versioned-deferral-fingerprint-{suffix}",
+            source_type="caregiver_report",
+            source_id=evidence_id,
+            evidence=[{"evidence_id": evidence_id}],
+            request_text="Call the clinic to confirm the appointment.",
+            version=1,
+        ))
+        db.commit()
+
+    review_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
+    endpoint = f"/api/v1/open-loops/{loop_id}"
+    missing_version = client.patch(
+        endpoint,
+        headers=headers,
+        json={
+            "status": "deferred",
+            "deferred_reason": "Waiting for the clinic to confirm.",
+            "review_at": review_at,
+        },
+    )
+    assert missing_version.status_code == 409, missing_version.text
+
+    with SessionLocal() as db:
+        loop = db.query(OpenLoopRecord).filter_by(id=loop_id).one()
+        loop.version = 2
+        loop.description = "A newer caregiver update says the clinic already called."
+        db.commit()
+
+    stale_version = client.patch(
+        endpoint,
+        headers=headers,
+        json={
+            "status": "deferred",
+            "expected_version": 1,
+            "deferred_reason": "Waiting for the clinic to confirm.",
+            "review_at": review_at,
+        },
+    )
+    assert stale_version.status_code == 409, stale_version.text
+    assert "changed after it was shown" in stale_version.json()["detail"]
+
+    current_version = client.patch(
+        endpoint,
+        headers=headers,
+        json={
+            "status": "deferred",
+            "expected_version": 2,
+            "deferred_reason": "Waiting for the clinic to confirm.",
+            "review_at": review_at,
+        },
+    )
+    assert current_version.status_code == 200, current_version.text
+    assert current_version.json()["status"] == "deferred"
+    assert current_version.json()["version"] == 3
