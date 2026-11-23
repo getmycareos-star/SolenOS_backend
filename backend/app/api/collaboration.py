@@ -6472,6 +6472,26 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying)\b",
         text,
     )
+    grief = re.search(
+        r"\\b(?:i miss (?:her|him|them)|i(?:'m| am) grieving|"
+        r"i feel like i(?:'m| am) losing (?:her|him|them)|"
+        r"since (?:she|he|they) died|after (?:she|he|they) died|"
+        r"(?:she|he|they) passed away|i can't believe (?:she|he|they) are gone)\\b",
+        text,
+    )
+    self_blame = re.search(
+        r"\\b(?:i feel like i(?:'m| am) failing|i should be doing more|"
+        r"i lost my temper|i don't think i(?:'m| am) a good caregiver|"
+        r"i(?:'m| am) a bad (?:caregiver|daughter|son)|"
+        r"it's my fault|it is my fault|i let (?:her|him|them) down)\\b",
+        text,
+    )
+    positive_emotion = re.search(
+        r"\\b(?:what a relief|i feel relieved|i(?:'m| am) hopeful|"
+        r"i feel hopeful|we had a good day|she had a good day|he had a good day|"
+        r"that went well|i(?:'m| am) proud of)\\b",
+        text,
+    )
     standalone_overload = re.fullmatch(
         r"(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*",
         text,
@@ -6525,6 +6545,27 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "alone', or 'I'm here for you'; do not promise outcomes or imply personal presence. Immediate danger "
             "still takes precedence and requires clear real-world emergency or human support guidance."
         )
+    if grief:
+        guidance.append(
+            "GRIEF RESPONSE: The caregiver is describing grief or the fear of losing someone. Acknowledge only the "
+            "loss, change, or fear they actually named; do not assume the person has died or predict what will happen. "
+            "Do not turn the disclosure into a task list or medical explanation. Let the caregiver continue in their "
+            "own words, and offer practical help only if they ask for it."
+        )
+    if self_blame:
+        guidance.append(
+            "SELF-BLAME RESPONSE: The caregiver is blaming themselves or describing a difficult moment. Do not "
+            "judge, moralize, agree that they have failed, or dismiss the event with empty reassurance. Acknowledge "
+            "the specific thing they said, keep one difficult moment separate from a conclusion about their whole "
+            "caregiving, and do not force advice or a care workflow. Address any stated immediate risk to anyone's "
+            "safety before ordinary emotional support."
+        )
+    if positive_emotion:
+        guidance.append(
+            "POSITIVE MOMENT RESPONSE: The caregiver is sharing relief, hope, gratitude, or progress. Recognize the "
+            "positive moment in proportion to what they said. Do not reframe it as a crisis, invent a broader recovery, "
+            "or immediately add tasks. Follow the caregiver's actual question or simply acknowledge the moment."
+        )
     if correction:
         guidance.append(
             "CORRECTION HANDLING: The caregiver is correcting an earlier description. Accept the distinction "
@@ -6575,7 +6616,10 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
         return True
     if "VAGUE CONCERN" in guidance and text.count("?") > 1:
         return True
-    if "DISTRESS RESPONSE" in guidance and not critical_safety:
+    if (
+        ("DISTRESS RESPONSE" in guidance or "GRIEF RESPONSE" in guidance or "SELF-BLAME RESPONSE" in guidance)
+        and not critical_safety
+    ):
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         if len(sentences) > 2 or len(text.split()) > 70:
             return True
