@@ -54,11 +54,12 @@ _CRITICAL = re.compile(
     re.I,
 )
 _APPOINTMENT = re.compile(
-    r"\b(?:appointment|doctor visit|clinic visit|questions for the doctor|prepare for (?:the )?visit)\b",
+    r"\b(?:prepare|preparing|preparation)\b.{0,80}\b(?:appointment|doctor visit|clinic visit|visit)\b|"
+    r"\bquestions? (?:to ask )?(?:the )?doctor\b",
     re.I,
 )
 _HANDOFF = re.compile(
-    r"\b(?:handoff|hand-off|shift change|caregiver update|update the next caregiver|share with the next caregiver)\b",
+    r"\b(?:handoff|hand-off|shift change|update the next caregiver|share with the next caregiver)\b",
     re.I,
 )
 _DOCUMENT = re.compile(
@@ -111,8 +112,9 @@ def resolve_response_length_policy(
 
     if intent_hint:
         normalized_hint = intent_hint.strip().casefold()
-        if normalized_hint in _POLICIES:
-            return _POLICIES[normalized_hint]
+        if normalized_hint not in _POLICIES:
+            raise ValueError(f"Unsupported response-length intent hint: {intent_hint}")
+        return _POLICIES[normalized_hint]
 
     # Acknowledgements (including goodbye) must not enter the orientation path.
     if _ACK.fullmatch(value):
