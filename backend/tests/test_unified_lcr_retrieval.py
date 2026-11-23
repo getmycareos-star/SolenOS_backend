@@ -1786,6 +1786,12 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 caregiver_id="partial-document-caregiver",
                 query="What is uncertain or unreadable in the documents?",
             )
+            passage_context = build_lcr_context(
+                db,
+                "partial-document-person",
+                caregiver_id="partial-document-caregiver",
+                query="tablet breakfast",
+            )
         documents = context["sources"]["document_extractions"]
         assert documents["returned_count"] == 2
         item = next(value for value in documents["items"] if value["id"] == "partial-document-analysis")
@@ -1810,6 +1816,17 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         assert any(item["id"] == "partial-document-analysis" for item in uncertainty_documents["items"]), (
             "a question about uncertainty must retrieve a partially unreadable document even when its text does not contain the word"
         )
+        passage_item = next(
+            value for value in passage_context["sources"]["document_extractions"]["items"]
+            if value["id"] == "partial-document-analysis"
+        )
+        retrieved_passages = passage_item["retrieved_source_passages"]
+        assert retrieved_passages
+        assert any(
+            "take the listed tablet with breakfast" in passage["text"]
+            and passage["source_character_start"] == passage_context["sources"]["document_extractions"]["items"][0]["source_text"].find("take the listed tablet with breakfast")
+            for passage in retrieved_passages
+        ), "Companion retrieval must return the exact matching document passage with source offsets"
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
