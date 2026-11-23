@@ -315,7 +315,7 @@ def test_history_first_page_failure_can_recover_when_retry_returns_the_source(mo
                 "interpretation_limit": "The first source scan failed.",
             },
         },
-        "missing_required_sources": [],
+        "missing_required_sources": ["events"],
         "missing_optional_sources": [],
         "retrieval_contract": {},
     }
