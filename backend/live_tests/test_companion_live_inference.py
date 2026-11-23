@@ -903,9 +903,9 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert grief_data.get("written_to_lcr") is False, grief_data
         grief_reply = grief_data.get("reply", "")
         assert 0 < len(grief_reply.split()) <= 70, grief_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", grief_reply.strip()) if part]) <= 2, grief_reply
-        assert not re.search(r"\\b(?:after she died|since she died|when she passed away)\\b", grief_reply, re.IGNORECASE), grief_reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", grief_reply), grief_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", grief_reply.strip()) if part]) <= 2, grief_reply
+        assert not re.search(r"\b(?:after she died|since she died|when she passed away)\b", grief_reply, re.IGNORECASE), grief_reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", grief_reply), grief_reply
 
         guilt = _ask(
             client,
@@ -919,9 +919,9 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert guilt_data.get("written_to_lcr") is False, guilt_data
         guilt_reply = guilt_data.get("reply", "")
         assert 0 < len(guilt_reply.split()) <= 70, guilt_reply
-        assert len([part for part in re.split(r"(?<=[.!?])\\s+", guilt_reply.strip()) if part]) <= 2, guilt_reply
-        assert not re.search(r"\\b(?:you are a bad caregiver|you failed her|this is your fault)\\b", guilt_reply, re.IGNORECASE), guilt_reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", guilt_reply), guilt_reply
+        assert len([part for part in re.split(r"(?<=[.!?])\s+", guilt_reply.strip()) if part]) <= 2, guilt_reply
+        assert not re.search(r"\b(?:you are a bad caregiver|you failed her|this is your fault)\b", guilt_reply, re.IGNORECASE), guilt_reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", guilt_reply), guilt_reply
 
         positive = _ask(
             client,
@@ -935,7 +935,7 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert positive_data.get("written_to_lcr") is False, positive_data
         positive_reply = positive_data.get("reply", "")
         assert 0 < len(positive_reply.split()) <= 50, positive_reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", positive_reply), positive_reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", positive_reply), positive_reply
         assert any(term in positive_reply.casefold() for term in ("glad", "relief", "good", "calm")), positive_reply
 
 
