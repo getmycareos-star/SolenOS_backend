@@ -147,7 +147,7 @@ def test_worker_discards_result_when_caregiver_access_is_revoked_during_inferenc
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def revoke_during_assist(payload, request, inference_db):
+    async def revoke_during_assist(payload, request, inference_db):
         nonlocal access_revoked
         assert threading.get_ident() != caller_thread_id
         assert access_revoked is False
@@ -406,7 +406,7 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def complete_assist(payload, request, db):
+    async def complete_assist(payload, request, db):
         assert threading.get_ident() != caller_thread_id
         assert payload.workflow == "appointment"
         assert request.state.scoped_person_id == "person-test"
