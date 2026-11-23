@@ -2675,8 +2675,9 @@ def _lcr_context_chronological_key(line: str) -> tuple[float, str]:
     except (ValueError, TypeError, json.JSONDecodeError):
         return (float("inf"), line)
     for field in (
-        "occurred_at", "observed_at", "decided_at", "effective_at", "effective_time",
-        "scheduled_at", "event_time", "timestamp", "recorded_at", "uploaded_at", "created_at",
+        "occurred_at", "observed_at", "effective_at", "decided_at", "effective_time",
+        "scheduled_at", "event_time", "timestamp", "reported_at", "collected_at",
+        "recorded_at", "uploaded_at", "ingested_at", "created_at",
     ):
         value = record.get(field)
         if not value:
