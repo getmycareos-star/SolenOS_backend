@@ -1180,12 +1180,15 @@ async def _maintain_qwen_job_lease(
 
 
 def _run_qwen_support_assist(payload, request):
-    """Run the synchronous assistant in a worker thread with its own DB session."""
+    """Await the async assistant in an isolated worker thread and DB session."""
     from app.api.collaboration import qwen_support_assist
 
     inference_db = SessionLocal()
     try:
-        return qwen_support_assist(payload, request, inference_db)
+        # This function is invoked through asyncio.to_thread, so the worker
+        # thread has no running event loop. Await the FastAPI coroutine instead
+        # of persisting an un-awaited coroutine object as the model result.
+        return asyncio.run(qwen_support_assist(payload, request, inference_db))
     finally:
         inference_db.close()
 
@@ -1424,9 +1427,9 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         fake_request = SimpleNamespace(
             state=SimpleNamespace(scoped_person_id=job.person_id, scoped_caregiver_id=job.caregiver_id)
         )
-        # qwen_support_assist is a synchronous FastAPI handler. Run it off the
-        # worker event loop and give it an isolated session so live inference
-        # cannot block lease renewal or share a SQLAlchemy Session across threads.
+        # qwen_support_assist is an async FastAPI handler. Await it in an
+        # isolated worker thread and session so live inference cannot block
+        # lease renewal or share a SQLAlchemy Session across threads.
         result = await asyncio.to_thread(_run_qwen_support_assist, payload, fake_request)
         # The source may have been deleted while inference was running. A
         # cancelled job must never persist a derived answer after that deletion.
