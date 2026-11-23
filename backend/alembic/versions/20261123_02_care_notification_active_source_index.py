@@ -101,7 +101,7 @@ def _normalize_predicate(value):
         clause = _strip_outer_parentheses(clause)
         # PostgreSQL can render IN (...) as = ANY (ARRAY[...]).
         clause = re.sub(
-            r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*\)",
+            r"=\s*any\s*\(\s*\(*\s*array\s*\[(.*?)\]\s*\)*\s*\)",
             lambda match: "IN (" + match.group(1) + ")",
             clause,
         )
