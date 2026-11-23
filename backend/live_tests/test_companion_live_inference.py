@@ -780,6 +780,44 @@ def test_live_qwen_companion_retrieves_a_paraphrased_event_from_the_second_histo
     ), result.get("source_record_refs")
 
 
+def test_live_qwen_greetings_use_and_persist_the_unified_companion_conversation():
+    """Greetings and thanks must use the same real-model, persisted conversation path."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Returning greeting acceptance evaluator")
+        greeting = _ask(client, session, "Good morning.")
+        assert greeting.status_code == 200, greeting.text
+        greeting_data = greeting.json()
+        conversation_id = greeting_data.get("session_id")
+        assert conversation_id, greeting_data
+        assert greeting_data.get("ai_generated") is True, greeting_data
+        assert greeting_data.get("written_to_lcr") is False, greeting_data
+        greeting_reply = greeting_data.get("reply", "")
+        assert 0 < len(greeting_reply.split()) <= 30, greeting_reply
+        assert greeting_reply.count("?") == 0, greeting_reply
+
+        with TestingSessionLocal() as db:
+            saved = db.query(ConversationMessage).filter(
+                ConversationMessage.session_id == conversation_id
+            ).order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
+            assert [(item.role, item.content) for item in saved] == [
+                ("user", "Good morning."),
+                ("assistant", greeting_reply),
+            ]
+
+        thanks = _ask(client, session, "Thank you.", conversation_id)
+        assert thanks.status_code == 200, thanks.text
+        thanks_data = thanks.json()
+        assert thanks_data.get("session_id") == conversation_id, thanks_data
+        assert thanks_data.get("ai_generated") is True, thanks_data
+        assert thanks_data.get("written_to_lcr") is False, thanks_data
+        with TestingSessionLocal() as db:
+            saved = db.query(ConversationMessage).filter(
+                ConversationMessage.session_id == conversation_id
+            ).order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc()).all()
+            assert [item.role for item in saved] == ["user", "assistant", "user", "assistant"]
+            assert saved[2].content == "Thank you."
+
+
 def test_live_qwen_respects_low_capacity_caregiver_response_contract():
     """Real inference must stay concise and avoid turning exhaustion into a checklist."""
     client = TestClient(app)
