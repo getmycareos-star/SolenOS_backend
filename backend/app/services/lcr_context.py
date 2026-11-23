@@ -1403,6 +1403,16 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
         "LCR context metadata: "
         + json.dumps({
             "schema_status": context.get("schema_status"),
+            "source_limits": [
+                {
+                    "source_type": name,
+                    "status": source.get("status"),
+                    "interpretation_limit": source.get("interpretation_limit"),
+                }
+                for name, source in context.get("sources", {}).items()
+                if source.get("status") in {"failed", "partial", "unsearchable"}
+                and source.get("interpretation_limit")
+            ][:20],
             "source_caveats": source_caveats[:20],
             "history_coverage": context.get("history_coverage"),
             "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
