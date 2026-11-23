@@ -1117,7 +1117,7 @@ def build_lcr_context(
                     )
                     # The SQL ordering is deterministic. Python's stable sort retains
                     # that order for ties while prioritising exact/direct query matches.
-                    ranked_items.append((score, candidate_count, item))
+                    ranked_items.append((score, rows_seen if exact_ordered_history else candidate_count, item))
                     if len(ranked_items) > ranked_limit:
                         ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
                         del ranked_items[ranked_limit:]
