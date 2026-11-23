@@ -84,6 +84,7 @@ def review_payload(analysis_id, candidate_index, decision, **extra):
             "expected_source_quote": candidate.get("source_quote") or "",
             "expected_subject": candidate.get("subject") or "",
             "expected_observation": candidate.get("observation") or "",
+            "expected_review_status": candidate.get("review_status") or "pending_review",
             **extra,
         }
 
