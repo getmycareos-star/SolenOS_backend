@@ -6523,8 +6523,9 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         guidance.append(
             "DISTRESS RESPONSE: The caregiver expresses distress. Do not force a care workflow, interrogate them, "
             "minimize their experience, or assume they want advice. A brief acknowledgement and space to pause may "
-            "be the most useful response. Immediate danger still takes precedence and requires clear real-world "
-            "emergency or human support guidance."
+            "be the most useful response. Avoid stock reassurance such as 'everything will be okay', 'you are not "
+            "alone', or 'I'm here for you'; do not promise outcomes or imply personal presence. Immediate danger "
+            "still takes precedence and requires clear real-world emergency or human support guidance."
         )
     if correction:
         guidance.append(
@@ -6587,6 +6588,12 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
             return True
         if re.search(
             r"\b(?:let's|we can)\s+(?:make|create|build|start)\s+(?:a\s+)?(?:plan|checklist|schedule|routine)\b",
+            lowered,
+        ):
+            return True
+        if re.search(
+            r"\b(?:everything will be okay|you are not alone|you're not alone|i'?m here for you|"
+            r"i am here for you|it will all be okay)\b",
             lowered,
         ):
             return True
