@@ -427,6 +427,21 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
     return predicates
 
 
+def _apply_text_search_filter(statement, table: Table, source_name: str, terms: list[str], *, include_all_history: bool = False):
+    """Apply lexical search without turning an unsearchable source into a match.
+
+    Older or partially migrated source tables may not expose any configured
+    searchable text columns. Returning every row from such a table for a
+    topic-specific question creates unrelated care context and can mislead the
+    Companion. Fail closed for that source; explicit full-history requests keep
+    their separate, intentional behaviour.
+    """
+    if terms and not include_all_history:
+        predicates = _text_search_predicates(table, source_name, terms)
+        statement = statement.where(or_(*predicates)) if predicates else statement.where(false())
+    return statement
+
+
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
@@ -796,10 +811,10 @@ def build_lcr_context(
             else:
                 # Undated sources cannot satisfy an explicit temporal query.
                 statement = statement.where(false())
-        if terms and not include_all_history:
-            search_predicates = _text_search_predicates(table, source_name, terms)
-            if search_predicates:
-                statement = statement.where(or_(*search_predicates))
+        statement = _apply_text_search_filter(
+            statement, table, source_name, terms,
+            include_all_history=include_all_history,
+        )
         order_field = next((name for name in spec["order"] if name in table.c), None)
         if order_field:
             statement = statement.order_by(desc(table.c[order_field]))
