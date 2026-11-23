@@ -491,7 +491,7 @@ def _apply_text_search_filter(statement, table: Table, source_name: str, terms: 
 TEXT_FIELDS = {
     "source_text", "fact_value", "asserted_value", "source_label", "source_span", "description",
     "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
-    "notes", "correction_text", "before_state", "after_state", "delta_json",
+    "notes", "correction_text", "original_text", "corrected_text", "before_state", "after_state", "delta_json",
     "closed_reason", "necessity_rationale", "intended_answerer_label", "rationale", "topic", "perspective_text",
     "preparation_notes", "travel_notes",
     "notes", "reason", "review_notes", "resolution",
