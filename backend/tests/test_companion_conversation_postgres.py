@@ -146,6 +146,80 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
     cross_person_history = client.get(f"/api/v1/conversation/{session_id}", headers=other_headers)
     assert cross_person_history.status_code == 404, cross_person_history.text
 
+    # Source references are returned only while the conversation owner still
+    # has an active full-record grant. A later scope change or revocation must
+    # be enforced on history retrieval, not inherited from message creation.
+    invited_session_id = f"companion-invited-{suffix}"
+    invited_message_id = f"companion-invited-message-{suffix}"
+    with Session() as db:
+        db.add(ConversationSession(
+            id=invited_session_id,
+            person_id=person_id,
+            caregiver_id=invited_caregiver_id,
+            title="Invited caregiver source review",
+            status="active",
+            created_at=now,
+            updated_at=now,
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=invited_message_id,
+            session_id=invited_session_id,
+            role="assistant",
+            content="This response references the care record and its source.",
+            guard_verdict="supported",
+            safety_note=None,
+            evidence_ids_json=json.dumps([f"evidence-{suffix}"]),
+            source_record_refs_json=json.dumps(source_refs),
+            response_metadata_json=json.dumps({
+                "source_event_ids": [f"event-{suffix}"],
+                "source_evidence_ids": [f"evidence-{suffix}"],
+                "ai_generated": False,
+                "response_mode": "record_retrieval",
+            }),
+            created_at=now,
+        ))
+        db.commit()
+
+    invited_own_history = client.get(
+        f"/api/v1/conversation/{invited_session_id}", headers=invited_headers
+    )
+    assert invited_own_history.status_code == 200, invited_own_history.text
+    assert invited_own_history.json()["messages"][0]["source_record_refs"] == source_refs
+
+    restricted_scope = client.patch(
+        f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
+        headers=initial_headers,
+        json={"access_scope": "documents_only"},
+    )
+    assert restricted_scope.status_code == 200, restricted_scope.text
+    denied_history = client.get(
+        f"/api/v1/conversation/{invited_session_id}", headers=invited_headers
+    )
+    assert denied_history.status_code == 403, denied_history.text
+
+    restored_scope = client.patch(
+        f"/api/v1/caregiver-access/members/{invited_caregiver_id}/access-scope",
+        headers=initial_headers,
+        json={"access_scope": "full_record"},
+    )
+    assert restored_scope.status_code == 200, restored_scope.text
+    restored_history = client.get(
+        f"/api/v1/conversation/{invited_session_id}", headers=invited_headers
+    )
+    assert restored_history.status_code == 200, restored_history.text
+    assert restored_history.json()["messages"][0]["source_record_refs"] == source_refs
+
+    revoked = client.delete(
+        f"/api/v1/caregiver-access/members/{invited_caregiver_id}",
+        headers=initial_headers,
+    )
+    assert revoked.status_code == 200, revoked.text
+    revoked_history = client.get(
+        f"/api/v1/conversation/{invited_session_id}", headers=invited_headers
+    )
+    assert revoked_history.status_code == 401, revoked_history.text
+
     with Session() as db:
         stored_session = db.query(ConversationSession).filter_by(id=session_id).one()
         stored_message = db.query(ConversationMessage).filter_by(id=message_id).one()
