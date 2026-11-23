@@ -58,6 +58,11 @@ _STANDALONE_LOW_CAPACITY = re.compile(
     re.I,
 )
 
+def is_low_capacity_caregiver_message(message: str) -> bool:
+    value = " ".join((message or "").casefold().split())
+    return bool(_LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value))
+
+
 _SELF_HARM_CRITICAL = re.compile(
     r"\b(?:suicidal|suicide attempt|suicide plan|thinking about suicide|"
     r"trying to kill myself|kill myself|end my life|want to die|"
@@ -166,7 +171,7 @@ def resolve_response_length_policy(
     # loneliness alone must not shorten an answer the caregiver explicitly wants.
     # Only explicit overload, inability to continue, or a request to pause selects
     # the low-capacity response budget.
-    if _LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value):
+    if is_low_capacity_caregiver_message(value):
         return _POLICIES["low_capacity_support"]
 
     if intent_hint:
