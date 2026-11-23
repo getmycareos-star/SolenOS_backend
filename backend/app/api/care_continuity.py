@@ -4958,7 +4958,7 @@ def update_care_continuity_resource(
     db: Session = Depends(get_db),
 ):
     """Update a decision and append its immutable revision in the same transaction."""
-    if resource != "decisions":
+    if resource not in {"decisions", "caregiver-observations"}:
         raise HTTPException(status_code=404, detail="This care-continuity resource has no update workflow")
     person_id, caregiver_id = _scoped_identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
