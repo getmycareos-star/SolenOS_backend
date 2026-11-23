@@ -405,12 +405,11 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         corrected_again = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 1,
-                "decision": "correct",
-                "corrected_subject": "Meal intake",
-                "corrected_observation": quotes[1],
-            },
+            json=review_payload(
+                analysis_id, 1, "correct",
+                corrected_subject="Meal intake",
+                corrected_observation=quotes[1],
+            ),
         )
         assert corrected_again.status_code == 200, corrected_again.text
         assert corrected_again.json()["idempotent_replay"] is True
@@ -436,12 +435,11 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         attempted_overwrite = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 1,
-                "decision": "correct",
-                "corrected_subject": "Meal intake",
-                "corrected_observation": quotes[1],
-            },
+            json=review_payload(
+                analysis_id, 1, "correct",
+                corrected_subject="Meal intake",
+                corrected_observation=quotes[1],
+            ),
         )
         assert attempted_overwrite.status_code == 409, attempted_overwrite.text
         with Session() as db:
@@ -461,7 +459,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         accepted_again = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json=review_payload(analysis_id, 1, "accept"),
         )
         assert accepted_again.status_code == 200
         assert accepted_again.json()["source_record_ref"] == accepted.json()["source_record_ref"]
@@ -479,7 +477,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         third_replay = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json=review_payload(analysis_id, 1, "accept"),
         )
         assert third_replay.status_code == 200, third_replay.text
         assert third_replay.json()["delta_run_id"] == delta_run_id
@@ -623,7 +621,7 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
         failed_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert failed_review.status_code == 503, failed_review.text
         assert "review was not committed" in failed_review.json()["detail"]
@@ -709,7 +707,7 @@ def test_incomplete_document_blocks_interpretation_and_candidate_acceptance(monk
         review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert review.status_code == 409, review.text
         assert "blocked until every page has a complete extraction" in review.json()["detail"]
@@ -785,7 +783,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -1028,7 +1026,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
         accepted = client.post(
             f"/api/v1/documents/intelligence/{understood.json()['analysis_id']}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -1051,7 +1049,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
         second_accepted = client.post(
             f"/api/v1/documents/intelligence/{second_understood.json()['analysis_id']}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert second_accepted.status_code == 200, second_accepted.text
         assert second_accepted.json()["written_to_lcr"] is True
