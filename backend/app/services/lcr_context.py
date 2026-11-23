@@ -1542,6 +1542,12 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             prompt_record = dict(item)
             if source_name == "document_extractions":
                 prompt_record.pop("candidates", None)
+            elif source_name == "appointment_workspaces":
+                # Freshness can change the item's information_status to
+                # stale/unknown. Preserve its underlying source kind separately
+                # so the model can distinguish caregiver-authored visit notes
+                # from canonical LCR facts without treating stale notes as current.
+                prompt_record["source_record_kind"] = "appointment_workspace_caregiver_notes"
             items.append(json.dumps(
                 {
                     "source_type": source_name,
