@@ -13,6 +13,15 @@ def assertion_information_status(
     state = str(epistemic_state or "reported").strip().casefold()
     lifecycle = str(assertion_status or "reported").strip().casefold()
 
+    # Terminal review actions override the epistemic label for currentness.
+    # A previously verified or inferred assertion that was later withdrawn,
+    # rejected, or superseded remains in history but must not read as current.
+    if lifecycle in {"rejected", "superseded", "withdrawn"}:
+        return (
+            "historical_assertion",
+            "This assertion is no longer current; retain it only as part of the record history.",
+        )
+
     if state == "inferred":
         return (
             "inferred_interpretation",
