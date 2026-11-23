@@ -837,7 +837,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
             isinstance(item, dict) and item.get("review_status") in {"pending_review", "corrected_pending_approval"}
             for item in observations
         ),
-        "written_to_lcr": any(
+        "written_to_lcr": extraction_complete and any(
             isinstance(item, dict) and item.get("review_status") == "accepted_by_caregiver"
             for item in stored_observations
         ),
