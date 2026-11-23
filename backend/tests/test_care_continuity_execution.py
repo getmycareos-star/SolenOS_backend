@@ -9,6 +9,7 @@ from app.models.care_continuity import CareAssertion
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.privacy_delivery import HandoffDraft, HandoffDraftRevision
 from app.services import care_continuity_execution as execution
+from app.services.care_continuity import get_freshness
 
 
 class _Query:
@@ -692,3 +693,24 @@ def test_care_state_lock_order_assigns_ids_before_sorting_new_records():
     assert second.id
     assert first.id != second.id
     assert [item.id for item in ordered] == sorted([first.id, second.id])
+
+
+@pytest.mark.parametrize("assertion_kind", ["current_state", "time_bound_observation"])
+@pytest.mark.parametrize("assertion_status", ["rejected", "superseded", "withdrawn"])
+def test_terminal_assertion_lifecycle_always_overrides_freshness(
+    assertion_kind, assertion_status
+):
+    assertion = SimpleNamespace(
+        id="assertion-1",
+        field="sleep_pattern",
+        assertion_kind=assertion_kind,
+        assertion_status=assertion_status,
+        review_after_days=30,
+        observed_at=None,
+        recorded_at=None,
+    )
+
+    result = get_freshness(assertion)
+
+    assert result["status"] == "historical"
+    assert "must not be presented as current" in result["explanation"]
