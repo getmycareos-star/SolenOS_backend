@@ -10,12 +10,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.time_location import Appointment
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
-from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision, EvidenceObservation
+from app.models.care_continuity import CareActionOutcome, CareAssertion, CareRecordRelationship, CareStateRevision, EvidenceObservation
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
@@ -89,7 +89,8 @@ def _postgres_conversation_db():
         tables=[
             Person.__table__, Caregiver.__table__, CareEvent.__table__, Appointment.__table__,
             AppointmentWorkspaceRecord.__table__, AppointmentWorkspaceRevision.__table__,
-            CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, EvidenceObservation.__table__, CaptureAnalysis.__table__,
+            CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, EvidenceObservation.__table__,
+            CareRecordRelationship.__table__, Correction.__table__, CaptureAnalysis.__table__,
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
             metadata.tables["care_facts"], metadata.tables["evidence"],
@@ -2412,6 +2413,74 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
         assert [row["id"] for row in documents["items"]] == [extraction.id]
         assert documents["candidate_scan_complete"] is True
         assert documents["status"] == "available"
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_corrected_care_event_remains_historical_and_links_original_wording():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        with Session(bind=connection) as db:
+            person = Person(id="event-correction-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="event-correction-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            event = CareEvent(
+                id="event-corrected-history", person_id=person.id,
+                event_type="daily_observation", status="recorded",
+                occurred_at=datetime(2025, 3, 4, 9, 0, tzinfo=UTC),
+                title="Medication was given",
+                description="Caregiver originally reported that the medication was given.",
+                created_by_caregiver_id=caregiver.id,
+            )
+            correction = Correction(
+                id="event-correction-record", person_id=person.id,
+                target_type="care_event", target_id=event.id,
+                original_text="Medication was given.",
+                corrected_text="Caregiver did not witness the medication being given.",
+                reason="The earlier report was based on an assumption.",
+                caregiver_id=caregiver.id,
+                processing_status="completed",
+                processing_attempts=1,
+                processed_at=datetime.now(UTC),
+            )
+            db.add_all([event, correction])
+            db.flush()
+            db.add(CareRecordRelationship(
+                person_id=person.id,
+                source_type="correction", source_id=correction.id,
+                relationship_type="corrects",
+                target_type="care_event", target_id=event.id,
+                provenance="Caregiver correction; original event retained unchanged.",
+                created_by_caregiver_id=caregiver.id,
+            ))
+            db.commit()
+
+            context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id,
+                include_all_history=True, limit_per_source=20,
+            )
+
+        projected = next(
+            row for row in context["sources"]["events"]["items"]
+            if row["id"] == "event-corrected-history"
+        )
+        assert projected["information_status"] == "historical_event"
+        assert projected["superseded_by_corrections"][0]["id"] == "event-correction-record"
+        assert projected["superseded_by_corrections"][0]["original_text"] == "Medication was given."
+        assert projected["superseded_by_corrections"][0]["corrected_text"] == (
+            "Caregiver did not witness the medication being given."
+        )
+        prompt = format_lcr_context_for_prompt(context)
+        assert "historical_event" in prompt
+        assert "Caregiver did not witness the medication being given." in prompt
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
