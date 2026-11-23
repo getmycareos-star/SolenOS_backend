@@ -485,6 +485,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                         decision="accept",
                         expected_source_quote="A stale source quotation from an earlier render.",
                         expected_subject=candidate_for_review["subject"],
+                        expected_observation=candidate_for_review["observation"],
                     ),
                     _request(person_id, caregiver_id),
                     db,
@@ -503,6 +504,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
                     decision="reject",
                     expected_source_quote=candidate_to_reject["source_quote"],
                     expected_subject=candidate_to_reject["subject"],
+                    expected_observation=candidate_to_reject["observation"],
                 ),
                 _request(person_id, caregiver_id),
                 db,
@@ -705,7 +707,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         with Session() as db:
             with pytest.raises(HTTPException) as denied:
                 review_document_candidate(
-                    analysis_id, CandidateReview(candidate_index=0, decision="accept", expected_source_quote="", expected_subject=""),
+                    analysis_id, CandidateReview(candidate_index=0, decision="accept", expected_source_quote="", expected_subject="", expected_observation=""),
                     _request(other_person_id, other_caregiver_id), db,
                 )
             assert denied.value.status_code == 404
@@ -859,7 +861,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "reject", "expected_source_quote": quote_reject, "expected_subject": "Patient", "rationale": "Not relevant to current care."},
+            json={"candidate_index": 0, "decision": "reject", "expected_source_quote": quote_reject, "expected_subject": "Patient", "expected_observation": quote_reject, "rationale": "Not relevant to current care."},
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
@@ -912,6 +914,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "decision": "accept",
                 "expected_source_quote": quote_correct,
                 "expected_subject": "Person",
+                "expected_observation": quote_correct,
             },
         )
         assert stale_snapshot.status_code == 409, stale_snapshot.text
@@ -928,6 +931,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "decision": "accept",
                 "expected_source_quote": quote_correct,
                 "expected_subject": caregiver_label,
+                "expected_observation": quote_correct,
                 "expected_candidate_id": "candidate-from-an-older-document-analysis",
             },
         )
@@ -984,7 +988,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         superseded_retry = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label},
+            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label, "expected_observation": quote_correct},
         )
         assert superseded_retry.status_code == 200, superseded_retry.text
         assert superseded_retry.json()["idempotent_replay"] is True
