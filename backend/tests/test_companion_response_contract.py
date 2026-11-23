@@ -2380,6 +2380,12 @@ def test_companion_prompt_keeps_interaction_dimensions_independent():
     assert "a sad caregiver may still want a detailed factual answer" in contract
     assert "Acknowledge positive moments without turning them into a crisis" in contract
 
+    mixed_emotion = collaboration._caregiver_interaction_guidance(
+        "I'm angry, frightened, and exhausted. I don't know what to do."
+    )
+    assert "DISTRESS RESPONSE" in mixed_emotion
+    assert "LOW-CAPACITY RESPONSE" in mixed_emotion
+
 
 def test_general_frustration_is_not_misclassified_as_a_system_repair_request():
     general_distress = collaboration._caregiver_interaction_guidance("I'm frustrated and tired.")
