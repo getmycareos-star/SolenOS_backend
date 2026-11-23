@@ -418,8 +418,8 @@ def database_schema_differences(bind=None):
             for clause in split_top_level_and(expression):
                 clause = strip_outer_predicate_parentheses(clause)
                 clause = re.sub(
-                    r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*\)",
-                    lambda match: "IN (" + match.group(1) + ")",
+                    r"=\s*any\s*\(\s*\(*\s*array\s*\[(.*?)\]\s*\)*\s*\)",
+                    lambda match: "in (" + match.group(1) + ")",
                     clause,
                 )
                 clause = re.sub(r"\(\s*([a-z_][a-z0-9_]*)\s*\)", r"\1", clause)
