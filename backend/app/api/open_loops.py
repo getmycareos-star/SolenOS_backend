@@ -117,6 +117,7 @@ class EvidenceAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: str = Field(min_length=1, max_length=12000)
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
+    expected_version: Optional[int] = Field(default=None, ge=1)
     idempotency_key: Optional[str] = Field(default=None, max_length=160)
     verification_rule: Optional[str] = Field(default=None, max_length=4000)
     response_outcome: Optional[str] = Field(default=None, max_length=40)
@@ -141,6 +142,20 @@ def _utc(value):
     if value.tzinfo is None:
         raise HTTPException(status_code=422, detail="Timestamps must include a timezone")
     return value.astimezone(timezone.utc)
+
+
+def _require_expected_version(loop: OpenLoopRecord, expected_version: int | None) -> None:
+    """Reject lifecycle decisions made against a stale or missing suggestion version."""
+    if expected_version is None:
+        raise HTTPException(
+            status_code=409,
+            detail="A saved version is required before changing this follow-up. Refresh and review it first.",
+        )
+    if expected_version != loop.version:
+        raise HTTPException(
+            status_code=409,
+            detail="This follow-up changed after it was shown. Refresh and review the latest details.",
+        )
 
 
 
@@ -751,17 +766,8 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
-    if payload.status == "deferred":
-        if payload.expected_version is None:
-            raise HTTPException(
-                status_code=409,
-                detail="A saved version is required before deferring this follow-up. Refresh and review it first.",
-            )
-        if payload.expected_version != loop.version:
-            raise HTTPException(
-                status_code=409,
-                detail="This follow-up changed after it was shown. Refresh and review the latest details.",
-            )
+    if payload.status is not None:
+        _require_expected_version(loop, payload.expected_version)
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
     changes.pop("expected_version", None)
@@ -1060,6 +1066,7 @@ def close_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Sess
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "closure_verified", payload.idempotency_key, payload)
     if replay is not None:
+    _require_expected_version(loop, payload.expected_version)
         return {"accepted": True, "verification": "verified", "loop": replay}
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
@@ -1149,6 +1156,7 @@ def cancel_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "cancelled", payload.idempotency_key, payload)
     if replay is not None:
+    _require_expected_version(loop, payload.expected_version)
         return {"accepted": True, "verification": "cancelled_not_resolved", "loop": replay}
     if loop.status in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Loop is already terminal")
@@ -1171,6 +1179,7 @@ def reopen_loop(loop_id: str, payload: EvidenceAction, request: Request, db: Ses
     loop = _get_scoped(db, person_id, caregiver_id, loop_id, for_update=True)
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "reopened", payload.idempotency_key, payload)
     if replay is not None:
+    _require_expected_version(loop, payload.expected_version)
         return replay
     if loop.status not in TERMINAL_STATES:
         raise HTTPException(status_code=409, detail="Only closed or cancelled loops can be reopened")
