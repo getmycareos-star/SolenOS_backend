@@ -1265,15 +1265,18 @@ def test_postgres_historical_scan_includes_delayed_report_and_recording_timestam
             db.execute(text("ALTER TABLE evidence ADD COLUMN reported_at TIMESTAMPTZ"))
             db.execute(text("ALTER TABLE evidence ADD COLUMN uploaded_at TIMESTAMPTZ"))
             db.execute(text("ALTER TABLE evidence ADD COLUMN occurred_at TIMESTAMPTZ"))
+            db.execute(text("ALTER TABLE evidence ADD COLUMN evidence_status VARCHAR"))
             db.execute(text("""
-                INSERT INTO evidence (id, person_id, reported_at, uploaded_at, occurred_at)
+                INSERT INTO evidence (id, person_id, reported_at, uploaded_at, occurred_at, evidence_status)
                 VALUES
                   ('reported-in-window', :person_id, '2025-03-12T10:00:00+00:00',
-                   '2026-01-02T10:00:00+00:00', NULL),
+                   '2026-01-02T10:00:00+00:00', NULL, 'active'),
                   ('uploaded-in-window', :person_id, NULL,
-                   '2025-03-14T10:00:00+00:00', NULL),
+                   '2025-03-14T10:00:00+00:00', NULL, 'active'),
                   ('outside-window', :person_id, '2024-12-20T10:00:00+00:00',
-                   '2026-01-02T10:00:00+00:00', NULL)
+                   '2026-01-02T10:00:00+00:00', NULL, 'active'),
+                  ('deleted-in-window', :person_id, '2025-03-13T10:00:00+00:00',
+                   '2025-03-13T10:00:00+00:00', NULL, 'deleted_by_caregiver')
             """), {"person_id": person.id})
 
             db.add_all([
