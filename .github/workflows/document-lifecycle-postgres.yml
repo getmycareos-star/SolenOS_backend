@@ -43,10 +43,10 @@ permissions:
   statuses: write
 
 concurrency:
-  # Keep only the newest main-branch validation queued; obsolete revisions
-  # must not starve verification of the current source.
-  group: document-lifecycle-postgres-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Each run owns a disposable PostgreSQL database and Silo container. Cancel
+  # obsolete revisions so current-main document verification is not starved.
+  group: document-lifecycle-postgres-current-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   document-lifecycle-postgres:
