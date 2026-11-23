@@ -2812,11 +2812,22 @@ def _collect_full_lcr_context_pages(
             source["candidate_count"] = page_source.get(
                 "candidate_count", source.get("candidate_count")
             )
-            source["candidate_scan_complete"] = page_source.get(
-                "candidate_scan_complete", source.get("candidate_scan_complete", False)
+            source["candidate_scan_complete"] = (
+                False if page_status in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
+                else page_source.get(
+                    "candidate_scan_complete", source.get("candidate_scan_complete", False)
+                )
             )
-            source["has_more"] = page_source.get("has_more", False)
-            source["next_offset"] = page_source.get("next_offset")
+            if page_status in {"failed", "partial"}:
+                source["has_more"] = True
+                source["next_offset"] = (
+                    page_source.get("next_offset")
+                    or source.get("next_offset")
+                    or offsets.get(name)
+                )
+            else:
+                source["has_more"] = page_source.get("has_more", False)
+                source["next_offset"] = page_source.get("next_offset")
             source["returned_count"] = len(source["items"])
             source["offset"] = 0
             source["returned_history_complete"] = bool(
