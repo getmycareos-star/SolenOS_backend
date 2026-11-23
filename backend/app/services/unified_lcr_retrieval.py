@@ -168,6 +168,34 @@ def _temporal_window(
         start = end = today - timedelta(days=1)
     elif re.search(r"\btoday\b", text):
         start = end = today
+    elif re.search(
+        r"\b(?:last|past)\s+(one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+(days?|weeks?|months?)\b",
+        text,
+    ):
+        written_match = re.search(
+            r"\b(?:last|past)\s+(one|two|three|four|five|six|seven|eight|nine|ten|"
+            r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+(days?|weeks?|months?)\b",
+            text,
+        )
+        written_count = {
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+            "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+            "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+            "nineteen": 19, "twenty": 20,
+        }[written_match.group(1)]
+        written_unit = written_match.group(2)
+        if written_unit.startswith("day"):
+            start, end = today - timedelta(days=written_count - 1), today
+        elif written_unit.startswith("week"):
+            start, end = today - timedelta(days=written_count * 7 - 1), today
+        else:
+            month_index = today.year * 12 + (today.month - 1) - written_count
+            start_year, start_month_zero = divmod(month_index, 12)
+            start_month = start_month_zero + 1
+            start_day = min(today.day, calendar.monthrange(start_year, start_month)[1])
+            start, end = date(start_year, start_month, start_day), today
     elif re.search(r"\b(?:last|past)\s+(\d{1,4})\s+days?\b", text):
         days = int(re.search(r"\b(?:last|past)\s+(\d{1,4})\s+days?\b", text).group(1))
         if days < 1 or days > 7300:
