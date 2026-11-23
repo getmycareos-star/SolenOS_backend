@@ -343,3 +343,27 @@ def test_lifecycle_response_does_not_invent_missing_pages_for_standalone_scan():
     assert response["processed_page_numbers"] == [3]
     assert response["unprocessed_page_numbers"] == []
     assert response["interpretation_blocked"] is False
+
+
+def test_lifecycle_response_ignores_malformed_persisted_page_numbers():
+    from types import SimpleNamespace
+
+    from app.api.document_lifecycle import _response
+
+    analysis = SimpleNamespace(
+        id="malformed-page-metadata-analysis",
+        source_evidence_id="malformed-page-metadata-evidence",
+        source_text="[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page.",
+        extraction_status="available",
+        candidates={
+            "filename": "care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+            "unprocessed_page_numbers": [None, "2", True, {"page": 2}],
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["unprocessed_page_numbers"] == [2]
+    assert response["interpretation_blocked"] is True
