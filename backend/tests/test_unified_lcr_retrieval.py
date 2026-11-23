@@ -1407,7 +1407,7 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
                 person_id="appointment-workspace-person",
             ))
             db.flush()
-            db.add(AppointmentWorkspaceRecord(
+            workspace_record = AppointmentWorkspaceRecord(
                 id="appointment-workspace-record",
                 person_id="appointment-workspace-person",
                 appointment_id=None,
@@ -1438,6 +1438,21 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
                         "lcr_reconciliation": "not_performed",
                     },
                 },
+            )
+            db.add(workspace_record)
+            db.flush()
+            db.add(CareStateRevision(
+                id="appointment-workspace-later-care-change",
+                person_id="appointment-workspace-person",
+                target_type="care_event",
+                target_id="later-care-event",
+                revision_number=1,
+                change_kind="updated",
+                before_state="{}",
+                after_state="{\"status\": \"changed\"}",
+                evidence_ids=[],
+                changed_by_caregiver_id="appointment-workspace-caregiver",
+                changed_at=workspace_record.updated_at + timedelta(seconds=1),
             ))
             db.add(AppointmentWorkspaceRevision(
                 id="appointment-workspace-revision-2",
@@ -1465,7 +1480,8 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
         workspaces = context["sources"]["appointment_workspaces"]
         assert workspaces["returned_count"] == 1
         item = workspaces["items"][0]
-        assert item["information_status"] == "appointment_workspace_caregiver_notes"
+        assert item["information_status"] == "appointment_workspace_stale"
+        assert item["source_freshness"]["status"] == "stale"
         assert item["status"] == "ready_for_review"
         assert item["version_number"] == 3
         assert item["payload"]["clinicianFindings"].startswith("The clinician said")
