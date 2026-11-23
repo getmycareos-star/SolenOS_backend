@@ -2877,6 +2877,24 @@ def test_companion_never_describes_incomplete_lcr_retrieval_as_missing_informati
     assert "do not say the information is" in incomplete
     assert "additional saved history may need checking" in incomplete
 
+    unsearchable_optional_source = instruction({
+        "retrieval_projection_complete": True,
+        "page_limit_reached": False,
+        "source_limits": [{
+            "source_type": "document_extractions",
+            "status": "unsearchable",
+            "interpretation_limit": "This source could not be searched for this topic.",
+        }],
+    }, False)
+    assert "cannot confirm from the records retrieved" in unsearchable_optional_source
+
+    missing_optional_source = instruction({
+        "retrieval_projection_complete": True,
+        "page_limit_reached": False,
+        "missing_optional_sources": ["document_extractions"],
+    }, False)
+    assert "additional saved history may need checking" in missing_optional_source
+
     page_limited = instruction({
         "retrieval_projection_complete": True,
         "page_limit_reached": True,

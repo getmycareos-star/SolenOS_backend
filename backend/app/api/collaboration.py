@@ -6814,10 +6814,17 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
                 limits.append(f"{source_name} is {status}: {explanation}")
         if limits:
             source_limit_instruction = " Source availability limits: " + " ".join(limits) + " "
+    # A projection can be technically complete for the sources that were
+    # available while one or more source families were unsearchable or absent.
+    # That is not evidence that the care history is empty.
+    source_availability_incomplete = bool(source_limits) or bool(
+        coverage.get("missing_required_sources")
+    ) or bool(coverage.get("missing_optional_sources"))
     retrieval_incomplete = (
         not bool(coverage.get("retrieval_projection_complete"))
         or bool(coverage.get("page_limit_reached"))
         or bool(context_truncated)
+        or source_availability_incomplete
     )
     if retrieval_incomplete:
         return (
