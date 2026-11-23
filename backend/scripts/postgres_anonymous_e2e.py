@@ -1494,6 +1494,9 @@ def main():
                 "decision": "correct",
                 "corrected_subject": "sleep",
                 "corrected_observation": "Caregiver corrected the report: sleep was interrupted twice overnight.",
+                "expected_source_quote": daily_capture_payload["notes"],
+                "expected_subject": "sleep",
+                "expected_observation": "Generated suggestion: interrupted sleep.",
             },
         )
         require(status == 200
@@ -1511,7 +1514,13 @@ def main():
             "POST",
             f"/api/v1/capture/analyses/{daily_analysis_id}/review",
             token=token_a,
-            body={"candidate_index": 0, "decision": "accept"},
+            body={
+                "candidate_index": 0,
+                "decision": "accept",
+                "expected_source_quote": daily_capture_payload["notes"],
+                "expected_subject": "sleep",
+                "expected_observation": "Generated suggestion: interrupted sleep.",
+            },
         )
         require(status == 200
                 and accepted_review.get("written_to_lcr") is True
@@ -1531,7 +1540,13 @@ def main():
             "POST",
             f"/api/v1/capture/analyses/{daily_analysis_id}/review",
             token=token_a,
-            body={"candidate_index": 1, "decision": "reject"},
+            body={
+                "candidate_index": 1,
+                "decision": "reject",
+                "expected_source_quote": daily_capture_payload["notes"],
+                "expected_subject": "mood",
+                "expected_observation": "Generated suggestion that the caregiver did not confirm.",
+            },
         )
         require(status == 200
                 and rejected_review.get("written_to_lcr") is False
@@ -1541,7 +1556,13 @@ def main():
             "POST",
             f"/api/v1/capture/analyses/{daily_analysis_id}/review",
             token=token_a,
-            body={"candidate_index": 1, "decision": "accept"},
+            body={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": daily_capture_payload["notes"],
+                "expected_subject": "mood",
+                "expected_observation": "Generated suggestion that the caregiver did not confirm.",
+            },
         )
         require(status == 409, f"Rejected candidate must remain final after retry: {status}: {rejected_retry}")
 
