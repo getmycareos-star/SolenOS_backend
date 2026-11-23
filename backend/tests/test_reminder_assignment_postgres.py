@@ -438,3 +438,17 @@ def test_postgres_follow_up_approval_rejects_stale_open_loop_version():
         json=payload,
     )
     assert current.status_code == 201, current.text
+
+    unversioned_payload = {
+        **payload,
+        "idempotency_key": f"unversioned-approval-{suffix}-0001",
+        "suggestion_id": f"events:event-{suffix}",
+        "suggestion_version": None,
+    }
+    unversioned = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=headers,
+        json=unversioned_payload,
+    )
+    assert unversioned.status_code == 409, unversioned.text
+    assert "not a versioned saved follow-up" in unversioned.json()["detail"]
