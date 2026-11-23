@@ -454,10 +454,9 @@ def database_schema_differences(bind=None):
             if not columns:
                 continue
             dialect_options = item.get("dialect_options") or {}
-            predicate = (
-                dialect_options.get(f"{target.dialect.name}_where")
-                or item.get("filter_definition")
-            )
+            predicate = dialect_options.get(f"{target.dialect.name}_where")
+            if predicate is None:
+                predicate = item.get("filter_definition")
             if (
                 valid_postgres_index_names is not None
                 and str(item.get("name") or "") not in valid_postgres_index_names
