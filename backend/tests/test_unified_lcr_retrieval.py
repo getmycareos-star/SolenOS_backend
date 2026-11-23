@@ -1824,7 +1824,7 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         assert retrieved_passages
         assert any(
             "take the listed tablet with breakfast" in passage["text"]
-            and passage["source_character_start"] == passage_context["sources"]["document_extractions"]["items"][0]["source_text"].find("take the listed tablet with breakfast")
+            and passage["source_character_start"] == passage_item["source_text"].find("take the listed tablet with breakfast")
             for passage in retrieved_passages
         ), "Companion retrieval must return the exact matching document passage with source offsets"
     finally:
