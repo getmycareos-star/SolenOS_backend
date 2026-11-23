@@ -72,3 +72,44 @@ def test_partial_and_unique_indexes_do_not_satisfy_full_lookup_coverage():
     assert not migration._is_usable_lookup_index(partial_index, "person_id")
     assert not migration._is_usable_lookup_index(filtered_index, "person_id")
     assert not migration._is_usable_lookup_index(unique_index, "person_id")
+
+
+
+def test_downgrade_drops_only_the_exact_migration_owned_lookup_index(monkeypatch):
+    migration = _migration()
+    table = "handoff_records"
+    column = "expires_at"
+    base = migration._index_name(table, column)
+    indexes = [
+        {
+            "name": "ix_solenos_schema_preexisting",
+            "column_names": [column],
+            "unique": False,
+        },
+        {"name": base + "_1", "column_names": [column], "unique": False},
+        {"name": base, "column_names": ["different_column"], "unique": False},
+        {"name": base + "_legacy", "column_names": [column], "unique": False},
+    ]
+
+    class Inspector:
+        def has_table(self, name):
+            return name == table
+
+        def get_indexes(self, name):
+            return indexes if name == table else []
+
+    class Operations:
+        def get_bind(self):
+            return object()
+
+        def drop_index(self, name, table_name):
+            dropped.append((name, table_name))
+
+    dropped = []
+    monkeypatch.setattr(migration, "inspect", lambda _bind: Inspector())
+    monkeypatch.setattr(migration, "op", Operations())
+    monkeypatch.setattr(migration, "INDEXES", {table: (column,)})
+
+    migration.downgrade()
+
+    assert dropped == [(base + "_1", table)]
