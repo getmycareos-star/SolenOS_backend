@@ -765,9 +765,13 @@ def _response(analysis: CaptureAnalysis) -> dict:
     stored_observations = intelligence.get("observations")
     stored_observations = stored_observations if isinstance(stored_observations, list) else []
     source_text = analysis.source_text or ""
+    unprocessed_pages = sorted(set(
+        _unprocessed_page_numbers(source_text)
+        + (details.get("unprocessed_page_numbers") if isinstance(details.get("unprocessed_page_numbers"), list) else [])
+    ))
     extraction_complete = (
         analysis.extraction_status == "available"
-        and not _unprocessed_page_numbers(source_text)
+        and not unprocessed_pages
         and not _unreadable_page_numbers(source_text)
     )
     # Match the document-intelligence response contract: candidates from an
@@ -784,7 +788,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         # readability. Recompute these lists on every response so a successful
         # retry cannot retain stale failure markers from an earlier attempt.
         "unreadable_page_numbers": _unreadable_page_numbers(analysis.source_text or ""),
-        "unprocessed_page_numbers": _unprocessed_page_numbers(analysis.source_text or ""),
+        "unprocessed_page_numbers": unprocessed_pages,
         "retryable_page_numbers": [
             page for page in _retryable_page_numbers(analysis.source_text or "")
             if page not in set(details.get("retry_exhausted_page_numbers") or [])
@@ -836,7 +840,8 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
     })
     total_pages = max(observed_pages, default=1)
     unreadable_pages = _unreadable_page_numbers(source_text)
-    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    missing_page_numbers = sorted(set(range(1, total_pages + 1)) - set(observed_pages))
+    unprocessed_pages = sorted(set(_unprocessed_page_numbers(source_text)) | set(missing_page_numbers))
     processed_pages = sorted(set(observed_pages) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
     return extraction_status, {
