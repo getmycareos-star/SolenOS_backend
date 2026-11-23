@@ -1033,7 +1033,7 @@ def build_lcr_context(
                 caregiver_origin,
             ) if caregiver_origin is not None else None
             historical_assertion = and_(
-                table.c.assertion_status.in_(("rejected", "superseded", "withdrawn")),
+                table.c.assertion_status.in_(("rejected", "superseded", "retracted", "withdrawn")),
                 caregiver_origin,
             ) if caregiver_origin is not None else None
             eligible_assertions = [accepted_or_legacy]
