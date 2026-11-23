@@ -1022,3 +1022,19 @@ def test_document_extraction_metadata_does_not_invent_gaps_for_standalone_scan()
     )
 
     assert metadata.get("unprocessed_page_numbers", []) == []
+
+
+def test_document_extraction_metadata_does_not_trust_stale_pdf_manifest():
+    from app.services.lcr_context import _document_extraction_metadata
+
+    metadata = _document_extraction_metadata(
+        {
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+            "processed_page_numbers": [1, 2, 3],
+        },
+        "[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page.",
+    )
+
+    assert metadata["unprocessed_page_numbers"] == [2]
