@@ -1469,8 +1469,8 @@ def _prompt_safe_lcr_record(value: Any) -> Any:
     """
     if isinstance(value, dict):
         excluded = {
-            "candidates", "canonical_candidate", "document_candidate",
-            "document_intelligence", "source_quote",
+            "candidates", "canonical_candidate", "document_intelligence",
+            "source_quote", "source_excerpt", "source_span_start", "source_span_end",
         }
         return {
             str(key): _prompt_safe_lcr_record(item)
@@ -1578,8 +1578,14 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 default=str,
                 separators=(",", ":"),
             ))
+        source_kind = (
+            "; source_record_kind=appointment_workspace_caregiver_notes"
+            if source_name == "appointment_workspaces" else
+            "; source_record_kind=appointment_workspace_revision_history"
+            if source_name == "appointment_workspace_revisions" else ""
+        )
         section = (
-            f"[{source_name}; status={source.get('status')}; "
+            f"[{source_name}; status={source.get('status')}{source_kind}; "
             f"returned={source.get('returned_count', 0)}; "
             f"candidates={source.get('candidate_count', 'not_counted')}; "
             f"scan_complete={source.get('candidate_scan_complete', False)}; "
