@@ -1286,6 +1286,12 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 caregiver_id="partial-document-caregiver",
                 query="medication",
             )
+            uncertainty_context = build_lcr_context(
+                db,
+                "partial-document-person",
+                caregiver_id="partial-document-caregiver",
+                query="What is uncertain or unreadable in the documents?",
+            )
         documents = context["sources"]["document_extractions"]
         assert documents["returned_count"] == 2
         item = next(value for value in documents["items"] if value["id"] == "partial-document-analysis")
@@ -1305,6 +1311,10 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         assert "unreadable_page_numbers" in prompt_context
         assert '"source_quote"' not in prompt_context, (
             "unreviewed model candidate objects must not be leaked into the LCR retrieval prompt"
+        )
+        uncertainty_documents = uncertainty_context["sources"]["document_extractions"]
+        assert any(item["id"] == "partial-document-analysis" for item in uncertainty_documents["items"]), (
+            "a question about uncertainty must retrieve a partially unreadable document even when its text does not contain the word"
         )
     finally:
         _load_source_schema.cache_clear()
