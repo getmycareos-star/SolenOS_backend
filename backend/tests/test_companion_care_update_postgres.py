@@ -193,6 +193,8 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         assert body["persistence"] == "conversation_only"
         coverage = body["lcr_context_coverage"]
         assert coverage["history_coverage"] == "partial_source_history"
+        assert coverage["sources"]["legacy_optional"]["status"] == "unsearchable"
+        assert "cannot be searched for this topic" in coverage["sources"]["legacy_optional"]["interpretation_limit"]
         assert any(
             item["source_type"] == "legacy_optional"
             and item["status"] == "unsearchable"
