@@ -39,7 +39,7 @@ def test_companion_automatically_gets_retrieval_discipline():
     assert select_specialized_domains(messages) == ("lcr_retrieval", "companion")
 
 
-def test_specialists_are_selective_and_capped_at_three():
+def test_specialists_are_selective_and_capped_at_four():
     messages = [{
         "role": "system",
         "content": (
@@ -48,8 +48,8 @@ def test_specialists_are_selective_and_capped_at_three():
         ),
     }]
     selected = select_specialized_domains(messages)
-    assert len(selected) == 3
-    assert selected == ("lcr_retrieval", "care_extraction", "longitudinal_reasoning")
+    assert len(selected) == 4
+    assert selected == ("lcr_retrieval", "care_extraction", "longitudinal_reasoning", "reconciliation")
 
 
 def test_no_specialist_is_loaded_for_unclassified_generic_inference():
