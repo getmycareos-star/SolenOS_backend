@@ -2261,7 +2261,7 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
 
 def test_companion_prompt_budget_is_bounded_for_the_production_model_context():
     assert collaboration.COMPANION_PROMPT_CONTEXT_BUDGET_CHARS == 7000
-    assert collaboration.COMPANION_MAX_OUTPUT_TOKENS == 384
+    assert collaboration.COMPANION_MAX_OUTPUT_TOKENS == 640
 
 
 def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
@@ -3397,3 +3397,9 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
         assert "cannot confirm from the records retrieved" in user_prompt.casefold()
     finally:
         teardown()
+
+
+
+def test_companion_greeting_contract_allows_up_to_fifteen_words():
+    assert collaboration._greeting_reply_needs_revision("Hello, welcome back. Glad you are here today.")
+    assert not collaboration._greeting_reply_needs_revision("Hello, glad you are here and ready to continue today.")
