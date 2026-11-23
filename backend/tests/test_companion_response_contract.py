@@ -2295,6 +2295,19 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
+def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
+    assert collaboration._caregiver_response_needs_revision(
+        "I'm sad",
+        "I'm sorry this feels so heavy. Let's create a plan and checklist for the next seven days. "
+        + "We can review every task and organize the whole week together. "
+        + "First, list all appointments; next, identify every concern; then, assign each task.",
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "I'm sad",
+        "I'm sorry this is hard. We can pause here; nothing else needs to be handled right now.",
+    )
+
+
 def test_caregiver_interaction_guidance_prioritizes_frustration_repair_over_defense():
     guidance = collaboration._caregiver_interaction_guidance(
         "You keep asking me the same questions. I've already told you this."
