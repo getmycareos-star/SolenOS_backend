@@ -1421,3 +1421,44 @@ def test_outcome_verification_retry_rejects_changed_ignored_rule():
     assert first_corroboration.status_code == 200, first_corroboration.text
     assert identical_corroboration.status_code == 200, identical_corroboration.text
     assert changed_corroboration_rule.status_code == 409, changed_corroboration_rule.text
+
+
+def test_create_idempotency_rejects_changed_deadline_and_evidence():
+    client = TestClient(app)
+    _, headers = session(client, "Create payload recipient")
+    key = "create-full-payload-integrity"
+    first_payload = {
+        "loop_type": "follow_up",
+        "title": "Confirm the clinic appointment",
+        "description": "The appointment date still needs confirmation.",
+        "evidence": [{"kind": "caregiver_report", "text": "Clinic asked us to call back."}],
+        "deadline_at": (datetime.now(timezone.utc) + timedelta(days=2)).isoformat(),
+        "deadline_source": "explicit_user",
+        "deadline_timezone": "Africa/Lagos",
+        "request_text": "Please confirm the date with the clinic.",
+        "verification_rule": "The clinic must confirm the date.",
+        "idempotency_key": key,
+    }
+
+    first = client.post("/api/v1/open-loops", headers=headers, json=first_payload)
+    identical = client.post("/api/v1/open-loops", headers=headers, json=first_payload)
+    changed_deadline = client.post(
+        "/api/v1/open-loops",
+        headers=headers,
+        json={**first_payload, "deadline_at": (datetime.now(timezone.utc) + timedelta(days=5)).isoformat()},
+    )
+    changed_evidence = client.post(
+        "/api/v1/open-loops",
+        headers=headers,
+        json={**first_payload, "evidence": [{"kind": "caregiver_report", "text": "A different source report."}]},
+    )
+
+    assert first.status_code == 201, first.text
+    assert identical.status_code == 201, identical.text
+    assert identical.json()["id"] == first.json()["id"]
+    assert changed_deadline.status_code == 409, changed_deadline.text
+    assert changed_evidence.status_code == 409, changed_evidence.text
+
+    listed = client.get("/api/v1/open-loops", headers=headers)
+    assert listed.status_code == 200, listed.text
+    assert len(listed.json()["items"]) == 1
