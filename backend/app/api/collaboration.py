@@ -2765,11 +2765,13 @@ def _collect_full_lcr_context_pages(
         page_contexts.append(page_context)
         page_count += 1
         page_sources = page_context.get("sources", {})
+        page_failure_detected = False
         for name, source in merged_sources.items():
             if name == "companion_conversation":
                 continue
             page_source = page_sources.get(name)
             if not isinstance(page_source, dict):
+                page_failure_detected = True
                 source["status"] = "partial" if source.get("items") else "failed"
                 source["candidate_scan_complete"] = False
                 source["has_more"] = True
@@ -2782,6 +2784,7 @@ def _collect_full_lcr_context_pages(
                 continue
             page_status = str(page_source.get("status") or "unknown")
             if page_status in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}:
+                page_failure_detected = True
                 source["status"] = (
                     "partial" if source.get("items") and page_status == "failed" else page_status
                 )
@@ -2845,6 +2848,11 @@ def _collect_full_lcr_context_pages(
             for name, source in merged_sources.items()
             if name != "companion_conversation"
         }
+        if page_failure_detected:
+            # Do not repeat a failed page request up to the page ceiling. Keep
+            # every unvisited source offset so the incomplete projection is
+            # explicit and can be resumed by a later request.
+            break
 
     merged["sources"] = merged_sources
     merged["source_status"] = {
