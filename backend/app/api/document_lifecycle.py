@@ -851,7 +851,6 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
     }
 
 
-@router.post("/{evidence_id}/extract", status_code=201)
 def _lock_active_document_source(db: Session, evidence_id: str, person_id: str, caregiver_id: str):
     """Lock the source only for the short persistence phase, never during OCR."""
     evidence = db.query(Evidence).filter(
@@ -868,6 +867,7 @@ def _lock_active_document_source(db: Session, evidence_id: str, person_id: str, 
     return evidence, upload
 
 
+@router.post("/{evidence_id}/extract", status_code=201)
 def extract_saved_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Extract from the persisted original bytes and bind the result to its evidence ID."""
     person_id, caregiver_id = _identity(request, db)
