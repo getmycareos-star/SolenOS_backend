@@ -15,6 +15,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
+from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
 main_module = importlib.import_module("app.main")
@@ -353,5 +354,56 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
             decisions = db.query(AIOutputLCRDecision).filter_by(proposal_id=proposal["id"]).all()
             assert len(decisions) == 1
             assert decisions[0].decision == "accepted"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_postgres_companion_direct_event_context_marks_withdrawn_events_as_historical(monkeypatch):
+    from datetime import datetime, timezone
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    captured_prompts = []
+
+    def fake_chat(base, model, messages, options=None):
+        captured_prompts.extend(messages)
+        return "I can help explain the saved care information and its limits."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
+    client = TestClient(app)
+    try:
+        session = create_session(client, "Historical event caregiver")
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        event = CareEvent(
+            person_id=person_id,
+            created_by_caregiver_id=caregiver_id,
+            event_type="daily_observation",
+            status="withdrawn",
+            occurred_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+            title="Corrected sleep report",
+            description="The caregiver withdrew this earlier sleep report.",
+            evidence_ids=[],
+            time_provenance="caregiver_reported",
+        )
+        with TestingSessionLocal() as db:
+            db.add(event)
+            db.commit()
+
+        response = send(
+            client,
+            session,
+            "Please help me understand the care information saved for her.",
+            "companion-withdrawn-event-context-0001",
+        )
+        assert response.status_code == 200, response.text
+        prompt = "\\n".join(
+            str(message.get("content") or "") for message in captured_prompts
+            if isinstance(message, dict)
+        )
+        assert "historical_event" in prompt
+        assert "do not present it as current care information" in prompt
+        assert "recorded_care_event" not in prompt
     finally:
         app.dependency_overrides.clear()
