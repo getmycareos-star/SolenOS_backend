@@ -19,12 +19,16 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
     build_unified_lcr_context,
 )
+
+
+def test_generic_record_understanding_question_does_not_become_lexical_filter():
+    assert _query_search_terms("Please help me understand the care information saved for her.") == []
 
 
 def _postgres_conversation_db():
