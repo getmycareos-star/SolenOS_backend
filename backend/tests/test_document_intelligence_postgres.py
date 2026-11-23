@@ -971,9 +971,15 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             headers=auth,
         )
         assert history.status_code == 200, history.text
-        assert history.json()["count"] == 2
-        assert [item["decision"] for item in history.json()["items"]] == ["reject", "accept"]
-        accepted_event = history.json()["items"][1]
+        # Rejection, correction and acceptance are three distinct caregiver
+        # decisions. The correction must remain in the append-only history.
+        assert history.json()["count"] == 3
+        history_items = history.json()["items"]
+        assert [item["decision"] for item in history_items] == ["reject", "correct", "accept"]
+        correction_event = history_items[1]
+        assert correction_event["after"]["subject"] == caregiver_label
+        assert correction_event["after"]["review_status"] == "corrected_pending_approval"
+        accepted_event = history_items[2]
         assert accepted_event["before"]["observation"] == quote_correct
         assert accepted_event["after"]["observation"] == quote_correct
         assert accepted_event["after"]["review_status"] == "accepted_by_caregiver"
