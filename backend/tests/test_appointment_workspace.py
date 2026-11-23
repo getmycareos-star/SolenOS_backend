@@ -3543,3 +3543,41 @@ def test_appointment_preparation_change_window_uses_actual_completion_time(clien
     assert window["basis"] == "since_previous_recorded_appointment"
     actual_anchor = datetime.fromisoformat(window["starts_at"])
     assert actual_anchor.replace(tzinfo=None) == completed_at.replace(tzinfo=None)
+
+def test_appointment_preparation_legacy_events_inherit_lcr_correction_currentness():
+    events = [
+        {"source_id": "corrected", "status": "recorded", "description": "Earlier report"},
+        {"source_id": "current", "status": "recorded", "description": "Current report"},
+        {"source_id": "not-in-projection", "status": "recorded", "description": "Unverified report"},
+    ]
+    lcr_context = {
+        "sources": {
+            "events": {
+                "items": [
+                    {
+                        "id": "corrected",
+                        "correction_lineage_status": "checked",
+                        "information_status": "historical_event",
+                        "interpretation_limit": "A correction superseded this original report.",
+                        "superseded_by_corrections": [{"corrected_text": "Corrected account"}],
+                    },
+                    {
+                        "id": "current",
+                        "correction_lineage_status": "checked",
+                        "information_status": "caregiver_reported",
+                        "interpretation_limit": "Caregiver report; not independently verified.",
+                    },
+                ],
+            },
+        },
+    }
+
+    result = appointment_workspace._apply_lcr_event_correction_lineage(events, lcr_context)
+    by_id = {item["source_id"]: item for item in result}
+
+    assert by_id["corrected"]["information_status"] == "historical_event"
+    assert by_id["corrected"]["corrections"][0]["corrected_text"] == "Corrected account"
+    assert by_id["current"]["information_status"] == "caregiver_reported"
+    assert by_id["not-in-projection"]["correction_lineage_status"] == "failed"
+    assert by_id["not-in-projection"]["information_status"] == "event_currentness_unknown"
+
