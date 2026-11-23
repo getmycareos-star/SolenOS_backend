@@ -1825,6 +1825,11 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
         )
         execution = dict(execution or {})
         stages = dict(execution.get("stages") or {})
+        if (
+            execution.get("transaction_owner") != "caller"
+            or stages.get("reconciliation") != "staged_in_caller_transaction"
+        ):
+            raise RuntimeError("care_continuity_reconciliation_not_durably_staged")
         if any(value in {"pending", "failed", "not_completed"} for value in stages.values()):
             raise RuntimeError("care_continuity_reconciliation_incomplete")
 
