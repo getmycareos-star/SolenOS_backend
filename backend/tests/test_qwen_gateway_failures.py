@@ -274,6 +274,33 @@ def test_qwen_readiness_and_runtime_status_reject_non_object_inventory(monkeypat
     assert runtime["inference_verified"] is False
 
 
+def test_qwen_readiness_and_runtime_status_reject_truncated_inventory(monkeypatch):
+    import http.client
+
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("QWEN_INSTALL_STATE_FILE", "/tmp/solenos-test-missing-qwen-state.json")
+
+    class TruncatedInventory(FakeResponse):
+        def read(self):
+            raise http.client.IncompleteRead(b'{"models":')
+
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: TruncatedInventory(b""),
+    )
+
+    readiness = qwen_gateway.qwen_readiness_status(force=True)
+    runtime = qwen_gateway.qwen_runtime_status()
+
+    assert readiness["available"] is False
+    assert readiness["error_category"] == "invalid_model_inventory"
+    assert readiness["failure_reason"] == "IncompleteRead"
+    assert runtime["available"] is False
+    assert runtime["error_category"] == "invalid_model_inventory"
+    assert runtime["failure_reason"] == "IncompleteRead"
+
+
 def test_qwen_readiness_and_runtime_status_reject_inventory_without_models(monkeypatch):
     configure_gateway(monkeypatch)
     monkeypatch.setenv("QWEN_INSTALL_STATE_FILE", "/tmp/solenos-test-missing-qwen-state.json")
