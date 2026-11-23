@@ -493,3 +493,62 @@ def test_postgres_delete_is_not_blocked_by_document_interpretation(monkeypatch):
             assert db.query(CaptureAnalysis).filter_by(
                 person_id=person_id, source_evidence_id=evidence_id
             ).count() == 0
+
+def test_postgres_worker_recovers_processing_job_with_missing_lease_timestamp(monkeypatch):
+    """Legacy processing rows without a lock timestamp must not remain stuck forever."""
+    suffix = uuid.uuid4().hex
+    person_id = f"missing-lease-person-{suffix}"
+    caregiver_id = f"missing-lease-caregiver-{suffix}"
+    job_id = str(uuid.uuid4())
+    monkeypatch.setattr(worker, "SessionLocal", SessionLocal)
+    monkeypatch.setattr(
+        worker,
+        "_process_document_evidence",
+        lambda evidence_id, scoped_person_id, scoped_caregiver_id: (
+            {"analysis_id": "analysis-recovered", "retryable_page_numbers": [], "retry_exhausted_page_numbers": []},
+            {"intelligence_status": "complete", "observations": [], "processed_page_count": 1, "total_page_count": 1, "unprocessed_page_numbers": []},
+        ),
+    )
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Missing lease timestamp recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Missing lease timestamp caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Resume document processing after worker restart.",
+                context_text="",
+                workflow="document_intake",
+                evidence_ids_json='["missing-lease-evidence"]',
+                status="processing",
+                attempt_count=1,
+                locked_at=None,
+                available_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            ))
+            db.commit()
+
+        assert asyncio.run(worker.process_one_qwen_job(job_id)) is True
+        with SessionLocal() as db:
+            recovered = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert recovered.status == "completed"
+            assert recovered.locked_at is None
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id,
+                event_type="document_intake_completed",
+            ).count() == 1
+    finally:
+        with SessionLocal() as db:
+            db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
