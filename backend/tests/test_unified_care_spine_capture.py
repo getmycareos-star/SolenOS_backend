@@ -476,7 +476,10 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             lcr_matches = [
                 item for item in lcr.json()["items"] if item["id"] == event_id
             ]
-            assert len(lcr_matches) == 1
+            assert len(lcr_matches) == 1, (
+                "Daily Capture event missing from current-care projection; "
+                f"response={lcr.json()}"
+            )
             assert lcr_matches[0]["evidence_ids"] == [evidence_id]
 
             # Exercise the actual Companion HTTP path, not only the retrieval
