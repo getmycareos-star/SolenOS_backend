@@ -705,7 +705,7 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
         with Session() as db:
             with pytest.raises(HTTPException) as denied:
                 review_document_candidate(
-                    analysis_id, CandidateReview(candidate_index=0, decision="accept"),
+                    analysis_id, CandidateReview(candidate_index=0, decision="accept", expected_source_quote="", expected_subject=""),
                     _request(other_person_id, other_caregiver_id), db,
                 )
             assert denied.value.status_code == 404

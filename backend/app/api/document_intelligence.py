@@ -87,8 +87,8 @@ class CandidateReview(BaseModel):
     # Bind a caregiver decision to the exact suggestion they reviewed. The
     # index alone is not stable when a document analysis is refreshed or
     # candidate ordering changes between render and submission.
-    expected_source_quote: str | None = Field(default=None, max_length=20000)
-    expected_subject: str | None = Field(default=None, max_length=120)
+    expected_source_quote: str = Field(max_length=20000)
+    expected_subject: str = Field(max_length=120)
     expected_candidate_id: str | None = Field(default=None, max_length=128)
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
@@ -1520,16 +1520,14 @@ def review_document_candidate(
     # positional; source wording and subject bind the action to what the
     # caregiver actually saw, while the existing row lock serializes review.
     if (
-        payload.expected_source_quote is not None
-        and candidate.get("source_quote") != payload.expected_source_quote
+        candidate.get("source_quote") != payload.expected_source_quote
     ):
         raise HTTPException(
             status_code=409,
             detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
         )
     if (
-        payload.expected_subject is not None
-        and candidate.get("subject") != payload.expected_subject
+        candidate.get("subject") != payload.expected_subject
     ):
         raise HTTPException(
             status_code=409,
