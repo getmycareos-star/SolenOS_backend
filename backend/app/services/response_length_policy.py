@@ -41,7 +41,7 @@ _ACK = re.compile(
     re.I,
 )
 _EMOTIONAL = re.compile(
-    r"\b(?:exhausted|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
+    r"\b(?:exhausted|tired|worn out|drained|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
     r"frightened|panicking|terrified|at my limit|falling apart|i'm struggling|"
     r"i am struggling|need a break|no sleep|up all night|"
     r"i(?:'m| am) (?:really |very |so )?(?:sad|angry|upset|lonely|anxious|grieving|frustrated|furious)|"
@@ -52,7 +52,7 @@ _EMOTIONAL = re.compile(
 )
 _STANDALONE_CAREGIVER_EMOTION = re.compile(
     r"^(?:really |very |so )?(?:sad|angry|upset|lonely|anxious|scared|frightened|"
-    r"afraid|frustrated|furious|overwhelmed|exhausted|burnt out|burned out)[.!?]*$",
+    r"afraid|frustrated|furious|overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*$",
     re.I,
 )
 _PATIENT_EMOTIONAL_REPORT = re.compile(
@@ -60,7 +60,7 @@ _PATIENT_EMOTIONAL_REPORT = re.compile(
     r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
     r".{0,40}\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been|has seemed|have seemed)\b"
     r".{0,24}\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
-    r"helpless|frustrated|furious|overwhelmed|exhausted|burnt out|burned out|grieving|panicking|terrified|falling apart)\b",
+    r"helpless|frustrated|furious|overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out|grieving|panicking|terrified|falling apart)\b",
     re.I,
 )
 _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
