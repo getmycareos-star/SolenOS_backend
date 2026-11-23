@@ -133,7 +133,11 @@ def test_document_review_response_reports_missing_page_and_hides_old_candidates(
             "unprocessed_page_numbers": [2],
             "document_intelligence": {
                 "status": "available",
-                "observations": [{"subject": "Medication", "observation": "Old candidate"}],
+                "observations": [{
+                    "subject": "Medication",
+                    "observation": "Old candidate",
+                    "review_status": "accepted_by_caregiver",
+                }],
             },
         },
     )
@@ -316,6 +320,7 @@ def test_lifecycle_response_blocks_legacy_pdf_page_gaps_and_hides_old_candidates
     assert response["unprocessed_page_numbers"] == [2]
     assert response["interpretation_blocked"] is True
     assert response["candidate_count"] == 0
+    assert response["written_to_lcr"] is False
 
 
 def test_lifecycle_response_does_not_invent_missing_pages_for_standalone_scan():
