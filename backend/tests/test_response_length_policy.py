@@ -15,6 +15,25 @@ def test_first_time_and_returning_greetings_have_distinct_targets_and_maxima():
     assert (returning.target_words, returning.max_words) == (30, 55)
 
 
+def test_explicit_caregiver_distress_uses_low_capacity_response_budget():
+    for message in (
+        "I'm sad about how things are going.",
+        "I feel very lonely looking after her.",
+        "I'm really angry and upset.",
+        "I feel so frustrated with all of this.",
+        "I've been crying all morning.",
+        "I just want a break.",
+    ):
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "low_capacity_support", message
+        assert (policy.target_words, policy.max_words) == (35, 60), message
+
+
+def test_patient_emotion_is_not_mistaken_for_caregiver_distress():
+    policy = resolve_response_length_policy("Mum has seemed sad and withdrawn this week.")
+    assert policy.intent != "low_capacity_support"
+
+
 def test_emotional_context_is_not_classified_as_a_greeting_or_acknowledgement():
     policy = resolve_response_length_policy("Hi. I'm exhausted. Mum has been awake all night again.")
     assert policy.intent == "low_capacity_support"
