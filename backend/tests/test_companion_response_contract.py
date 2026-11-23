@@ -300,6 +300,57 @@ def test_history_page_failure_cannot_be_reported_as_a_complete_projection(monkey
     assert merged["retrieval_contract"]["pages_fetched"] == 2
 
 
+def test_history_first_page_failure_can_recover_when_retry_returns_the_source(monkeypatch):
+    initial = {
+        "sources": {
+            "events": {
+                "status": "failed",
+                "items": [],
+                "candidate_count": 0,
+                "returned_count": 0,
+                "candidate_scan_complete": False,
+                "has_more": True,
+                "next_offset": 0,
+                "error_code": "source_query_failed",
+                "interpretation_limit": "The first source scan failed.",
+            },
+        },
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+    }
+
+    def recovered_page(*args, **kwargs):
+        assert kwargs["source_offsets"]["events"] == 0
+        return {
+            "sources": {
+                "events": {
+                    "status": "available",
+                    "items": [{"id": "event-recovered"}],
+                    "candidate_count": 1,
+                    "returned_count": 1,
+                    "candidate_scan_complete": True,
+                    "has_more": False,
+                    "next_offset": None,
+                },
+            },
+            "missing_required_sources": [],
+            "missing_optional_sources": [],
+            "retrieval_contract": {},
+        }
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", recovered_page)
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1", "What happened in 2025?",
+        initial, limit_per_source=1, max_pages=5,
+    )
+
+    assert merged["sources"]["events"]["status"] == "available"
+    assert [item["id"] for item in merged["sources"]["events"]["items"]] == ["event-recovered"]
+    assert merged["retrieval_projection_complete"] is True
+    assert merged["retrieval_contract"]["page_limit_reached"] is False
+
+
 def test_medication_dose_recall_never_overrides_higher_priority_safety_guards():
     request = "What dose did the doctor prescribe?"
     assert collaboration._should_use_medication_dose_recall_fallback(request) is True
