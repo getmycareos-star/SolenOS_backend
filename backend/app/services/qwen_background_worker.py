@@ -271,7 +271,10 @@ def _reconcile_daily_capture_delta(
         result = reconcile_event(
             delta_db,
             person_id=person_id,
-            event_date=event.occurred_at,
+            # Let Delta resolve time from the persisted source event. Passing
+            # occurred_at here would relabel a server-generated recording
+            # timestamp as an explicit caregiver-reported event time.
+            event_date=None,
             source="SolenOS Daily Capture",
             content=event.description,
             source_event_id=source_event_id,
