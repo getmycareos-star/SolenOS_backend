@@ -23,7 +23,7 @@ from app.models.time_location import Appointment
 from app.main import app
 import app.main as main_module
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///:memory:")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
 if os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") == "1" and not POSTGRES_DATABASE:
     raise RuntimeError(
@@ -33,11 +33,13 @@ pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") != "1" or not POSTGRES_DATABASE,
     reason="requires the dedicated live-Qwen appointment-assist workflow and migrated PostgreSQL",
 )
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True) if POSTGRES_DATABASE else None
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine is not None else None
 
 
 def override_db():
+    if TestingSessionLocal is None:
+        raise RuntimeError("Live appointment-assist acceptance requires PostgreSQL.")
     db = TestingSessionLocal()
     try:
         yield db
