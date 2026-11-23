@@ -63,7 +63,7 @@ _CRITICAL = re.compile(
 _APPOINTMENT = re.compile(
     r"\b(?:prepare|preparing|preparation)\b.{0,80}\b(?:appointment|doctor visit|clinic visit|visit)\b|"
     r"\b(?:appointment|doctor visit|clinic visit)\b.{0,80}\b(?:prep|preparing|preparation|briefing)\b|"
-    r"\bquestions? (?:for|to ask )(?:the )?doctor\b",
+    r"\bquestions?\b.{0,60}\b(?:for|to ask)\s+(?:the\s+)?doctor\b",
     re.I,
 )
 _HANDOFF = re.compile(
@@ -220,7 +220,7 @@ def resolve_workflow_response_length_policy(
 def count_response_words(text: str) -> int:
     # Count natural-language words while keeping contractions and hyphenated
     # compounds intact. Em dashes and surrounding punctuation separate words.
-    return len(re.findall(r"[\\w]+(?:['’][\\w]+)*(?:-[\\w]+(?:['’][\\w]+)*)*", text or "", re.UNICODE))
+    return len(re.findall(r"[\w]+(?:['’][\w]+)*(?:-[\w]+(?:['’][\w]+)*)*", text or "", re.UNICODE))
 
 
 def response_exceeds_hard_maximum(text: str, policy: ResponseLengthPolicy) -> bool:
