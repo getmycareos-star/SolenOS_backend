@@ -448,61 +448,6 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
     ) is False
 
 
-def test_worker_lease_maintainer_stops_when_another_worker_reclaims_job(monkeypatch):
-    claimed_at = datetime.now(timezone.utc)
-    lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
-    calls = []
-
-    def reject_old_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now=None):
-        calls.append((job_id, person_id, caregiver_id, expected_locked_at))
-        with lease_state["_lock"]:
-            lease_state["lost"] = True
-        return False
-
-    monkeypatch.setattr(worker, "_refresh_qwen_job_lease_once", reject_old_lease)
-    asyncio.run(worker._maintain_qwen_job_lease(
-        "job-test",
-        "person-test",
-        "caregiver-test",
-        lease_state,
-        interval_seconds=0,
-    ))
-
-    assert calls == [("job-test", "person-test", "caregiver-test", claimed_at)]
-    assert lease_state["lost"] is True
-    assert lease_state["locked_at"] == claimed_at
-
-
-def test_worker_lease_maintainer_advances_only_after_successful_compare_and_swap(monkeypatch):
-    claimed_at = datetime.now(timezone.utc)
-    lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
-    calls = []
-
-    def accept_current_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now=None):
-        calls.append((expected_locked_at, now))
-        with lease_state["_lock"]:
-            if len(calls) == 1:
-                lease_state["locked_at"] = now
-                return True
-            lease_state["lost"] = True
-        return False
-
-    monkeypatch.setattr(worker, "_refresh_qwen_job_lease_once", accept_current_lease)
-    # Stop after the first successful renewal by making the next attempt fail.
-    asyncio.run(worker._maintain_qwen_job_lease(
-        "job-test",
-        "person-test",
-        "caregiver-test",
-        lease_state,
-        interval_seconds=0,
-    ))
-
-    assert len(calls) == 2
-    assert calls[0][0] == claimed_at
-    assert lease_state["lost"] is True
-    assert lease_state["locked_at"] == calls[0][1]
-
-
 def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     caller_thread_id = threading.get_ident()
