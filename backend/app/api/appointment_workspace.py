@@ -178,10 +178,11 @@ def _record_out(record: AppointmentWorkspaceRecord, db: Session | None = None) -
             elif record.updated_at is None:
                 freshness["reason"] = "workspace_update_time_unavailable"
             else:
-                latest = db.query(CareStateRevision.changed_at).filter(
-                    CareStateRevision.person_id == record.person_id,
-                    CareStateRevision.changed_at > record.updated_at,
-                ).order_by(CareStateRevision.changed_at.desc()).first()
+                with db.begin_nested():
+                    latest = db.query(CareStateRevision.changed_at).filter(
+                        CareStateRevision.person_id == record.person_id,
+                        CareStateRevision.changed_at > record.updated_at,
+                    ).order_by(CareStateRevision.changed_at.desc()).first()
                 if latest:
                     freshness.update({
                         "status": "stale",
