@@ -1135,9 +1135,10 @@ def _refresh_qwen_job_lease_once(
     person_id: str,
     caregiver_id: str,
     *,
+    expected_locked_at: datetime,
     now: datetime | None = None,
 ) -> bool:
-    """Extend a running job's lease without holding its processing transaction."""
+    """Renew only the exact lease instance this worker originally claimed."""
     lease_db = SessionLocal()
     try:
         updated = lease_db.query(QwenBackgroundJob).filter(
@@ -1145,6 +1146,7 @@ def _refresh_qwen_job_lease_once(
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.caregiver_id == caregiver_id,
             QwenBackgroundJob.status == "processing",
+            QwenBackgroundJob.locked_at == expected_locked_at,
         ).update(
             {QwenBackgroundJob.locked_at: now or datetime.now(timezone.utc)},
             synchronize_session=False,
@@ -1163,20 +1165,30 @@ async def _maintain_qwen_job_lease(
     job_id: str,
     person_id: str,
     caregiver_id: str,
+    lease_state: dict,
     *,
     interval_seconds: float = 60,
 ) -> None:
-    """Keep long OCR/model work leased; stop if the job is cancelled or reclaimed."""
+    """Renew this worker's lease; stop permanently if another worker reclaims it."""
     while True:
         await asyncio.sleep(interval_seconds)
+        expected_locked_at = lease_state.get("locked_at")
+        refreshed_at = datetime.now(timezone.utc)
+        if not isinstance(expected_locked_at, datetime):
+            lease_state["lost"] = True
+            return
         lease_alive = await asyncio.to_thread(
             _refresh_qwen_job_lease_once,
             job_id,
             person_id,
             caregiver_id,
+            expected_locked_at=expected_locked_at,
+            now=refreshed_at,
         )
         if not lease_alive:
+            lease_state["lost"] = True
             return
+        lease_state["locked_at"] = refreshed_at
 
 
 def _run_qwen_support_assist(payload, request):
@@ -1232,11 +1244,13 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         db.add(QwenJobEvent(job_id=job.id, person_id=job.person_id, caregiver_id=job.caregiver_id, event_type="job_claimed", from_status=previous_status, to_status="processing", metadata_json={"attempt": job.attempt_count}))
         db.commit()
         db.refresh(job)
+        lease_state = {"locked_at": job.locked_at, "lost": False}
         lease_task = asyncio.create_task(
             _maintain_qwen_job_lease(
                 str(job.id),
                 str(job.person_id),
                 str(job.caregiver_id),
+                lease_state,
             )
         )
 
