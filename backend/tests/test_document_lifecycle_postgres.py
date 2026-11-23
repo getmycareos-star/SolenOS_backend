@@ -185,6 +185,7 @@ from app.api.collaboration import (
     DocumentVersionLinkRequest,
 )
 from app.models.capture_analysis import CaptureAnalysis
+import app.api.document_lifecycle as lifecycle_module
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 from app.api.document_intelligence import _existing_assertion_for_exact_document_duplicate
 from app.api.document_intelligence import _persist_document_follow_up
@@ -1243,5 +1244,100 @@ def test_postgres_document_upload_rolls_back_when_binary_storage_fails(monkeypat
                 Evidence.person_id == person_id
             ).count() == 0
             assert verify.query(QwenBackgroundJob).filter_by(person_id=person_id).count() == 0
+    finally:
+        engine.dispose()
+
+
+def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monkeypatch):
+    """A retry that finishes late must return the newer committed extraction."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-stale-retry-person-{suffix}"
+    caregiver_id = f"doc-stale-retry-caregiver-{suffix}"
+    original = b"%PDF-1.4\nsource fixture for concurrent retry\n%%EOF"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Concurrent document retry fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Document retry caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.commit()
+
+        with Session() as db:
+            upload = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "concurrent-retry.pdf", original
+            )
+            evidence_id = upload["evidence_id"]
+            source_text = (
+                "[Page 1]\nOriginal page one.\n"
+                "[Page 2 OCR]\n[Page not processed: OCR engine error]"
+            )
+            metadata = {
+                "kind": "document_extraction_v1",
+                "mime_type": "application/pdf",
+                "filename": "concurrent-retry.pdf",
+                "binary_sha256": hashlib.sha256(original).hexdigest(),
+                "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
+                "page_count": 2,
+                "processed_page_numbers": [1],
+                "unreadable_page_numbers": [],
+                "extraction_method": "tesseract_ocr",
+                "extraction_attempt_count": 1,
+            }
+            analysis = CaptureAnalysis(
+                id=f"doc-stale-retry-analysis-{suffix}",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_evidence_id=evidence_id,
+                source_text=source_text,
+                extraction_status="partial",
+                candidates=metadata,
+                review_history=[],
+            )
+            db.add(analysis)
+            db.commit()
+            analysis_id = analysis.id
+
+        def finish_older_retry(*args, **kwargs):
+            # Simulate a newer request committing while the older OCR work is
+            # outside the row lock. The late retry must not replace this result.
+            with Session() as newer_db:
+                current = newer_db.query(CaptureAnalysis).filter_by(
+                    id=analysis_id, person_id=person_id,
+                    source_evidence_id=evidence_id,
+                ).with_for_update().one()
+                newer_text = "[Page 1]\nNewer committed extraction.\n[Page 2 OCR]\nNewer page two."
+                newer_metadata = dict(current.candidates)
+                newer_metadata["source_text_sha256"] = hashlib.sha256(
+                    newer_text.strip().encode("utf-8")
+                ).hexdigest()
+                newer_metadata["newer_request_marker"] = "committed-before-older-retry"
+                newer_metadata["processed_page_numbers"] = [1, 2]
+                current.source_text = newer_text
+                current.extraction_status = "available"
+                current.candidates = newer_metadata
+                newer_db.commit()
+            return (
+                "[Page 1]\nOriginal page one.\n[Page 2 OCR]\nLate older retry result.",
+                "tesseract_ocr",
+            )
+
+        monkeypatch.setattr(lifecycle_module, "_extract", finish_older_retry)
+        with Session() as retry_db:
+            result = extract_saved_document(
+                evidence_id, _request(person_id, caregiver_id), retry_db
+            )
+
+        assert result["analysis_id"] == analysis_id
+        assert "Newer committed extraction." in result["extracted_text"]
+        assert "Late older retry result." not in result["extracted_text"]
+        with Session() as verify_db:
+            saved = verify_db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+            assert saved.candidates["newer_request_marker"] == "committed-before-older-retry"
+            assert "Newer committed extraction." in saved.source_text
+            assert saved.extraction_status == "available"
     finally:
         engine.dispose()
