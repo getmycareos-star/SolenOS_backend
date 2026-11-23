@@ -32,12 +32,12 @@ _POLICIES = {
 
 _GREETING = re.compile(
     r"^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening|good day|"
-    r"how are you|how are you doing|how are you today|how're you|how'?s it going|what'?s up|good night|yo|sup)(?: there| solenos)?[.!?]*$",
+    r"how are you|how are you doing|how are you today|how're you|how'?s it going|what'?s up|yo|sup)(?: there| solenos)?[.!?]*$",
     re.I,
 )
 _ACK = re.compile(
     r"^(?:thanks|thank you|thank you so much|got it|okay|ok|understood|yes|no|"
-    r"that helps|goodbye|bye|see you)[.! ]*$",
+    r"that helps|good night|goodbye|bye|see you)[.! ]*$",
     re.I,
 )
 _EMOTIONAL = re.compile(
