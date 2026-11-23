@@ -70,17 +70,17 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
     # state without repeating the adjective ("Mum is exhausted, and I am too").
     # Attribute only first-person agreement, never the patient's statement alone.
     patient_capacity = re.search(
-        rf"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
-        rf"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
-        rf".{{0,100}}\\b{capacity_terms}\\b",
+        rf"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+        rf"wife|husband|partner|he|she|they|the patient|care recipient)\b"
+        rf".{{0,100}}\b{capacity_terms}\b",
         value,
     )
     if patient_capacity and re.search(
-        r"\\bi(?:'m| am) too\\b|\\bi feel the same\\b",
+        r"\bi(?:'m| am) too\b|\bi feel the same\b",
         value[patient_capacity.end():],
     ):
         return True
-    if re.search(r"\\bi(?:'ve| have) been crying\\b|\\bi can't stop crying\\b", value):
+    if re.search(r"\bi(?:'ve| have) been crying\b|\bi can't stop crying\b", value):
         return True
     first_person = re.search(r"\bi(?:'m| am| feel)\b", value)
     if first_person is None:
