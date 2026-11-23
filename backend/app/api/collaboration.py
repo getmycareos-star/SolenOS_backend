@@ -6501,13 +6501,19 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"\b(?:i feel like i(?:'m| am) failing|i should be doing more|"
         r"i lost my temper|i don't think i(?:'m| am) a good caregiver|"
         r"i(?:'m| am) a bad (?:caregiver|daughter|son)|"
-        r"it's my fault|it is my fault|i let (?:her|him|them) down)\b",
+        r"it's my fault|it is my fault|i let (?:her|him|them) down|"
+        r"i feel (?:so |really |very )?guilty|i am (?:so |really |very )?guilty|"
+        r"i blame myself|i should have (?:been there|done more|known better)|"
+        r"i failed (?:her|him|them))\b",
         text,
     )
     positive_emotion = re.search(
         r"\b(?:what a relief|i feel relieved|i(?:'m| am) hopeful|"
         r"i feel hopeful|we had a good day|she had a good day|he had a good day|"
-        r"that went well|i(?:'m| am) proud of)\b",
+        r"that went well|i(?:'m| am) proud of|i(?:'m| am) grateful|"
+        r"i feel grateful|i(?:'m| am) thankful|i feel thankful|"
+        r"i(?:'m| am) glad (?:we|she|he|they)|that was a good moment|"
+        r"we got through today)\b",
         text,
     )
     standalone_overload = re.fullmatch(
