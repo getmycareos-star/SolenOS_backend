@@ -773,7 +773,7 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
         assert historical_assertions["withdrawn-assertion"] == "historical_assertion"
         assert historical_assertions["retracted-assertion"] == "historical_assertion"
         assert "pending-assertion" not in str(sources["assertions"])
-        assert "failed-document-extraction" not in str(sources["document_extractions"])
+        assert "failed-document-extraction" not in str(sources["assertions"])
         assert "other-caregiver-document" not in str(sources["document_extractions"])
         assert "other-person-document" not in str(sources["document_extractions"])
         assert "other-person-event" not in str(sources["events"])
