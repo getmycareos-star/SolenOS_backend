@@ -110,6 +110,11 @@ def test_non_reconstruction_questions_do_not_force_full_history_paging(query):
     assert collaboration._is_broad_temporal_history_request(query) is False
 
 
+def test_broad_care_journey_uses_the_same_bounded_history_page_ceiling():
+    assert collaboration._lcr_history_page_limit(True) == collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES
+    assert collaboration._lcr_history_page_limit(False) == collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES
+
+
 def test_explicit_temporal_window_fetches_all_matching_history_pages():
     assert collaboration.MAX_TEMPORAL_LCR_HISTORY_PAGES == 20
     assert collaboration._should_fetch_full_lcr_context_pages(
