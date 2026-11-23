@@ -919,7 +919,7 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         pause_reply = pause_data.get("reply", "")
         assert 0 < len(pause_reply.split()) <= 45, pause_reply
         assert pause_reply.count("?") == 0, pause_reply
-        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", pause_reply), pause_reply
+        assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", pause_reply), pause_reply
 
         sadness = _ask(
             client,
