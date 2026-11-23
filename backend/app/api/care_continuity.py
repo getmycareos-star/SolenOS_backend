@@ -2201,7 +2201,7 @@ def current_care_projection(
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
         if source_name == "events" and str(row.get("event_type") or "").strip().lower() in {
-            "structured_daily_capture", "daily_care_entry",
+            "daily_capture", "structured_daily_capture", "daily_care_entry",
         }:
             # Event descriptions are stored as a JSON envelope for provenance
             # and idempotency. Never show that internal envelope as caregiver
@@ -2351,7 +2351,7 @@ def current_care_projection(
                     "reported_at": quick_check_in.get("caregiver_reported_at") or row.get("reported_at"),
                 }
         needs_attention = row.get("attention_candidate") is True or row.get("follow_up_candidate") is True
-        is_daily_capture = event_type in {"structured_daily_capture", "daily_care_entry", "quick_daily_checkin"}
+        is_daily_capture = event_type in {"daily_capture", "structured_daily_capture", "daily_care_entry", "quick_daily_checkin"}
         if needs_attention:
             add("events", row, "Care event needing attention", 5, require_open=True)
         elif is_daily_capture:
