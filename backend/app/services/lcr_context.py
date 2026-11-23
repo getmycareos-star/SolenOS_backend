@@ -801,17 +801,19 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
     page_count = value.get("page_count")
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
+        observed_pages = {
+            int(match.group(1))
+            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text or "")
+        }
         processed = value.get("processed_page_numbers")
         if isinstance(processed, list):
-            observed_pages = {
+            manifest_pages = {
                 page for page in processed
                 if isinstance(page, int) and not isinstance(page, bool) and page > 0
             }
-        else:
-            observed_pages = {
-                int(match.group(1))
-                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or "")
-            }
+            # Both the immutable extracted text and saved page manifest must
+            # account for a PDF page. A stale manifest cannot fill a source gap.
+            observed_pages.intersection_update(manifest_pages)
         explicit_unprocessed = value.get("unprocessed_page_numbers")
         unprocessed = {
             page for page in explicit_unprocessed
