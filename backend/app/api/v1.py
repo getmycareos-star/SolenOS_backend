@@ -1758,7 +1758,13 @@ def _correction_request_fingerprint(correction: CorrectionCreate) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _process_persisted_correction(db: Session, person_id: str, correction_id: str) -> CorrectionModel:
+def _process_persisted_correction(
+    db: Session,
+    person_id: str,
+    correction_id: str,
+    *,
+    force: bool = False,
+) -> CorrectionModel:
     correction_row = (
         db.query(CorrectionModel)
         .filter(
@@ -1783,6 +1789,16 @@ def _process_persisted_correction(db: Session, person_id: str, correction_id: st
         correction_row.processing_status == "processing"
         and lease_started is not None
         and lease_started > now - timedelta(minutes=10)
+    ):
+        return correction_row
+    retry_after = correction_row.next_retry_at
+    if retry_after is not None and retry_after.tzinfo is None:
+        retry_after = retry_after.replace(tzinfo=timezone.utc)
+    if (
+        correction_row.processing_status == "pending"
+        and retry_after is not None
+        and retry_after > now
+        and not force
     ):
         return correction_row
 
@@ -1974,7 +1990,7 @@ def retry_correction(
         raise HTTPException(status_code=404, detail="Correction not found")
     session = _require_session_scope(request, db, person_id, correction_row.caregiver_id)
     require_caregiver_permission(db, person_id, session.caregiver_id, "correct_records")
-    return _process_persisted_correction(db, person_id, correction_id)
+    return _process_persisted_correction(db, person_id, correction_id, force=True)
 
 
 @router.get("/corrections/{person_id}", response_model=List[CorrectionSchema])
