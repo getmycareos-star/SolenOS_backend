@@ -1501,13 +1501,13 @@ def test_lifecycle_decisions_reject_missing_and_stale_versions():
     missing_status_version = client.patch(
         f"/api/v1/open-loops/{closable['id']}",
         headers=headers,
-        json={"status": "in_progress"},
+        json={"status": "deferred", "review_at": "2026-12-01T09:00:00+00:00", "deferred_reason": "Waiting for the scheduled review."},
     )
     assert missing_status_version.status_code == 409, missing_status_version.text
     stale_status_version = client.patch(
         f"/api/v1/open-loops/{closable['id']}",
         headers=headers,
-        json={"status": "in_progress", "expected_version": stale_version},
+        json={"status": "deferred", "review_at": "2026-12-01T09:00:00+00:00", "deferred_reason": "Waiting for the scheduled review.", "expected_version": stale_version},
     )
     assert stale_status_version.status_code == 409, stale_status_version.text
     stale_close = client.post(
