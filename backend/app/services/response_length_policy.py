@@ -43,7 +43,11 @@ _ACK = re.compile(
 _EMOTIONAL = re.compile(
     r"\b(?:exhausted|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
     r"frightened|panicking|terrified|at my limit|falling apart|i'm struggling|"
-    r"i am struggling|need a break|no sleep|up all night)\b",
+    r"i am struggling|need a break|no sleep|up all night|"
+    r"i(?:'m| am) (?:really |very |so )?(?:sad|angry|upset|lonely|anxious|grieving|frustrated|furious)|"
+    r"i feel (?:really |very |so )?(?:sad|angry|upset|alone|lonely|scared|afraid|anxious|helpless|frustrated|furious)|"
+    r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying|"
+    r"i've had enough|i have had enough|i can't take this|i cannot take this)\b",
     re.I,
 )
 _CRITICAL = re.compile(
