@@ -801,19 +801,25 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
     page_count = value.get("page_count")
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
-        observed_pages = {
-            int(match.group(1))
-            for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or "")
-        }
         processed = value.get("processed_page_numbers")
-        if isinstance(processed, list):
-            manifest_pages = {
-                page for page in processed
-                if isinstance(page, int) and not isinstance(page, bool) and page > 0
+        manifest_pages = {
+            page for page in processed
+            if isinstance(page, int) and not isinstance(page, bool) and page > 0
+        } if isinstance(processed, list) else set()
+        if source_text is None:
+            # Legacy rows may have a page manifest but predate stored page
+            # markers in source_text. Preserve that explicit manifest rather
+            # than falsely marking every page as missing.
+            observed_pages = set(manifest_pages)
+        else:
+            observed_pages = {
+                int(match.group(1))
+                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
             }
-            # Both the immutable extracted text and saved page manifest must
-            # account for a PDF page. A stale manifest cannot fill a source gap.
-            observed_pages.intersection_update(manifest_pages)
+            # When immutable text exists, require both the text and manifest
+            # to account for a page; a stale manifest cannot fill a source gap.
+            if isinstance(processed, list):
+                observed_pages.intersection_update(manifest_pages)
         explicit_unprocessed = value.get("unprocessed_page_numbers")
         unprocessed = {
             page for page in explicit_unprocessed
