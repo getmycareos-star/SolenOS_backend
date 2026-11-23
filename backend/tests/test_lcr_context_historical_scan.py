@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 import json
 
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
@@ -7,9 +8,15 @@ from sqlalchemy.orm import Session
 from app.services.lcr_context import (
     MAX_TEXT_CHARS,
     _load_source_schema,
+    _safe_value,
     build_lcr_context,
     format_lcr_context_for_prompt,
 )
+
+
+def test_reflected_uuid_values_are_normalized_for_lcr_sources():
+    identifier = UUID("9a8d72d2-49f1-4d78-a8c9-5f1a5f0b1b9c")
+    assert _safe_value(identifier) == str(identifier)
 
 
 def _care_events_schema(engine):
