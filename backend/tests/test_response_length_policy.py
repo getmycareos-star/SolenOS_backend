@@ -22,6 +22,8 @@ def test_explicit_caregiver_capacity_signals_use_low_capacity_response_budget():
         "I'm overwhelmed by everything today.",
         "I'm exhausted and can't keep up.",
         "I'm really angry and exhausted.",
+        "I'm angry, frightened, and overwhelmed.",
+        "I feel sad and tired.",
         "I can't cope with all of this.",
         "I can't continue right now.",
         "I need a break.",
@@ -44,6 +46,8 @@ def test_emotion_alone_does_not_override_a_caregiver_request_for_detail():
         "I'm frightened about the future. What was recorded at the last appointment?",
         "I'm angry about this. Explain what changed over time.",
         "I've been crying this morning.",
+        "I feel sad but not overwhelmed.",
+        "I think Mum is exhausted.",
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent != "low_capacity_support", message
