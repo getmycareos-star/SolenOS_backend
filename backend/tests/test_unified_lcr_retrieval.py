@@ -2261,7 +2261,7 @@ def test_medication_lexical_expansion_retrieves_common_caregiver_paraphrases():
         expanded = _expanded_search_terms(direct)
         assert "medication" in expanded or "medicine" in expanded
         assert _retrieval_score(
-            {"title": "Care update", "description": matching_record["description"]},
+            {"title": "Care update", "description": matching_record},
             query_term,
             direct,
             expanded,
