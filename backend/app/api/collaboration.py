@@ -8535,7 +8535,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": 128 if caregiver_guidance else 16},
+                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -8584,7 +8584,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": 128},
+                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
