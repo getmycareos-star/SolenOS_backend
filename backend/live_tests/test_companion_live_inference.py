@@ -1130,6 +1130,65 @@ def test_live_qwen_surfaces_only_the_source_validated_professional_question():
         finally:
             db.close()
 
+def test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led():
+    """Configured live inference handles distinct emotional disclosures without creating care facts."""
+    with TestClient(app) as client:
+        session = _create_session(client, "Live emotional interaction evaluator")
+        auth = {"Authorization": f"Bearer {session['access_token']}"}
+        baseline = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert baseline.status_code == 200, baseline.text
+        baseline_ids = {
+            item.get("id")
+            for item in baseline.json().get("items", [])
+            if item.get("id")
+        }
+
+        grief = _ask(client, session, "I miss her so much. Some days I still expect her to walk into the room.")
+        assert grief.status_code == 200, grief.text
+        grief_data = grief.json()
+        grief_reply = grief_data.get("reply", "")
+        assert grief_data.get("ai_generated") is True, grief_data
+        assert grief_data.get("written_to_lcr") is False, grief_data
+        assert grief_data.get("persistence") == "conversation_only", grief_data
+        assert 0 < len(grief_reply.split()) <= 90, grief_reply
+        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", grief_reply), grief_reply
+        assert not re.search(r"(?i)everything will be okay|at least|you should be grateful", grief_reply), grief_reply
+
+        self_blame = _ask(
+            client, session,
+            "I lost my temper today. I feel like I'm failing her as a caregiver.",
+            grief_data.get("session_id"),
+        )
+        assert self_blame.status_code == 200, self_blame.text
+        self_blame_data = self_blame.json()
+        self_blame_reply = self_blame_data.get("reply", "")
+        assert self_blame_data.get("ai_generated") is True, self_blame_data
+        assert self_blame_data.get("written_to_lcr") is False, self_blame_data
+        assert 0 < len(self_blame_reply.split()) <= 90, self_blame_reply
+        assert not re.search(r"(?i)you are a bad caregiver|you failed her|you should have", self_blame_reply), self_blame_reply
+
+        positive = _ask(
+            client, session,
+            "What a relief. We had a calm afternoon together and she smiled.",
+            self_blame_data.get("session_id"),
+        )
+        assert positive.status_code == 200, positive.text
+        positive_data = positive.json()
+        positive_reply = positive_data.get("reply", "")
+        assert positive_data.get("ai_generated") is True, positive_data
+        assert positive_data.get("written_to_lcr") is False, positive_data
+        assert 0 < len(positive_reply.split()) <= 70, positive_reply
+        assert not re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", positive_reply), positive_reply
+
+        after = client.get("/api/v1/care-continuity/current-care", headers=auth)
+        assert after.status_code == 200, after.text
+        after_ids = {
+            item.get("id")
+            for item in after.json().get("items", [])
+            if item.get("id")
+        }
+        assert after_ids == baseline_ids, {"before": baseline_ids, "after": after_ids}
+
 def test_live_qwen_concurrent_authenticated_companion_requests_remain_person_scoped():
     """Concurrent real inference must not mix two caregivers' saved evidence."""
     with TestClient(app) as client:
