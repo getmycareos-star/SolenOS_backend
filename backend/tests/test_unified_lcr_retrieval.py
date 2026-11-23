@@ -2180,3 +2180,64 @@ def test_retrieval_score_indexes_nested_descriptive_context_but_not_nested_ids()
     }
     assert _retrieval_score(contextual, "overnight awake", direct, expanded) > 0
     assert _retrieval_score(identifier_only, "overnight awake", direct, expanded) == 0
+
+def test_postgres_query_coverage_is_incomplete_when_a_present_source_is_unsearchable(monkeypatch):
+    """A searchable source must not make an incomplete cross-source scan look complete."""
+    from app.services.lcr_context import _load_source_schema
+
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        connection.exec_driver_sql("""
+            CREATE TABLE retrieval_test_events (
+                id VARCHAR PRIMARY KEY,
+                person_id VARCHAR NOT NULL,
+                title VARCHAR,
+                created_at TIMESTAMPTZ
+            )
+        """)
+        connection.exec_driver_sql("""
+            CREATE TABLE retrieval_test_evidence (
+                id VARCHAR PRIMARY KEY,
+                person_id VARCHAR NOT NULL,
+                created_at TIMESTAMPTZ
+            )
+        """)
+        connection.exec_driver_sql(
+            "INSERT INTO retrieval_test_events (id, person_id, title, created_at) "
+            "VALUES ('matching-event', 'coverage-person', 'Sleep observation', now())"
+        )
+        monkeypatch.setattr(
+            "app.services.lcr_context.SOURCE_SPECS",
+            {
+                "events": {
+                    "table": "retrieval_test_events",
+                    "required": True,
+                    "fields": ["id", "person_id", "title", "created_at"],
+                    "order": ["created_at"],
+                },
+                "evidence": {
+                    "table": "retrieval_test_evidence",
+                    "required": True,
+                    "fields": ["id", "person_id", "created_at"],
+                    "order": ["created_at"],
+                },
+            },
+        )
+        _load_source_schema.cache_clear()
+        with Session(bind=connection) as db:
+            context = build_lcr_context(
+                db, "coverage-person", query="sleep", limit_per_source=10,
+            )
+
+        assert context["sources"]["events"]["status"] == "available"
+        assert [item["id"] for item in context["sources"]["events"]["items"]] == ["matching-event"]
+        assert context["sources"]["evidence"]["status"] == "unsearchable"
+        assert context["unsearchable_sources"] == ["evidence"]
+        assert context["unsearchable_required_sources"] == ["evidence"]
+        assert context["history_coverage"] == "partial_search_coverage"
+        assert context["retrieval_scan_complete"] is False
+        assert context["retrieval_projection_complete"] is False
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
