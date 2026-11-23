@@ -3141,6 +3141,12 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
             }
             record_type = source_type_map.get(source_type, source_type)
             record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+            if source_type == "appointment_workspaces":
+                freshness = record.get("source_freshness") if isinstance(record.get("source_freshness"), dict) else {}
+                if freshness.get("status") == "stale":
+                    record_type = "appointment_workspace_stale"
+                elif freshness.get("status") != "current":
+                    record_type = "appointment_workspace_currentness_unknown"
             record_id = (
                 payload.get("source_id")
                 or record.get("id")
@@ -8771,10 +8777,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             if not record_id:
                 continue
             is_revision = source_type == "appointment_workspace_revisions"
+            freshness = record.get("source_freshness") if isinstance(record.get("source_freshness"), dict) else {}
+            workspace_record_type = (
+                "appointment_workspace_revision" if is_revision
+                else "appointment_workspace_stale" if freshness.get("status") == "stale"
+                else "appointment_workspace_currentness_unknown" if freshness.get("status") != "current"
+                else "appointment_workspace"
+            )
+            workspace_label = (
+                "Earlier appointment notes" if is_revision
+                else "Appointment notes to review" if freshness.get("status") == "stale"
+                else "Appointment notes — currentness not checked" if freshness.get("status") != "current"
+                else "Caregiver appointment notes"
+            )
             claim_source_records.append({
-                "record_type": "appointment_workspace_revision" if is_revision else "appointment_workspace",
+                "record_type": workspace_record_type,
                 "record_id": str(record_id),
-                "label": "Earlier appointment notes" if is_revision else "Caregiver appointment notes",
+                "label": workspace_label,
                 "source_text": json.dumps(record, ensure_ascii=False, default=str),
                 "occurred_at": (
                     record.get("changed_at") if is_revision
