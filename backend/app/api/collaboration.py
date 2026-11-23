@@ -5077,6 +5077,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "returned_count": source.get("returned_count", 0),
                         "candidate_scan_complete": source.get("candidate_scan_complete", False),
                         "has_more": source.get("has_more", False),
+                        "interpretation_limit": source.get("interpretation_limit"),
                     }
                     for name, source in shared_lcr_context.get("sources", {}).items()
                 },
