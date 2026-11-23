@@ -60,7 +60,7 @@ def _temporal_window(
     # calendar year. Treating it as a calendar year drops recent months and
     # includes months older than the caregiver requested.
     numbered_years = re.search(
-        r"\b(?:last|past)\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"\b(?:last|past)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|"
         r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\s+years?\b",
         text,
     )
@@ -168,23 +168,20 @@ def _temporal_window(
         start = end = today - timedelta(days=1)
     elif re.search(r"\btoday\b", text):
         start = end = today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text):
-        days = int(re.search(r"\b(?:last|past)\s+(\d{1,3})\s+days?\b", text).group(1))
-        if days < 1:
-            raise ValueError("A care-history day range must be at least one day.")
-        days = min(days, 366)
+    elif re.search(r"\b(?:last|past)\s+(\d{1,4})\s+days?\b", text):
+        days = int(re.search(r"\b(?:last|past)\s+(\d{1,4})\s+days?\b", text).group(1))
+        if days < 1 or days > 7300:
+            raise ValueError("A care-history day range must be between one day and twenty years.")
         start, end = today - timedelta(days=days - 1), today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text):
-        weeks = int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+weeks?\b", text).group(1))
-        if weeks < 1:
-            raise ValueError("A care-history week range must be at least one week.")
-        weeks = min(weeks, 52)
+    elif re.search(r"\b(?:last|past)\s+(\d{1,4})\s+weeks?\b", text):
+        weeks = int(re.search(r"\b(?:last|past)\s+(\d{1,4})\s+weeks?\b", text).group(1))
+        if weeks < 1 or weeks > 1040:
+            raise ValueError("A care-history week range must be between one week and twenty years.")
         start, end = today - timedelta(days=weeks * 7 - 1), today
-    elif re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text):
-        months = int(re.search(r"\b(?:last|past)\s+(\d{1,2})\s+months?\b", text).group(1))
-        if months < 1:
-            raise ValueError("A care-history month range must be at least one month.")
-        months = min(months, 12)
+    elif re.search(r"\b(?:last|past)\s+(\d{1,3})\s+months?\b", text):
+        months = int(re.search(r"\b(?:last|past)\s+(\d{1,3})\s+months?\b", text).group(1))
+        if months < 1 or months > 240:
+            raise ValueError("A care-history month range must be between one month and twenty years.")
         month_index = today.year * 12 + (today.month - 1) - months
         start_year, start_month_zero = divmod(month_index, 12)
         start_month = start_month_zero + 1
