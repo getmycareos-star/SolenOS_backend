@@ -92,3 +92,14 @@ def test_greeting_with_emotional_content_uses_low_capacity_support():
 def test_critical_terms_are_recognized_after_policy_regex_refactor():
     assert resolve_response_length_policy("She is unresponsive").intent == "critical_safety"
     assert resolve_response_length_policy("He is having a seizure").intent == "critical_safety"
+
+
+def test_good_night_uses_the_same_bounded_greeting_contract():
+    policy = resolve_response_length_policy("Good night!")
+    assert policy.intent == "first_time_greeting"
+    assert (policy.target_words, policy.max_words) == (25, 40)
+
+
+def test_greeting_with_there_is_classified_as_greeting():
+    policy = resolve_response_length_policy("Hi there.")
+    assert policy.intent == "first_time_greeting"
