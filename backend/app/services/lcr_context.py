@@ -602,6 +602,18 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 
 
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
+    if source_name == "events":
+        event_status = str(item.get("status") or "").casefold()
+        if event_status in {"invalidated", "superseded", "withdrawn", "deleted"}:
+            return (
+                "historical_event",
+                "This care entry was invalidated, superseded, or withdrawn. Keep it in the history, but do not present it as current care information.",
+            )
+        if event_status == "unparsed_raw":
+            return (
+                "unprocessed_capture",
+                "This is an unprocessed capture, not an accepted care event. Do not present it as an established event.",
+            )
     if source_name == "evidence":
         evidence_status = str(item.get("evidence_status") or "").casefold()
         epistemic_status = str(item.get("epistemic_status") or "").casefold()
