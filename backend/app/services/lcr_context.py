@@ -526,7 +526,7 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
     return value
 
 
-_SEMANTIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
+_CURATED_TERM_EXPANSIONS: dict[str, tuple[str, ...]] = {
     "uncertain": ("uncertainty", "unknown", "partial", "unreadable", "missing"),
     "unreadable": ("partial", "ocr", "not_readable"),
     "incomplete": ("partial", "unreadable", "not_processed"),
@@ -602,7 +602,7 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
     terms = [term for term in terms if term not in _SEARCH_STOPWORDS]
     expanded = list(terms)
     for term in terms:
-        expanded.extend(_SEMANTIC_EXPANSIONS.get(term, ()))
+        expanded.extend(_CURATED_TERM_EXPANSIONS.get(term, ()))
         if len(term) > 4 and term.endswith("ies"):
             expanded.append(term[:-3] + "y")
         elif len(term) > 4 and term.endswith("s"):
