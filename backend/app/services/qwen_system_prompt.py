@@ -239,7 +239,7 @@ def apply_solenos_system_contract(messages: list[dict]) -> list[dict]:
         else:
             non_system.append(message)
 
-    combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip()
+    combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip() + "\n\n" + SOLENOS_IDENTITY_CONSTITUTION
     if workflow_system:
         combined += "\n\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS\n" + "\n\n".join(workflow_system)
 
