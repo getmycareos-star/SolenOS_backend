@@ -273,6 +273,19 @@ def test_qwen35_gateway_rejects_thinking_only_response(monkeypatch):
     assert error.value.detail["reason"] == "missing_message_content"
 
 
+def test_qwen_gateway_rejects_non_qwen_ollama_models(monkeypatch):
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://solenos-ollama.railway.internal:11434")
+    monkeypatch.setenv("OLLAMA_MODEL", "llama3.1:8b")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.get_ollama_config()
+
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "unsupported_model"
+    assert error.value.detail["reason"] == "qwen_model_required"
+
+
 def test_production_qwen_gateway_rejects_public_inference_egress(monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://public-model.example.com:11434")
     monkeypatch.setenv("OLLAMA_MODEL", "qwen-test")
