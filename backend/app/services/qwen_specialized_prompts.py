@@ -273,16 +273,16 @@ Purpose: interpret event state transitions without erasing the audit trail.
 # Match on existing workflow system instructions only. User content and source
 # documents are deliberately excluded so a quoted phrase cannot activate a mode.
 ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("lcr_retrieval", ("lcr context", "living care record context", "care history search", "retrieve care", "retrieved lcr", "companion context", "session-authorized records", "retrieved_history", "records are the sole authority", "supplied living care record")),
-    ("care_extraction", ("extract", "extraction", "candidate observation", "daily capture", "add record", "source quote", "daily care qwen support layer", "review-required candidate", "source text", "proposals are not facts")),
-    ("longitudinal_reasoning", ("longitudinal", "change intelligence", "what changed", "delta engine", "trend", "compare historical", "delta object", "event chronology")),
+    ("lcr_retrieval", ("lcr context", "living care record context", "care history search", "retrieve care", "retrieved lcr", "companion context", "living_care_record", "care_history_search", "session-authorized records", "retrieved_history", "records are the sole authority", "supplied living care record")),
+    ("care_extraction", ("extract", "extraction", "candidate observation", "daily capture", "add record", "source quote", "daily care qwen support layer", "daily_capture", "add_record", "review-required candidate", "source text", "proposals are not facts")),
+    ("longitudinal_reasoning", ("longitudinal", "change intelligence", "what changed", "delta engine", "trend", "compare historical", "delta object", "delta_engine", "care_situation_change", "event chronology")),
     ("reconciliation", ("contradiction", "uncertainty", "conflicting", "reconcile evidence", "information gap", "sources conflict", "preserve disagreements")),
     ("document_intelligence", ("document", "ocr", "discharge summary", "uploaded file", "source pages", "document text", "document extraction")),
     ("companion", ("companion", "caregiver question", "answer the caregiver", "conversational response", "supporting language assistant inside solenos")),
-    ("handoff_appointment", ("handoff", "appointment", "professional summary", "clinician summary", "visit preparation", "draft a care briefing")),
-    ("caregiver_continuity", ("open loop", "care coordination", "caregiver strain", "care coverage", "unanswered concern")),
-    ("medication_continuity", ("medication", "medicines", "prescription", "dose discrepancy", "treatment continuity")),
-    ("event_lifecycle", ("record lifecycle", "correction", "withdrawn", "superseded", "event status")),
+    ("handoff_appointment", ("handoff", "appointment", "professional summary", "clinician summary", "visit preparation", "draft a care briefing", "professional_summary", "after_appointment")),
+    ("caregiver_continuity", ("open loop", "care coordination", "caregiver strain", "care coverage", "unanswered concern", "open_loops", "caregiver_strain_support", "care_coverage_gap", "incident_follow_through")),
+    ("medication_continuity", ("medication", "medicines", "prescription", "dose discrepancy", "treatment continuity", "medication_day")),
+    ("event_lifecycle", ("record lifecycle", "correction", "withdrawn", "superseded", "event status", "record_lifecycle", "care_instruction_change_tracker")),
 )
 
 
