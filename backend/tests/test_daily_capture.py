@@ -1148,8 +1148,9 @@ def test_care_event_correction_is_append_only_and_rejects_foreign_targets(monkey
             "execute_care_continuity_reconciliation",
             lambda *args, **kwargs: {
                 "workflow": "care_record_correction",
-                "status": "committed",
-                "stages": {"reconciliation": "committed"},
+                "status": "staged",
+                "stages": {"reconciliation": "staged_in_caller_transaction"},
+                "transaction_owner": "caller",
             },
         )
         client = TestClient(app)
@@ -3278,7 +3279,7 @@ def test_correction_receipt_is_durable_idempotent_and_retryable(monkeypatch):
                 raise RuntimeError("injected reconciliation failure")
             return {
                 "workflow": "care_record_correction",
-                "stages": {"reconciliation": "committed"},
+                "stages": {"reconciliation": "staged_in_caller_transaction"},
                 "transaction_owner": "caller",
             }
 
@@ -3441,7 +3442,7 @@ def test_correction_recovery_worker_respects_live_lease_and_recovers_expired_rec
                 raise RuntimeError("injected first-attempt failure")
             return {
                 "workflow": "care_record_correction",
-                "stages": {"reconciliation": "committed"},
+                "stages": {"reconciliation": "staged_in_caller_transaction"},
                 "transaction_owner": "caller",
             }
 
