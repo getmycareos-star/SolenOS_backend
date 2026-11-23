@@ -802,6 +802,7 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
             candidates={
                 "kind": "document_extraction_v1",
                 "binary_sha256": digest,
+                "source_text_sha256": hashlib.sha256(original.decode("utf-8").strip().encode("utf-8")).hexdigest(),
                 "extraction_method": "server_utf8_text",
                 "page_references": [1],
                 "source_quotations": [{"page": 1, "quote": "Follow-up appointment is scheduled for 12 December."}],
@@ -837,6 +838,92 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     assert extracted["record_status"] == "extracted_not_caregiver_reviewed"
     assert original_ref["source_type"] == "uploaded_document"
     assert original_ref["details"]["extraction_status"] == "available"
+
+
+def test_handoff_withholds_extraction_when_persisted_text_checksum_is_invalid(client):
+    import hashlib
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    original = b"Medication list: caregiver should confirm the current dose with the clinic."
+    original_text = original.decode("utf-8")
+    digest = hashlib.sha256(original).hexdigest()
+    source_text_digest = hashlib.sha256(original_text.strip().encode("utf-8")).hexdigest()
+    db = TestSessionLocal()
+    try:
+        document = Evidence(
+            id="handoff-tampered-document",
+            person_id=person_id,
+            type="document",
+            source_text="Uploaded document record",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic/tampered-medication-list",
+        )
+        db.add(document)
+        db.flush()
+        db.add(EvidenceUpload(
+            evidence_id=document.id,
+            filename="medication-list.txt",
+            mime_type="text/plain",
+            content=original,
+            size_bytes=len(original),
+            sha256=digest,
+        ))
+        db.add(CaptureAnalysis(
+            id="handoff-tampered-extraction",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=document.id,
+            source_text="ALTERED TEXT: take a different dose twice daily.",
+            extraction_status="available",
+            candidates={
+                "kind": "document_extraction_v1",
+                "binary_sha256": digest,
+                "source_text_sha256": source_text_digest,
+                "extraction_method": "server_utf8_text",
+            },
+            review_history=[],
+        ))
+        db.add(Appointment(
+            id="handoff-tampered-appointment",
+            person_id=person_id,
+            title="Medication review",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=5),
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "purpose": "professional_appointment",
+            "audience": "professional",
+            "window_days": 30,
+            "appointment_id": "handoff-tampered-appointment",
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    documents = body["source_statuses"]["documents"]
+    assert documents["status"] == "partial"
+    assert documents["unavailable_extraction_count"] == 1
+    assert not any(
+        row["source_id"] == "handoff-tampered-extraction"
+        and row["source_type"] == "document_extracted_text"
+        for row in body["source_references"]
+    )
+    original_reference = next(
+        row for row in body["source_references"]
+        if row["source_id"] == "handoff-tampered-document"
+    )
+    assert original_reference["source_type"] == "uploaded_document"
+    assert original_reference["details"]["extraction_status"] == "extraction_text_checksum_mismatch"
+    assert "ALTERED TEXT" not in response.text
 
 
 def test_document_source_without_extraction_is_reported_as_partial_retrieval(client):
