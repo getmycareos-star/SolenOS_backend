@@ -270,7 +270,10 @@ def test_patient_emotion_does_not_trigger_caregiver_low_capacity_response():
 
 
 def test_caregiver_distress_still_wins_when_patient_emotion_is_also_reported():
-    policy = resolve_response_length_policy(
-        "Mum was overwhelmed after lunch, and I'm exhausted from trying to help."
-    )
-    assert policy.intent == "low_capacity_support"
+    for message in (
+        "Mum was overwhelmed after lunch, and I'm exhausted from trying to help.",
+        "Mum has seemed sad this week, and I've been crying.",
+        "She is frightened at night, and I just want a break.",
+    ):
+        policy = resolve_response_length_policy(message)
+        assert policy.intent == "low_capacity_support", message
