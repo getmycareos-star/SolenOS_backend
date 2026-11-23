@@ -1372,7 +1372,10 @@ def test_postgres_lcr_keeps_failed_and_pending_document_extractions_visible():
             ])
             db.flush()
             context = build_lcr_context(
-                db, person.id, caregiver_id=caregiver.id, include_all_history=True,
+                db,
+                person.id,
+                caregiver_id=caregiver.id,
+                query="What does the clinic letter say about medication?",
             )
 
         extractions = {
