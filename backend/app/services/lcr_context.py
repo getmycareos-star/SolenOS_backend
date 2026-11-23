@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from functools import lru_cache
 from typing import Any
 
@@ -625,6 +625,18 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "assertions":
         return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
     if source_name == "appointment_workspaces":
+        freshness = item.get("source_freshness") if isinstance(item.get("source_freshness"), dict) else {}
+        freshness_status = str(freshness.get("status") or "unknown")
+        if freshness_status == "stale":
+            return (
+                "appointment_workspace_stale",
+                "This caregiver-authored appointment workspace was saved before a later care-record change. Keep it as historical context, but do not present it as the current appointment plan without review.",
+            )
+        if freshness_status != "current":
+            return (
+                "appointment_workspace_currentness_unknown",
+                "This caregiver-authored appointment workspace is saved separately from the Living Care Record, and its currentness could not be confirmed. Treat it as historical context until reviewed.",
+            )
         return (
             "appointment_workspace_caregiver_notes",
             "This is a caregiver-authored appointment workspace, saved separately from the Living Care Record. It may contain caregiver reports and notes about what a healthcare professional said; those statements are not independently verified. Preserve the saved status, version, and the payload's epistemic boundary.",
@@ -1221,6 +1233,60 @@ def build_lcr_context(
         })
     elif selected_ids:
         evidence_lineage["status"] = "unavailable_schema"
+    # Appointment workspaces are caregiver-authored snapshots. Match the
+    # existing workspace API's conservative freshness watermark so stale visit
+    # preparation cannot be presented as current after the LCR has changed.
+    workspace_source = sources.get("appointment_workspaces")
+    if workspace_source and workspace_source.get("items"):
+        revision_table = metadata.tables.get("care_state_revisions")
+        latest_care_change = None
+        freshness_available = bool(
+            revision_table is not None
+            and {"person_id", "changed_at"}.issubset(revision_table.c.keys())
+        )
+        if freshness_available:
+            try:
+                latest_care_change = db.execute(
+                    select(func.max(revision_table.c.changed_at)).where(
+                        revision_table.c.person_id == str(person_id)
+                    )
+                ).scalar_one_or_none()
+            except Exception:
+                freshness_available = False
+        for workspace in workspace_source["items"]:
+            updated_value = workspace.get("updated_at")
+            try:
+                updated_at = (
+                    datetime.fromisoformat(str(updated_value).replace("Z", "+00:00"))
+                    if updated_value else None
+                )
+                if updated_at is not None and updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=timezone.utc)
+                if latest_care_change is not None and latest_care_change.tzinfo is None:
+                    latest_care_change = latest_care_change.replace(tzinfo=timezone.utc)
+            except (TypeError, ValueError):
+                updated_at = None
+            if not freshness_available or updated_at is None:
+                workspace["source_freshness"] = {
+                    "status": "unknown",
+                    "reason": "care_state_freshness_check_unavailable",
+                    "interpretation_limit": "Currentness could not be confirmed from the saved care-change history.",
+                }
+            elif latest_care_change is not None and latest_care_change > updated_at:
+                workspace["source_freshness"] = {
+                    "status": "stale",
+                    "latest_care_change_at": latest_care_change.isoformat(),
+                    "reason": "care_record_changed_after_workspace_save",
+                    "interpretation_limit": "At least one care-record change was saved after this appointment workspace.",
+                }
+            else:
+                workspace["source_freshness"] = {
+                    "status": "current",
+                    "latest_care_change_at": None,
+                    "reason": None,
+                    "interpretation_limit": "No later person-scoped care-record change was found. This watermark does not replace exact source-dependency verification.",
+                }
+
     # A source that cannot be searched is not an empty source. It must
     # reduce retrieval completeness just like a failed or partial source read.
     failed_sources = sorted(
