@@ -478,6 +478,47 @@ def extract_review_candidates(
             candidate["source_evidence_id"] = source_evidence_id
         observations.append(candidate)
 
+    # Small deterministic recovery for explicit tentative condition statements.
+    # The configured model remains mandatory and supplies the primary extraction;
+    # this guard only preserves a source sentence the model omitted. It never
+    # diagnoses, infers a condition, or writes to the care record. The exact
+    # sentence remains a pending caregiver-review candidate.
+    existing_quotes = {item["source_quote"] for item in observations}
+    tentative_condition_pattern = re.compile(
+        r"\\b(?:suspects?|suspected|possible|possibly|probable|likely|unlikely|may have|might have|could have)\\s+"
+        r"(?P<subject>(?:[A-Za-z][A-Za-z'-]*\\s+){0,4}[A-Za-z][A-Za-z'-]*)",
+        re.IGNORECASE,
+    )
+    for match in tentative_condition_pattern.finditer(bounded_source):
+        subject = match.group("subject").strip(" .,:;")
+        observation = match.group(0).strip(" .,:;")
+        if not subject or not re.search(
+            r"\\b(?:pneumonia|infection|disease|condition|diagnosis|symptom|illness|"
+            r"allergy|fracture|stroke|sepsis|tumou?r|cancer|dementia|parkinson)\\b",
+            subject,
+            re.IGNORECASE,
+        ):
+            continue
+        quote = _expand_quote_to_source_sentence(bounded_source, match.group(0))
+        if not quote or quote in existing_quotes:
+            continue
+        if subject.casefold() not in quote.casefold() or observation not in quote:
+            continue
+        candidate = {
+            "subject": subject[:120],
+            "observation": observation[:500],
+            "source_quote": quote,
+            "review_status": "pending_review",
+            "source_event_id": source_event_id,
+            "extraction_method": "deterministic_explicit_uncertainty_source_match",
+        }
+        if source_evidence_id:
+            candidate["source_evidence_id"] = source_evidence_id
+        observations.append(candidate)
+        existing_quotes.add(quote)
+        if len(observations) >= 12:
+            break
+
     questions = parsed.get("open_questions", [])
     if not isinstance(questions, list):
         questions = []
