@@ -86,7 +86,7 @@ def _normalize_predicate(value):
         return None
     expression = " ".join(str(value).strip().split()).casefold().replace('"', "")
     # PostgreSQL adds explicit casts when rendering text and enum predicates.
-    expression = re.sub(r"::(?:[a-z_][a-z0-9_]*)(?:\[\])?", "", expression)
+    expression = re.sub(r"::(?:character varying|double precision|timestamp with time zone|timestamp without time zone|[a-z_][a-z0-9_]*)(?:\[\])?", "", expression)
     expression = _strip_outer_parentheses(expression)
     clauses = []
     for clause in _split_top_level_and(expression):
