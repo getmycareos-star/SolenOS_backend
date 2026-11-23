@@ -591,6 +591,7 @@ def _lock_document_source_and_analysis(
     person_id: str,
     analysis_id: str,
     expected_binary_sha256: str,
+    caregiver_id: str,
 ):
     """Hold source/analysis locks only for the short review-state persistence phase."""
     evidence = db.query(Evidence).filter(
@@ -934,7 +935,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         else:
             try:
                 evidence, upload, current_analysis = _lock_document_source_and_analysis(
-                    db, evidence_id, person_id, str(analysis.id), upload.sha256
+                    db, evidence_id, person_id, str(analysis.id), upload.sha256, caregiver_id
                 )
                 if _metadata(current_analysis) != original_candidates:
                     db.rollback()
@@ -977,7 +978,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             next_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))
         if next_offset < len(stored) and batch_final:
             evidence, upload, current_analysis = _lock_document_source_and_analysis(
-                db, evidence_id, person_id, str(analysis.id), upload.sha256
+                db, evidence_id, person_id, str(analysis.id), upload.sha256, caregiver_id
             )
             if _metadata(current_analysis) != original_candidates:
                 db.rollback()
@@ -997,7 +998,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             return _response(analysis)
         if next_offset < len(stored):
             evidence, upload, current_analysis = _lock_document_source_and_analysis(
-                db, evidence_id, person_id, str(analysis.id), upload.sha256
+                db, evidence_id, person_id, str(analysis.id), upload.sha256, caregiver_id
             )
             db.rollback()
             return _response(current_analysis)
