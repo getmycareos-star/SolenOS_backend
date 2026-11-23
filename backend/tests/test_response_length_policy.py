@@ -142,3 +142,7 @@ def test_questions_for_the_doctor_use_appointment_preparation_contract():
     policy = resolve_response_length_policy("What questions should I bring for the doctor?")
     assert policy.intent == "appointment_preparation"
     assert (policy.target_words, policy.max_words) == (150, 250)
+
+def test_word_count_matches_whitespace_delimited_frontend_semantics():
+    assert count_response_words("Mum's well-being is improving.") == 4
+    assert count_response_words("  one\ntwo\nthree  ") == 3
