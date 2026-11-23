@@ -833,7 +833,7 @@ def _exact_source_passages(
     page_markers = [
         (match.start(), int(match.group(1)), match.group(0))
         for match in re.finditer(
-            r"\\[\\s*Page\\s+(\\d+)(?:\\s+[^\\]]*)?\\s*\\]",
+            r"\[\s*Page\s+(\d+)(?:\s+[^\]]*)?\s*\]",
             source_text,
             re.IGNORECASE,
         )
