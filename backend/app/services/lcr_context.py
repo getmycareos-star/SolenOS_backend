@@ -613,7 +613,7 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
     if source_name == "events":
         event_status = str(item.get("status") or "").casefold()
-        if event_status in {"invalidated", "superseded", "withdrawn", "deleted"}:
+        if event_status in {"invalidated", "superseded", "retracted", "withdrawn", "deleted"}:
             return (
                 "historical_event",
                 "This care entry was invalidated, superseded, or withdrawn. Keep it in the history, but do not present it as current care information.",
@@ -626,7 +626,7 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "evidence":
         evidence_status = str(item.get("evidence_status") or "").casefold()
         epistemic_status = str(item.get("epistemic_status") or "").casefold()
-        if evidence_status in {"withdrawn", "superseded", "retracted", "archived", "historical", "historical_only"} or epistemic_status in {"withdrawn", "superseded"}:
+        if evidence_status in {"withdrawn", "superseded", "retracted", "archived", "historical", "historical_only"} or epistemic_status in {"retracted", "withdrawn", "superseded"}:
             return (
                 "historical_evidence",
                 "This source was withdrawn, superseded, or archived. Keep it only to explain the record history; do not treat it as current evidence.",
@@ -637,7 +637,7 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "historical_observation",
                 "A later structured observation superseded this version. Preserve the original wording and correction link, but do not present this version as current.",
             )
-        if str(item.get("epistemic_status") or "").casefold() in {"withdrawn", "superseded"}:
+        if str(item.get("epistemic_status") or "").casefold() in {"retracted", "withdrawn", "superseded"}:
             return (
                 "historical_observation",
                 "This structured observation was withdrawn or superseded. Keep it only as part of the source history.",
@@ -690,7 +690,7 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         )
     if source_name == "facts" and (
         item.get("superseded_by_fact_id")
-        or str(item.get("epistemic_status") or "").casefold() in {"withdrawn", "superseded"}
+        or str(item.get("epistemic_status") or "").casefold() in {"retracted", "withdrawn", "superseded"}
     ):
         return (
             "historical_fact",
