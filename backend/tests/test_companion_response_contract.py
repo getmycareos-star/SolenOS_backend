@@ -3401,5 +3401,5 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
 
 
 def test_companion_greeting_contract_allows_up_to_fifteen_words():
-    assert collaboration._greeting_reply_needs_revision("Hello, welcome back. Glad you are here today.")
-    assert not collaboration._greeting_reply_needs_revision("Hello, glad you are here and ready to continue today.")
+    assert not collaboration._greeting_reply_needs_revision("Hello, welcome back. Glad you are here today.")
+    assert collaboration._greeting_reply_needs_revision("Hello, I am glad you are here and ready to continue with your care story today.")
