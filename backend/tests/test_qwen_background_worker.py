@@ -169,43 +169,6 @@ def test_worker_discards_result_when_caregiver_access_is_revoked_during_inferenc
     db.close()
 
 
-def test_worker_does_not_persist_classification_after_lease_is_reclaimed(tmp_path, monkeypatch):
-    sessions = _isolated_job_store(tmp_path, monkeypatch)
-    job_id = _seed_job(sessions)
-    newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
-
-    async def reclaim_during_classification(*args, **kwargs):
-        other_worker_db = sessions()
-        current = other_worker_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
-        current.status = "processing"
-        current.locked_at = newer_lock
-        current.workflow = "companion"
-        other_worker_db.commit()
-        other_worker_db.close()
-        return "appointment"
-
-    async def unexpected_assist(*args, **kwargs):
-        raise AssertionError("a reclaimed worker must stop before assistant inference")
-
-    monkeypatch.setattr(worker, "_classify_task", reclaim_during_classification)
-    from app.api import collaboration
-    monkeypatch.setattr(collaboration, "qwen_support_assist", unexpected_assist)
-
-    assert asyncio.run(worker.process_one_qwen_job()) is True
-
-    db = sessions()
-    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
-    assert job.status == "processing"
-    assert job.workflow == "companion"
-    persisted_lock = job.locked_at
-    if persisted_lock.tzinfo is None:
-        persisted_lock = persisted_lock.replace(tzinfo=timezone.utc)
-    assert persisted_lock == newer_lock
-    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
-    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_completed").count() == 0
-    db.close()
-
-
 def test_worker_does_not_persist_assistant_output_after_lease_is_reclaimed(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     job_id = _seed_job(sessions)

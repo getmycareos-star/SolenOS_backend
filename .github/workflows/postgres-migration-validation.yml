@@ -103,6 +103,20 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
+      - name: Verify Qwen worker classification lease fencing on PostgreSQL
+        working-directory: backend
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          lease_database_url="${DATABASE_URL%/solenos_test}/solenos_qwen_lease"
+          cleanup() {
+            psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "DROP DATABASE IF EXISTS solenos_qwen_lease" >/dev/null || true
+          }
+          trap cleanup EXIT
+          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE solenos_qwen_lease"
+          DATABASE_URL="$lease_database_url" python -m alembic upgrade head
+          DATABASE_URL="$lease_database_url" SOLENOS_QWEN_WORKER_ENABLED=false python -m pytest tests/test_qwen_worker_lease_postgres.py -q
+
       - name: Verify the complete ORM schema contract has zero drift
         working-directory: backend
         run: |
