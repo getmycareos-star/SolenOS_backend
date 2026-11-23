@@ -121,7 +121,27 @@ def test_explicit_temporal_window_fetches_all_matching_history_pages():
         {"temporal_window": {"basis": "explicit_calendar_year"}}, False
     ) is True
     assert collaboration._should_fetch_full_lcr_context_pages(
-        {"temporal_window": None}, False
+        {"temporal_window": None, "sources": {}}, False
+    ) is False
+    assert collaboration._should_fetch_full_lcr_context_pages(
+        {
+            "temporal_window": None,
+            "sources": {
+                "events": {"has_more": True},
+                "companion_conversation": {"has_more": False},
+            },
+        },
+        False,
+    ) is True
+    assert collaboration._should_fetch_full_lcr_context_pages(
+        {
+            "temporal_window": None,
+            "sources": {
+                "events": {"has_more": False},
+                "companion_conversation": {"has_more": True},
+            },
+        },
+        False,
     ) is False
     assert collaboration._should_fetch_full_lcr_context_pages(
         {"temporal_window": None}, True
