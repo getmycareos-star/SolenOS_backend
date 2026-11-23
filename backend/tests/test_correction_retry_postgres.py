@@ -334,3 +334,106 @@ def test_postgres_delta_replay_is_invalidated_by_a_later_correction():
             Correction.target_id == event_id,
         ).count() == 1
     engine.dispose()
+
+
+def test_postgres_correction_recovery_loop_reclaims_pending_and_expired_processing_rows(monkeypatch):
+    """A fresh app worker can recover durable correction receipts after restart."""
+    from app.main import process_pending_corrections_once
+    from app.services.learning import LearningEngine
+
+    database_url = os.environ["DATABASE_URL"]
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    engine = create_engine(database_url, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:8]
+    person_id = f"recover-person-{suffix}"
+    caregiver_id = f"recover-caregiver-{suffix}"
+    pending_id = f"recover-pending-{suffix}"
+    stale_id = f"recover-stale-{suffix}"
+    old_time = datetime(2000, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(LearningEngine, "apply_correction", lambda self, correction, commit=True: None)
+    monkeypatch.setattr(LearningEngine, "record_learning_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(LearningEngine, "after_save", lambda *args, **kwargs: None)
+    monkeypatch.setattr(api_v1, "_reassess_correction_follow_ups", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        api_v1,
+        "execute_care_continuity_reconciliation",
+        lambda *args, **kwargs: {
+            "workflow": "care_record_correction",
+            "stages": {"reconciliation": "staged_in_caller_transaction"},
+            "transaction_owner": "caller",
+        },
+    )
+
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Correction recovery integration person"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Correction recovery caregiver",
+                relationship="family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add_all([
+                Correction(
+                    id=pending_id,
+                    person_id=person_id,
+                    target_type="care_event",
+                    target_id="pending-target",
+                    original_text="Pending original",
+                    corrected_text="Pending corrected",
+                    reason="Recovery test",
+                    caregiver_id=caregiver_id,
+                    idempotency_key=f"pending-{suffix}",
+                    request_sha256=hashlib.sha256(f"pending-{suffix}".encode()).hexdigest(),
+                    processing_status="pending",
+                    processing_attempts=0,
+                    next_retry_at=old_time,
+                    created_at=old_time,
+                    care_continuity_execution={"status": "pending", "retry_required": True},
+                ),
+                Correction(
+                    id=stale_id,
+                    person_id=person_id,
+                    target_type="care_event",
+                    target_id="stale-target",
+                    original_text="Stale original",
+                    corrected_text="Stale corrected",
+                    reason="Recovery test",
+                    caregiver_id=caregiver_id,
+                    idempotency_key=f"stale-{suffix}",
+                    request_sha256=hashlib.sha256(f"stale-{suffix}".encode()).hexdigest(),
+                    processing_status="processing",
+                    processing_attempts=1,
+                    processing_started_at=old_time,
+                    created_at=old_time,
+                    care_continuity_execution={"status": "processing", "retry_required": True},
+                ),
+            ])
+            db.commit()
+
+        # This opens fresh database sessions and exercises the same recovery
+        # entry point used by the application's lifespan worker after restart.
+        result = process_pending_corrections_once(batch_size=1)
+        assert result == {"examined": 2, "completed": 2, "pending": 0, "failed": 0}
+
+        with Session() as db:
+            pending = db.query(Correction).filter_by(id=pending_id, person_id=person_id).one()
+            stale = db.query(Correction).filter_by(id=stale_id, person_id=person_id).one()
+            assert pending.processing_status == "completed"
+            assert pending.processing_attempts == 1
+            assert pending.processed_at is not None
+            assert stale.processing_status == "completed"
+            assert stale.processing_attempts == 2
+            assert stale.processed_at is not None
+    finally:
+        with Session() as db:
+            db.query(Correction).filter(Correction.id.in_([pending_id, stale_id])).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
+        engine.dispose()
