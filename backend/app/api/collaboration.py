@@ -96,7 +96,7 @@ router = APIRouter(tags=["community and companion"])
 
 # Railway's observed 4,096-token model window must leave room for system rules and output.
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 7000
-COMPANION_MAX_OUTPUT_TOKENS = 640
+COMPANION_MAX_OUTPUT_TOKENS = 1024
 
 
 def _build_unified_lcr_context_or_422(*args, **kwargs):
