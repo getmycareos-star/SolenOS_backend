@@ -97,6 +97,21 @@ router = APIRouter(tags=["community and companion"])
 # Railway's observed 4,096-token model window must leave room for system rules and output.
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 7000
 COMPANION_MAX_OUTPUT_TOKENS = 1024
+COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
+    "INTERACTION UNDERSTANDING: Read the full current message together with the authorized recent conversation. "
+    "Keep the caregiver's intent, expressed emotion, capacity, urgency, information state, and conversation state "
+    "distinct; do not collapse them into one label. Identify whether the caregiver is greeting, asking, updating, "
+    "correcting, requesting, complaining, or saying goodbye. Notice expressed sadness, grief, loneliness, fear, "
+    "anger, frustration, guilt, relief, gratitude, hope, or uncertainty, including more than one at once, without "
+    "treating an interpretation as a psychological diagnosis. Match the amount of detail to the caregiver's stated "
+    "capacity: normal, reduced, overwhelmed, or unable to continue. Assess urgency independently; emergency safety "
+    "guidance takes priority over brevity or ordinary conversation. Keep known, missing, uncertain, conflicting, "
+    "and corrected information separate, and distinguish a continuing, repeated, interrupted, new, or returning "
+    "conversation. An angry caregiver may also be frightened; a sad caregiver may still want a detailed factual "
+    "answer. Answer the actual request rather than forcing emotional support, advice, or a workflow. Acknowledge "
+    "positive moments without turning them into a crisis. Never announce internal labels or claim to know feelings "
+    "the caregiver has not expressed."
+)
 
 
 def _build_unified_lcr_context_or_422(*args, **kwargs):
@@ -7956,6 +7971,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Do not translate a caregiver report into a verified fact. Preserve names and medication names exactly. "
             "If quoting an original source in another language, make clear it is the original wording."
         )
+        system_prompt += " " + COMPANION_INTERACTION_INTERPRETATION_CONTRACT
         system_prompt += " " + _care_recipient_identity_guidance(person.name)
         caregiver_guidance = _caregiver_interaction_guidance(user_text)
         if caregiver_guidance:
