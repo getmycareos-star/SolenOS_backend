@@ -6639,7 +6639,12 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"\b(?:no,? that's not|that isn't what happened|"
         r"you got that wrong|that's incorrect|that is incorrect|"
         r"i meant|to correct that|not stopped eating|"
-        r"didn.t stop eating|not that she stopped)\b",
+        r"didn.t stop eating|not that she stopped|the earlier entry is wrong|"
+        r"the earlier report is wrong|that entry is wrong|that report is wrong|"
+        r"please correct (?:that|the time|the entry|the record)|"
+        r"i(?:'m| am) correcting|that report was withdrawn|"
+        r"this report was withdrawn|that entry was withdrawn|"
+        r"the earlier entry was corrected)\b",
         text,
     )
     vague = re.fullmatch(
