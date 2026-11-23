@@ -859,7 +859,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "reject", "rationale": "Not relevant to current care."},
+            json={"candidate_index": 0, "decision": "reject", "expected_source_quote": quote_reject, "expected_subject": "Patient", "rationale": "Not relevant to current care."},
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
@@ -984,7 +984,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         superseded_retry = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label},
         )
         assert superseded_retry.status_code == 200, superseded_retry.text
         assert superseded_retry.json()["idempotent_replay"] is True
@@ -1114,7 +1114,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         denied_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=other_auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json={"candidate_index": 1, "decision": "accept", "expected_source_quote": quote_correct, "expected_subject": caregiver_label},
         )
         assert denied_review.status_code == 404
 
