@@ -993,6 +993,23 @@ def test_qwen_lcr_assist_uses_shared_projection_and_scopes_document_extractions(
         finally:
             db.close()
 
+        original_builder = collaboration.build_unified_lcr_context
+
+        def include_unsearchable_source(*args, **kwargs):
+            context = original_builder(*args, **kwargs)
+            context["sources"]["legacy_optional"] = {
+                "status": "unsearchable",
+                "items": [],
+                "candidate_count": None,
+                "returned_count": 0,
+                "candidate_scan_complete": False,
+                "has_more": False,
+                "interpretation_limit": "This source cannot be searched for this topic; its lack of returned records does not establish that no matching care information exists.",
+            }
+            return context
+
+        monkeypatch.setattr(collaboration, "build_unified_lcr_context", include_unsearchable_source)
+
         response = client.post(
             "/api/v1/assistant/assist",
             headers={"Authorization": f"Bearer {token}"},
@@ -1012,6 +1029,8 @@ def test_qwen_lcr_assist_uses_shared_projection_and_scopes_document_extractions(
         prompt = captured[0][0]["content"]
         assert "Breakfast intake was lower than usual" in prompt
         assert "Canonical LCR source (assertions;" in prompt
+        assert "legacy_optional" in prompt
+        assert "cannot be searched for this topic" in prompt
         assert "PRIVATE_PEER_DOCUMENT_TEXT" not in prompt
         assert "peer-note.pdf" not in prompt
     finally:
