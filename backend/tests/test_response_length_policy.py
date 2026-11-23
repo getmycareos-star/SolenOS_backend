@@ -3,6 +3,7 @@ from app.services.response_length_policy import (
     is_critical_safety_message,
     is_greeting_message,
     resolve_response_length_policy,
+    resolve_workflow_response_length_policy,
     response_exceeds_hard_maximum,
 )
 
@@ -195,3 +196,43 @@ def test_every_response_intent_has_a_bounded_generation_budget():
     for message, stage, hint, expected_budget in cases:
         policy = resolve_response_length_policy(message, caregiver_stage=stage, intent_hint=hint)
         assert policy.token_budget == expected_budget, message
+
+
+
+def test_every_enabled_qwen_workflow_has_an_explicit_response_contract():
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS
+
+    for workflow in ENABLED_WORKFLOWS:
+        policy = resolve_workflow_response_length_policy(workflow, "Please help with this.")
+        assert policy.token_budget >= 48, workflow
+        assert policy.token_budget <= 1024, workflow
+        assert policy.max_words is None or policy.max_words >= 15, workflow
+
+
+def test_qwen_workflow_contracts_select_the_expected_caregiver_detail_level():
+    expected = {
+        "document": (100, 180),
+        "living_care_record": (150, 250),
+        "care_situation_change": (120, 200),
+        "returning_caregiver": (30, 55),
+        "appointment": (150, 250),
+        "handoff": (150, 250),
+        "reminders_notifications": (35, 60),
+        "caregiver_strain_support": (35, 60),
+        "critical_information_completeness": (150, 250),
+    }
+    for workflow, limits in expected.items():
+        policy = resolve_workflow_response_length_policy(workflow, "Please help with this.")
+        assert (policy.target_words, policy.max_words) == limits, workflow
+
+
+def test_workflow_policy_still_prioritizes_critical_safety_and_caregiver_distress():
+    critical = resolve_workflow_response_length_policy("appointment", "Mum is not breathing.")
+    overwhelmed = resolve_workflow_response_length_policy(
+        "professional_summary",
+        "I'm exhausted and overwhelmed.",
+    )
+    assert critical.intent == "critical_safety"
+    assert critical.max_words is None
+    assert overwhelmed.intent == "low_capacity_support"
+    assert (overwhelmed.target_words, overwhelmed.max_words) == (35, 60)
