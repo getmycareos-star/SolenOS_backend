@@ -9259,7 +9259,13 @@ def update_care_notification_preferences(
     )):
         db.query(CareReminder).filter(
             CareReminder.person_id == person_id,
-            CareReminder.created_by_caregiver_id == caregiver_id,
+            or_(
+                CareReminder.assigned_to_caregiver_id == caregiver_id,
+                and_(
+                    CareReminder.assigned_to_caregiver_id.is_(None),
+                    CareReminder.created_by_caregiver_id == caregiver_id,
+                ),
+            ),
             CareReminder.status == "open",
         ).update({CareReminder.notification_deferred_until: None}, synchronize_session=False)
     preference.updated_at = datetime.now(timezone.utc)
