@@ -2746,21 +2746,17 @@ def _collect_full_lcr_context_pages(
     page_count = 1
     page_contexts: list[dict[str, Any]] = []
     offsets = {
-        name: (
-            source.get("next_offset")
-            if source.get("has_more")
-            else int(source.get("candidate_count") or 0)
-        )
+        name: source.get("next_offset")
         for name, source in merged_sources.items()
-        if name != "companion_conversation"
+        if name != "companion_conversation" and source.get("has_more")
     }
 
     for _ in range(1, max_pages):
-        if not any(
-            source.get("has_more")
-            for name, source in merged_sources.items()
-            if name != "companion_conversation"
-        ):
+        active_source_names = sorted(
+            name for name, source in merged_sources.items()
+            if name != "companion_conversation" and source.get("has_more")
+        )
+        if not active_source_names:
             break
         try:
             page_context = build_unified_lcr_context(
@@ -2772,6 +2768,7 @@ def _collect_full_lcr_context_pages(
                 conversation_limit=1,
                 include_all_history=True,
                 source_offsets=offsets,
+                only_sources=set(active_source_names),
             )
         except SQLAlchemyError:
             logger.exception("Companion LCR history page retrieval failed")
@@ -2781,9 +2778,8 @@ def _collect_full_lcr_context_pages(
         page_count += 1
         page_sources = page_context.get("sources", {}) if isinstance(page_context, dict) else {}
         page_failure_detected = False
-        for name, source in merged_sources.items():
-            if name == "companion_conversation":
-                continue
+        for name in active_source_names:
+            source = merged_sources[name]
             page_source = page_sources.get(name)
             if not isinstance(page_source, dict):
                 page_failure_detected = True
@@ -2864,13 +2860,9 @@ def _collect_full_lcr_context_pages(
             )
             source["selection"] = "complete_history_ranked_pages"
         offsets = {
-            name: (
-                source.get("next_offset")
-                if source.get("has_more")
-                else int(source.get("candidate_count") or 0)
-            )
+            name: source.get("next_offset")
             for name, source in merged_sources.items()
-            if name != "companion_conversation"
+            if name != "companion_conversation" and source.get("has_more")
         }
         if page_failure_detected:
             # Do not repeat a failed page request up to the page ceiling. Keep
