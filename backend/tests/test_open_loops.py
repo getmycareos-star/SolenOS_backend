@@ -101,6 +101,11 @@ def create_loop(client, headers, loop_type="unresolved_concern", **overrides):
     assert response.status_code == 201, response.text
     return response.json()
 
+def current_loop_version(client, headers, loop_id):
+    response = client.get(f"/api/v1/open-loops/{loop_id}", headers=headers)
+    assert response.status_code == 200, response.text
+    return response.json()["loop"]["version"]
+
 
 def test_open_loop_persists_and_lists_only_within_server_issued_session():
     client = TestClient(app)
