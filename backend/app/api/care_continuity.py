@@ -2561,6 +2561,7 @@ def current_care_projection(
             else ("no_reviews_recorded" if review_schema_available else "unavailable_schema")
         )
 
+    projection_limit = max(1, min(int(limit_per_source), 50))
     return {
         "person_id": person_id,
         "as_of": context.get("as_of"),
@@ -2570,9 +2571,9 @@ def current_care_projection(
         "schema_status": context.get("schema_status", "partial"),
         "missing_required_sources": context.get("missing_required_sources", []),
         "missing_optional_sources": context.get("missing_optional_sources", []),
-        "items": ordered[:12],
-        "item_count": min(len(ordered), 12),
-        "has_more": len(ordered) > 12 or any(
+        "items": ordered[:projection_limit],
+        "item_count": min(len(ordered), projection_limit),
+        "has_more": len(ordered) > projection_limit or any(
             bool((source or {}).get("has_more")) for source in sources.values()
         ),
         "outcomes": [
