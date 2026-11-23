@@ -172,9 +172,9 @@ def test_worker_discards_result_when_caregiver_access_is_revoked_during_inferenc
 def test_worker_does_not_persist_classification_after_lease_is_reclaimed(tmp_path, monkeypatch):
     sessions = _isolated_job_store(tmp_path, monkeypatch)
     job_id = _seed_job(sessions)
+    newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
 
     async def reclaim_during_classification(*args, **kwargs):
-        newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
         other_worker_db = sessions()
         current = other_worker_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
         current.status = "processing"
@@ -197,7 +197,10 @@ def test_worker_does_not_persist_classification_after_lease_is_reclaimed(tmp_pat
     job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
     assert job.status == "processing"
     assert job.workflow == "companion"
-    assert job.locked_at > datetime.now(timezone.utc)
+    persisted_lock = job.locked_at
+    if persisted_lock.tzinfo is None:
+        persisted_lock = persisted_lock.replace(tzinfo=timezone.utc)
+    assert persisted_lock == newer_lock
     assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
     assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_completed").count() == 0
     db.close()

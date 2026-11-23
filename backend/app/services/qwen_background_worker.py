@@ -1507,12 +1507,17 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             QwenBackgroundJob.person_id == job.person_id,
             QwenBackgroundJob.caregiver_id == job.caregiver_id,
         ).populate_existing().with_for_update().first()
+        if lease_state is None:
+            db.rollback()
+            return True
+        with lease_state["_lock"]:
+            expected_locked_at = lease_state.get("locked_at")
+            lease_lost = lease_state.get("lost")
         if (
             current_job is None
             or current_job.status != "processing"
-            or lease_state is None
-            or current_job.locked_at != lease_state.get("locked_at")
-            or lease_state.get("lost")
+            or current_job.locked_at != expected_locked_at
+            or lease_lost
         ):
             db.rollback()
             return True
