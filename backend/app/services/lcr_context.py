@@ -803,7 +803,7 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
         observed_pages = {
             int(match.group(1))
-            for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text or "")
+            for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or "")
         }
         processed = value.get("processed_page_numbers")
         if isinstance(processed, list):
