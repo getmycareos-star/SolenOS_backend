@@ -114,3 +114,17 @@ def test_shared_greeting_detector_matches_orientation_and_companion_boundaries()
     assert not is_greeting_message("Thanks")
     assert not is_greeting_message("Goodbye")
     assert not is_greeting_message("Hi, I am exhausted.")
+
+
+
+def test_appointment_keyword_alone_does_not_trigger_long_preparation_contract():
+    policy = resolve_response_length_policy("Was the appointment on Tuesday?")
+    assert policy.intent == "simple_factual_answer"
+    assert (policy.target_words, policy.max_words) == (35, 60)
+
+
+def test_invalid_explicit_workflow_hint_fails_loudly():
+    import pytest
+
+    with pytest.raises(ValueError, match="Unsupported response-length intent hint"):
+        resolve_response_length_policy("anything", intent_hint="unknown_workflow")
