@@ -28,10 +28,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Each run owns an isolated disposable PostgreSQL service. Cancel obsolete
-  # revisions so a stale main-branch validation cannot starve the current source.
+  # Keep one active isolated PostgreSQL migration run alive until it finishes.
+  # GitHub retains only the newest pending run for this concurrency group.
   group: postgres-migration-validation-current-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   postgres-migrations:
