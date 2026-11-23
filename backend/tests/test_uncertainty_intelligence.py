@@ -951,13 +951,12 @@ def test_orm_persisted_assessment_supersession_lcr_projection_and_rollback():
         # Force a real uniqueness failure after changing state; rollback must preserve
         # the committed active assessment and its historical predecessor.
         current.is_active = False
-        db.add(UncertaintyAssessment(
-            id="orm-assessment-new", person_id="orm-person-a", subject_type="care_record",
-            subject_id="medication", field="status", epistemic_state=EpistemicState.UNKNOWN,
-            confidence=None, context=[], evidence_ids=None, is_active=True,
-        ))
         with pytest.raises(IntegrityError):
-            db.flush()
+            db.execute(UncertaintyAssessment.__table__.insert().values(
+                id="orm-assessment-new", person_id="orm-person-a", subject_type="care_record",
+                subject_id="medication", field="status", epistemic_state=EpistemicState.UNKNOWN,
+                confidence=None, context=[], evidence_ids=None, is_active=True,
+            ))
         db.rollback()
 
         restored = db.query(UncertaintyAssessment).filter(
