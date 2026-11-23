@@ -163,11 +163,36 @@ def _schema_column_types_compatible(expected, actual, dialect_name: str) -> bool
 
 def database_schema_differences(bind=None):
     """Compare ORM-owned tables, columns, indexes, unique constraints and foreign keys."""
-    from sqlalchemy import inspect
+    from sqlalchemy import inspect, text
+    from sqlalchemy.engine import Engine
 
     target = bind or engine
     inspector = inspect(target)
     existing_tables = set(inspector.get_table_names())
+    valid_postgres_index_names = None
+    if target.dialect.name == "postgresql":
+        # Catalog presence alone is insufficient: PostgreSQL can retain an
+        # invalid/not-ready index after an interrupted concurrent build.
+        index_status_query = text("""
+            SELECT index_class.relname
+            FROM pg_index AS index_data
+            JOIN pg_class AS index_class ON index_class.oid = index_data.indexrelid
+            JOIN pg_class AS table_class ON table_class.oid = index_data.indrelid
+            JOIN pg_namespace AS table_schema ON table_schema.oid = table_class.relnamespace
+            WHERE table_schema.nspname = current_schema()
+              AND index_data.indisvalid
+              AND index_data.indisready
+              AND index_data.indislive
+        """)
+        if isinstance(target, Engine):
+            with target.connect() as connection:
+                valid_postgres_index_names = set(
+                    connection.execute(index_status_query).scalars()
+                )
+        else:
+            valid_postgres_index_names = set(
+                target.execute(index_status_query).scalars()
+            )
     differences = []
 
     for table_name, table in Base.metadata.tables.items():
@@ -304,6 +329,10 @@ def database_schema_differences(bind=None):
                     )
                     or item.get("filter_definition")
                 )
+                and (
+                    valid_postgres_index_names is None
+                    or str(item.get("name") or "") in valid_postgres_index_names
+                )
             )
         )
         missing_unique_constraints = expected_unique_constraints - actual_unique_constraints
@@ -361,6 +390,11 @@ def database_schema_differences(bind=None):
                 dialect_options.get(f"{target.dialect.name}_where")
                 or item.get("filter_definition")
             )
+            if (
+                valid_postgres_index_names is not None
+                and str(item.get("name") or "") not in valid_postgres_index_names
+            ):
+                continue
             actual_indexes.add((
                 tuple(columns),
                 bool(item.get("unique", False)),
