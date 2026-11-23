@@ -19,7 +19,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareSta
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _information_status, _load_source_schema, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _apply_text_search_filter, _information_status, _load_source_schema, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
@@ -1200,6 +1200,23 @@ def test_invalidated_or_superseded_care_events_remain_historical():
     status, explanation = _information_status("events", {"status": "unparsed_raw"})
     assert status == "unprocessed_capture"
     assert "not an accepted care event" in explanation
+
+
+def test_topic_search_keeps_failed_document_extractions_as_visible_evidence_gaps():
+    table = CaptureAnalysis.__table__
+    statement, searchable = _apply_text_search_filter(
+        table.select(),
+        table,
+        "document_extractions",
+        ["medication"],
+    )
+    sql = str(statement)
+
+    assert searchable is True
+    assert "source_text" in sql
+    assert "extraction_status IN" in sql
+    assert "failed" in sql
+    assert "processing" in sql
 
 
 def test_withdrawn_or_superseded_evidence_never_reads_as_current():
