@@ -16,7 +16,7 @@ import re
 from difflib import SequenceMatcher
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, and_, or_, text, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
+from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, and_, or_, text, cast, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
