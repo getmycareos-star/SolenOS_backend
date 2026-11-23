@@ -1,6 +1,6 @@
 """Authenticated appointment-assist acceptance against a real Qwen model.
 
-All synthetic identity and appointment rows live in an isolated SQLite database.
+All synthetic identity and appointment rows live in an isolated PostgreSQL database.
 No production care record is read or written.
 """
 from __future__ import annotations
@@ -25,6 +25,10 @@ import app.main as main_module
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///:memory:")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
+if os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") == "1" and not POSTGRES_DATABASE:
+    raise RuntimeError(
+        "Live appointment-assist Qwen acceptance requires PostgreSQL; refusing a skipped SQLite run."
+    )
 pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL") != "1" or not POSTGRES_DATABASE,
     reason="requires the dedicated live-Qwen appointment-assist workflow and migrated PostgreSQL",
