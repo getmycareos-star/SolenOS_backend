@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.time_location import Appointment
+from app.models.appointment_workspace import AppointmentWorkspaceRecord
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision, EvidenceObservation
@@ -1383,6 +1384,84 @@ def test_postgres_appointment_retrieval_preserves_timezone_and_preparation_conte
         assert "Africa/Lagos" in prompt_context
         assert "Current medication list" in prompt_context
         assert "Should the evening dose time change?" in prompt_context
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
+
+def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_lcr_facts():
+    """Companion can retrieve visit outcomes while preserving their caregiver-recorded status."""
+    from app.services.lcr_context import _load_source_schema
+
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            db.add(Person(id="appointment-workspace-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="appointment-workspace-caregiver",
+                name="Family caregiver",
+                relationship="family",
+                person_id="appointment-workspace-person",
+            ))
+            db.flush()
+            db.add(AppointmentWorkspaceRecord(
+                id="appointment-workspace-record",
+                person_id="appointment-workspace-person",
+                appointment_id=None,
+                created_by_caregiver_id="appointment-workspace-caregiver",
+                updated_by_caregiver_id="appointment-workspace-caregiver",
+                status="ready_for_review",
+                version_number=3,
+                last_revision_reason="Caregiver saved the visit outcome",
+                payload={
+                    "visitPurpose": "Memory clinic follow-up",
+                    "clinician": "Dr. Example",
+                    "clinicianFindings": "The clinician said the sleep pattern should be tracked for two weeks.",
+                    "decisions": "Continue the current routine until the follow-up.",
+                    "instructions": "Bring the sleep notes to the next visit.",
+                    "medicationQuestions": "Ask whether the evening dose timing should change.",
+                    "unanswered": "The family is still waiting for the blood test result.",
+                    "followUps": [{
+                        "action": "Call the clinic about the blood test result",
+                        "owner": "Family caregiver",
+                        "due": "2026-12-04",
+                        "status": "Open",
+                        "open_loop_id": "appointment-follow-up-loop",
+                    }],
+                    "epistemic_boundary": {
+                        "caregiver_report": "caregiver_reported",
+                        "clinician_findings": "caregiver_recorded_clinician_statement_not_independently_verified",
+                        "ai_suggestions_written_as_clinical_facts": False,
+                        "lcr_reconciliation": "not_performed",
+                    },
+                },
+            ))
+            db.commit()
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db,
+                "appointment-workspace-person",
+                caregiver_id="appointment-workspace-caregiver",
+                query="What did the clinician say about sleep and what remains unanswered?",
+            )
+        workspaces = context["sources"]["appointment_workspaces"]
+        assert workspaces["returned_count"] == 1
+        item = workspaces["items"][0]
+        assert item["information_status"] == "appointment_workspace_caregiver_notes"
+        assert item["status"] == "ready_for_review"
+        assert item["version_number"] == 3
+        assert item["payload"]["clinicianFindings"].startswith("The clinician said")
+        assert item["payload"]["unanswered"].startswith("The family is still waiting")
+        assert item["payload"]["epistemic_boundary"]["clinician_findings"] == (
+            "caregiver_recorded_clinician_statement_not_independently_verified"
+        )
+        assert item["payload"]["followUps"][0]["open_loop_id"] == "appointment-follow-up-loop"
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert "appointment_workspace_caregiver_notes" in prompt_context
+        assert "not independently verified" in prompt_context
+        assert "lcr_reconciliation" in prompt_context
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
