@@ -2316,7 +2316,18 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
-def test_companion_routes_indirect_stroke_signs_to_immediate_safety_response(monkeypatch):
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Mum's face is drooping and her speech is slurred.",
+        "Dad's speech suddenly became slurred.",
+        "She suddenly became confused and cannot see out of one eye.",
+        "He has sudden numbness on one side of his body.",
+        "Mum has weakness on one side and cannot lift her arm.",
+        "One side of her face is drooping.",
+    ],
+)
+def test_companion_routes_indirect_stroke_signs_to_immediate_safety_response(monkeypatch, message):
     client = setup_client(monkeypatch)
     monkeypatch.setattr(
         collaboration,
@@ -2328,10 +2339,7 @@ def test_companion_routes_indirect_stroke_signs_to_immediate_safety_response(mon
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
-            json={
-                "person_id": person_id,
-                "text": "Mum's face is drooping and her speech is slurred.",
-            },
+            json={"person_id": person_id, "text": message},
         )
         assert response.status_code == 200, response.text
         data = response.json()
