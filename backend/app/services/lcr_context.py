@@ -780,6 +780,61 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     return "recorded_status_unspecified", "No explicit epistemic status was stored for this record."
 
 
+def _exact_source_passages(
+    source_text: str,
+    terms: list[str],
+    *,
+    max_passages: int = 3,
+    passage_chars: int = 1600,
+) -> list[dict[str, Any]]:
+    """Return verbatim source windows around query matches, never model rewrites."""
+    if not source_text or not terms:
+        return []
+    folded = source_text.casefold()
+    hits: list[tuple[int, int, str]] = []
+    for term in dict.fromkeys(terms):
+        needle = str(term or "").strip().casefold()
+        if len(needle) < 3:
+            continue
+        cursor = 0
+        while cursor < len(folded):
+            position = folded.find(needle, cursor)
+            if position < 0:
+                break
+            hits.append((position, position + len(needle), needle))
+            cursor = position + max(1, len(needle))
+    if not hits:
+        return []
+
+    clusters: list[dict[str, Any]] = []
+    for start, end, term in sorted(hits):
+        if clusters and start <= clusters[-1]["end"] + 350:
+            clusters[-1]["end"] = max(clusters[-1]["end"], end)
+            clusters[-1]["terms"].add(term)
+        else:
+            clusters.append({"start": start, "end": end, "terms": {term}})
+
+    ranked = sorted(
+        clusters,
+        key=lambda item: (-len(item["terms"]), item["start"]),
+    )[:max(1, max_passages)]
+    passages = []
+    for cluster in ranked:
+        start = max(0, cluster["start"] - passage_chars // 3)
+        end = min(len(source_text), start + passage_chars)
+        if end < cluster["end"]:
+            end = cluster["end"]
+            start = max(0, end - passage_chars)
+        passages.append({
+            "text": source_text[start:end],
+            "source_character_start": start,
+            "source_character_end": end,
+            "matched_terms": sorted(cluster["terms"]),
+        })
+    passages.sort(key=lambda item: item["source_character_start"])
+    return passages
+
+
 def _safe_appointment_workspace_payload(value: Any) -> dict[str, Any]:
     """Keep caregiver-authored appointment context bounded and preserve its labels."""
     if isinstance(value, str):
@@ -1245,6 +1300,10 @@ def build_lcr_context(
                             else original_quote[:20000] + "… [truncated]"
                         )
                     if source_name == "document_extractions":
+                        if direct_terms and isinstance(row_values.get("source_text"), str):
+                            item["retrieved_source_passages"] = _exact_source_passages(
+                                row_values["source_text"], direct_terms,
+                            )
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
                         item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
