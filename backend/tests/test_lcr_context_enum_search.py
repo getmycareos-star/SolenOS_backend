@@ -181,3 +181,27 @@ def test_postgres_unsearchable_optional_source_marks_projection_incomplete(monke
         connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         connection.close()
         engine.dispose()
+
+
+def test_written_multi_year_duration_is_not_used_as_a_lexical_care_filter():
+    from app.services.lcr_context import _query_search_terms
+
+    assert _query_search_terms(
+        "What changed in the last two years?",
+        temporal_window={"start": "2024-01-01T00:00:00+00:00", "end": "2026-01-01T00:00:00+00:00"},
+    ) == []
+
+
+def test_multi_year_temporal_search_preserves_actual_care_topic_terms():
+    from app.services.lcr_context import _query_search_terms
+
+    assert _query_search_terms(
+        "What changed after the fall in the past three years?",
+        temporal_window={"start": "2023-01-01T00:00:00+00:00", "end": "2026-01-01T00:00:00+00:00"},
+    ) == ["fall"]
+
+
+def test_unbounded_lexical_query_keeps_ordinary_number_words():
+    from app.services.lcr_context import _query_search_terms
+
+    assert _query_search_terms("two falls overnight") == ["two", "falls", "overnight"]
