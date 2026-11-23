@@ -1305,7 +1305,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
                 ).populate_existing().with_for_update().first()
-                if current_job is None or current_job.status == "cancelled":
+                if (
+                    current_job is None
+                    or current_job.status == "cancelled"
+                    or current_job.locked_at != lease_state.get("locked_at")
+                    or lease_state.get("lost")
+                ):
                     db.rollback()
                     return True
                 extraction, intelligence = await asyncio.to_thread(
@@ -1323,7 +1328,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 current_job = db.query(QwenBackgroundJob).filter(
                     QwenBackgroundJob.id == job.id
                 ).populate_existing().with_for_update().first()
-                if current_job is None or current_job.status == "cancelled":
+                if (
+                    current_job is None
+                    or current_job.status == "cancelled"
+                    or current_job.locked_at != lease_state.get("locked_at")
+                    or lease_state.get("lost")
+                ):
                     db.rollback()
                     return True
                 job = current_job
@@ -1488,7 +1498,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         current_job = db.query(QwenBackgroundJob).filter(
             QwenBackgroundJob.id == job.id
         ).populate_existing().with_for_update().first()
-        if current_job is None or current_job.status == "cancelled":
+        if (
+            current_job is None
+            or current_job.status == "cancelled"
+            or current_job.locked_at != lease_state.get("locked_at")
+            or lease_state.get("lost")
+        ):
             db.rollback()
             return True
         try:
