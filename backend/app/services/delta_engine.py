@@ -2522,7 +2522,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
     result["interpretation_evaluation"] = evaluate_longitudinal_interpretations(computed, db=db, person_id=person_id, history_coverage=history_coverage)
     result["computed_changes"] = computed
     result["provenance"] = {
-        "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": (event_date or datetime.now(timezone.utc)).isoformat(),
+        "person_id": person_id, "created_by_caregiver_id": created_by_caregiver_id, "source": source, "event_date": effective_event_date.isoformat(),
         "source_event_id": source_event_id, "evidence_ids": evidence_ids,
         "source_event_snapshot_sha256": source_event_snapshot_sha256,
         "engine_version": DELTA_ENGINE_VERSION,
