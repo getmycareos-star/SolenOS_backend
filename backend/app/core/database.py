@@ -293,7 +293,18 @@ def database_schema_differences(bind=None):
         actual_unique_constraints.update(
             tuple(sorted(item.get("column_names") or []))
             for item in inspector.get_indexes(table_name)
-            if item.get("unique") and item.get("column_names")
+            if (
+                item.get("unique")
+                and item.get("column_names")
+                # A partial unique index only constrains rows satisfying its
+                # predicate; it cannot replace a full UNIQUE constraint.
+                and not (
+                    (item.get("dialect_options") or {}).get(
+                        f"{target.dialect.name}_where"
+                    )
+                    or item.get("filter_definition")
+                )
+            )
         )
         missing_unique_constraints = expected_unique_constraints - actual_unique_constraints
         if missing_unique_constraints:
