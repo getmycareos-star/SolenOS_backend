@@ -58,3 +58,37 @@ def test_all_longer_caregiver_workflows_have_explicit_contracts():
             resolve_response_length_policy("What does this document mean?").max_words) == (100, 180)
     assert (resolve_response_length_policy("Has her sleep worsened over time?").target_words,
             resolve_response_length_policy("Has her sleep worsened over time?").max_words) == (120, 200)
+
+
+
+def test_goodbye_and_thanks_are_acknowledgements_not_orientation_greetings():
+    assert resolve_response_length_policy("Goodbye").intent == "simple_acknowledgement"
+    assert resolve_response_length_policy("Thanks", caregiver_stage="new").intent == "simple_acknowledgement"
+
+
+def test_emergency_override_can_use_existing_deterministic_urgency_result():
+    policy = resolve_response_length_policy(
+        "Mum fell and is confused",
+        critical_safety=True,
+    )
+    assert policy.intent == "critical_safety"
+    assert policy.max_words is None
+
+
+def test_explicit_workflow_hint_wins_over_ambiguous_prompt_wording():
+    policy = resolve_response_length_policy(
+        "Please help with this",
+        intent_hint="care_handoff",
+    )
+    assert (policy.target_words, policy.max_words) == (150, 250)
+
+
+def test_greeting_with_emotional_content_uses_low_capacity_support():
+    policy = resolve_response_length_policy("Hello. I am overwhelmed and cannot cope.")
+    assert policy.intent == "low_capacity_support"
+    assert (policy.target_words, policy.max_words) == (35, 60)
+
+
+def test_critical_terms_are_recognized_after_policy_regex_refactor():
+    assert resolve_response_length_policy("She is unresponsive").intent == "critical_safety"
+    assert resolve_response_length_policy("He is having a seizure").intent == "critical_safety"
