@@ -47,6 +47,65 @@ def test_schema_verifier_reports_data_type_and_primary_key_drift():
         engine.dispose()
 
 
+def test_schema_verifier_rejects_composite_index_with_reversed_column_order():
+    """A reversed composite B-tree index does not satisfy the ORM query contract."""
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(bind=engine)
+        candidate = None
+        for table in sorted(Base.metadata.tables.values(), key=lambda item: item.name):
+            for index in sorted(table.indexes, key=lambda item: item.name or ""):
+                expressions = list(index.expressions)
+                columns = [expression.name for expression in expressions if hasattr(expression, "name")]
+                predicate = index.dialect_options["sqlite"].get("where")
+                if (
+                    len(columns) > 1
+                    and len(columns) == len(expressions)
+                    and not index.unique
+                    and predicate is None
+                ):
+                    reflected = next(
+                        (
+                            item for item in inspect(engine).get_indexes(table.name)
+                            if item.get("name") == index.name
+                            and item.get("column_names") == columns
+                        ),
+                        None,
+                    )
+                    if reflected is not None:
+                        candidate = (table.name, index.name, columns)
+                        break
+            if candidate:
+                break
+
+        assert candidate is not None, "test schema must contain a simple composite index"
+        table_name, index_name, columns = candidate
+        preparer = engine.dialect.identifier_preparer
+        quoted_index = preparer.quote(index_name)
+        quoted_table = preparer.quote(table_name)
+        reversed_columns = ", ".join(preparer.quote(name) for name in reversed(columns))
+        with engine.begin() as connection:
+            connection.execute(text(f"DROP INDEX {quoted_index}"))
+            connection.execute(text(
+                f"CREATE INDEX {quoted_index} ON {quoted_table} ({reversed_columns})"
+            ))
+
+        differences = database_schema_differences(engine)
+        mismatch = next(
+            (
+                item for item in differences
+                if item.startswith(f"{table_name}: missing indexes or index predicates")
+            ),
+            None,
+        )
+        assert mismatch is not None
+        assert all(column in mismatch for column in columns)
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_indexes():
     from sqlalchemy import inspect
 
