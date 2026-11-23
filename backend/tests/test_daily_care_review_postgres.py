@@ -496,11 +496,12 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
                 CaptureAnalysis.id.in_(analysis_ids)
             ).all()
             assert len(saved_analyses) == 2
+            analyses_by_id = {row.id: row for row in saved_analyses}
             assert all(
                 row.candidates["proposals"][0]["accepted_assertion_id"] == assertion_id
                 for row in saved_analyses
             )
-            assert saved_analyses[1].review_history[-1]["reused_existing_assertion"] is True
+            assert analyses_by_id[analysis_ids[1]].review_history[-1]["reused_existing_assertion"] is True
     finally:
         app.dependency_overrides.pop(get_db, None)
         engine.dispose()
