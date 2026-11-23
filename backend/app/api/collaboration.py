@@ -29,7 +29,7 @@ from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
-from app.models.care import CareEvent, Caregiver, Insight, Person
+from app.models.care import CareEvent, Caregiver, Correction, Insight, Person
 from app.models.care import Evidence as EvidenceModel
 from app.models.care_continuity import (
     CareAssertion,
@@ -42,6 +42,7 @@ from app.models.care_continuity import (
     EvidenceFreshnessPolicy,
     EvidenceSourceRelationship,
     EvidenceObservation,
+    CareRecordRelationship,
 )
 from app.models.caregiver_intelligence import CaregiverHandoff
 from app.models.collaboration import (
@@ -6095,12 +6096,12 @@ def _care_history_recall_context_lines(
     *,
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Fetch each requested care-history topic from person-scoped caregiver reports.
+    """Fetch person-scoped caregiver reports without reviving superseded facts.
 
-    The general LCR context is relevance-ranked and bounded. For an explicit
-    question about what was recorded, that ranking must not hide one requested
-    topic merely because another topic ranked higher. This lookup retrieves
-    matching recorded caregiver events directly and keeps the original report.
+    The direct topic lookup supplements ranked retrieval, so it must independently
+    apply correction lineage. Original wording remains visible as history, while
+    pending or unlinked corrections prevent the original report from being treated
+    as the current account.
     """
     topics = _care_history_requested_topics(user_text)
     terms = sorted({
@@ -6110,7 +6111,7 @@ def _care_history_recall_context_lines(
         if len(term) >= 4
     })
     if not topics or not terms:
-        return {"event_lines": [], "evidence_lines": [], "has_more": False}
+        return {"event_lines": [], "evidence_lines": [], "has_more": False, "status": "not_requested"}
 
     bounded_limit = max(1, min(int(limit), 100))
     topic_predicates = [CareEvent.description.ilike(f"%{term}%") for term in terms]
@@ -6118,7 +6119,7 @@ def _care_history_recall_context_lines(
         db.query(CareEvent)
         .filter(
             CareEvent.person_id == person_id,
-            CareEvent.status == "recorded",
+            CareEvent.status.in_(("recorded", "withdrawn", "superseded", "invalidated", "retracted", "deleted")),
             CareEvent.created_by_caregiver_id.isnot(None),
             or_(*topic_predicates),
         )
@@ -6127,6 +6128,57 @@ def _care_history_recall_context_lines(
     rows = query.limit(bounded_limit + 1).all()
     has_more = len(rows) > bounded_limit
     rows = rows[:bounded_limit]
+    event_ids = [str(row.id) for row in rows]
+
+    corrections_by_event: dict[str, list[dict[str, Any]]] = {}
+    correction_lookup_complete = True
+    if event_ids:
+        try:
+            with db.begin_nested():
+                correction_rows = (
+                    db.query(Correction)
+                    .filter(
+                        Correction.person_id == str(person_id),
+                        Correction.target_type == "care_event",
+                        Correction.target_id.in_(event_ids),
+                    )
+                    .order_by(Correction.created_at.asc(), Correction.id.asc())
+                    .all()
+                )
+                correction_ids = [str(row.id) for row in correction_rows]
+                relationships = (
+                    db.query(CareRecordRelationship)
+                    .filter(
+                        CareRecordRelationship.person_id == str(person_id),
+                        CareRecordRelationship.source_type == "correction",
+                        CareRecordRelationship.source_id.in_(correction_ids),
+                        CareRecordRelationship.relationship_type == "corrects",
+                        CareRecordRelationship.target_type == "care_event",
+                        CareRecordRelationship.target_id.in_(event_ids),
+                    )
+                    .all()
+                    if correction_ids else []
+                )
+            linked_ids_by_event: dict[str, set[str]] = {}
+            for relationship in relationships:
+                linked_ids_by_event.setdefault(str(relationship.target_id), set()).add(
+                    str(relationship.source_id)
+                )
+            for correction in correction_rows:
+                event_id = str(correction.target_id)
+                corrections_by_event.setdefault(event_id, []).append({
+                    "id": str(correction.id),
+                    "original_text": str(correction.original_text or ""),
+                    "corrected_text": str(correction.corrected_text or ""),
+                    "reason": str(correction.reason or ""),
+                    "processing_status": str(correction.processing_status or "legacy_unverified"),
+                    "caregiver_id": str(correction.caregiver_id or ""),
+                    "linked_to_original": str(correction.id) in linked_ids_by_event.get(event_id, set()),
+                    "created_at": correction.created_at.isoformat() if correction.created_at else None,
+                })
+        except SQLAlchemyError:
+            correction_lookup_complete = False
+            db.rollback()
 
     event_lines: list[str] = []
     linked_evidence_ids: list[str] = []
@@ -6134,11 +6186,36 @@ def _care_history_recall_context_lines(
         caregiver_report = _care_history_event_text({"description": row.description})
         if not caregiver_report:
             continue
-        report_terms = set(re.findall(r"[\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
+        report_terms = set(re.findall(r"[\\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
         if not any(report_terms.intersection(variants) for _, variants in topics):
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
         linked_evidence_ids.extend(evidence_ids)
+        linked_corrections = corrections_by_event.get(str(row.id), [])
+        completed_unlinked = [
+            item for item in linked_corrections
+            if item["processing_status"].casefold() == "completed" and not item["linked_to_original"]
+        ]
+        pending = [
+            item for item in linked_corrections
+            if item["processing_status"].casefold() != "completed"
+        ]
+        event_status = str(row.status or "").casefold()
+        if event_status in {"withdrawn", "superseded", "invalidated", "retracted", "deleted"}:
+            information_status = "historical_event"
+            interpretation_limit = "This original caregiver report was withdrawn or superseded. Keep it as history, not as the current account."
+        elif not correction_lookup_complete or completed_unlinked:
+            information_status = "event_currentness_unknown"
+            interpretation_limit = "Correction history could not be fully checked. Do not present this original report as the latest account."
+        elif pending:
+            information_status = "event_correction_pending"
+            interpretation_limit = "A caregiver correction is still processing. The original wording remains historical until the correction is applied."
+        elif linked_corrections:
+            information_status = "historical_event"
+            interpretation_limit = "A caregiver correction is linked to this original report. Preserve both versions; do not present the original wording as current."
+        else:
+            information_status = "caregiver_reported"
+            interpretation_limit = "This is a caregiver-reported account, not independent verification."
         event_lines.append(
             "Person-scoped caregiver care-history report: "
             + json.dumps({
@@ -6147,12 +6224,16 @@ def _care_history_recall_context_lines(
                 "record": {
                     "id": str(row.id),
                     "status": row.status,
+                    "information_status": information_status,
+                    "interpretation_limit": interpretation_limit,
                     "created_by_caregiver_id": str(row.created_by_caregiver_id or ""),
                     "description": caregiver_report,
                     "event_type": row.event_type,
                     "title": row.title,
                     "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+                    "recorded_at": row.recorded_at.isoformat() if getattr(row, "recorded_at", None) else None,
                     "evidence_ids": evidence_ids,
+                    "corrections": linked_corrections,
                 },
             }, ensure_ascii=False, default=str)
         )
@@ -6179,16 +6260,24 @@ def _care_history_recall_context_lines(
                         "source_type": evidence.source_type,
                         "evidence_kind": evidence.evidence_kind,
                         "epistemic_status": evidence.epistemic_status,
+                        "evidence_status": getattr(evidence, "evidence_status", None),
                         "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
                         "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
                     },
                 }, ensure_ascii=False, default=str)
             )
 
+    status = "available" if correction_lookup_complete else "partial"
     return {
         "event_lines": event_lines,
         "evidence_lines": evidence_lines,
-        "has_more": has_more,
+        "has_more": has_more or not correction_lookup_complete,
+        "status": status,
+        "correction_lineage_complete": correction_lookup_complete,
+        "interpretation_limit": (
+            None if correction_lookup_complete
+            else "Correction history could not be checked for every directly retrieved event."
+        ),
     }
 
 
