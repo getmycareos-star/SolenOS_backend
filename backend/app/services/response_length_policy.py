@@ -67,7 +67,7 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
 
     capacity_terms = r"(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)"
     first_person_capacity = re.search(
-        rf"\bi(?:'m| am| feel| have|[' ]ve)\b[^.!?]{0,50}\b{capacity_terms}\b",
+        rf"\bi(?:'m| am| feel)\b[^.!?]{0,50}\b{capacity_terms}\b",
         value,
     )
     explicitly_negated = re.search(
