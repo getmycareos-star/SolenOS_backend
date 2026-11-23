@@ -3185,11 +3185,10 @@ def _is_casual_greeting(text: str) -> bool:
 
 def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
     """Greeting replies stay within the selected first-time/returning contract."""
-    words = re.findall(r"[^\W_]+", reply or "", flags=re.UNICODE)
     normalized = (reply or "").casefold()
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     asks_a_question = "?" in (reply or "")
-    return not words or len(words) > max_words or repeats_automatic_question or asks_a_question
+    return not (reply or "").strip() or count_response_words(reply) > max_words or repeats_automatic_question or asks_a_question
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -8503,7 +8502,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or (greeting_only and _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
-            invalid_reply = False
+            # Deterministic source-quoted answers may bypass model-semantic checks,
+            # but never the selected length/format contract.
+            invalid_reply = (
+                not isinstance(reply, str)
+                or not reply.strip()
+                or _companion_message_needs_revision(reply, response_length_policy.max_words)
+            )
         if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
             # the response contract, not prompt suggestions. Ask the model to
@@ -8515,8 +8520,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "to repeat information already provided. For an overwhelmed caregiver, acknowledge only "
                     "their stated words; if no specific priority is supported by the record, do not invent one. "
                     "Do not speculate about the care recipient's condition, anyone's feelings or intentions, "
-                    "or future events, and do not claim an action or status changed. Use at most two short "
-                    "sentences, no list, and at most one question. For a vague concern, "
+                    "or future events, and do not claim an action or status changed. Keep the response "
+                    "proportionate to the request and follow the selected response-length target and hard maximum. "
+                    "Do not force a two-sentence limit on a complex care question. Use a list only when it materially "
+                    "improves clarity, and ask at most one question. For a vague concern, "
                     "ask no more than one focused question, phrased openly when appropriate. Do not claim a record was changed or an action "
                     "was completed unless the backend confirmed it. Return only the revised caregiver-facing answer."
                     if caregiver_guidance else
