@@ -659,3 +659,45 @@ def test_companion_extracts_notes_from_structured_daily_capture_json_for_history
     assert not collaboration._contains_unsupported_operational_claim(
         answer, question + "\n" + "\n".join(lines), lines
     )
+
+
+
+def test_daily_care_repairs_overlength_answer_and_revalidates_before_return(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Care recipient")
+    event_id = add_event(
+        session, "Sleep observation", "Caregiver reported poor sleep last night.",
+        "2026-10-26T22:00:00Z",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    calls = []
+
+    def fake_qwen(messages, **kwargs):
+        calls.append((messages, kwargs))
+        answer = (
+            ("The caregiver reported poor sleep on 2026-10-26 [source: " + event_id + "].")
+            if len(calls) == 2
+            else ("This is an unnecessarily long answer that repeats the same point without adding "
+                  "any supported information. " * 8)
+        )
+        return json.dumps({"answer": answer, "proposals": []})
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "question": "What was recorded about sleep?",
+            "prepare_lcr_proposals": False,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert len(calls) == 2
+    assert "Revise only the caregiver-facing answer" in calls[1][0][-1]["content"]
+    assert "Preserve every supported fact" in calls[1][0][-1]["content"]
+    assert calls[0][1]["options"]["num_predict"] == calls[1][1]["options"]["num_predict"]
+    assert response.json()["answer"] == (
+        "The caregiver reported poor sleep on 2026-10-26 [source: " + event_id + "]."
+    )
+    assert response.json()["written_to_lcr"] is False
