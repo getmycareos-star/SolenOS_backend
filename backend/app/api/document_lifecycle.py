@@ -852,6 +852,22 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
 
 
 @router.post("/{evidence_id}/extract", status_code=201)
+def _lock_active_document_source(db: Session, evidence_id: str, person_id: str):
+    """Lock the source only for the short persistence phase, never during OCR."""
+    evidence = db.query(Evidence).filter(
+        Evidence.id == evidence_id,
+        Evidence.person_id == person_id,
+        Evidence.type == "document",
+    ).first()
+    if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
+        raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
+    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
+    if upload is None:
+        raise HTTPException(status_code=404, detail="Original document bytes are unavailable")
+    _verified_content(upload)
+    return evidence, upload
+
+
 def extract_saved_document(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Extract from the persisted original bytes and bind the result to its evidence ID."""
     person_id, caregiver_id = _identity(request, db)
@@ -896,6 +912,26 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 previous_source_text=row.source_text or "",
             )
             retry_text = _apply_capture_page_number(retry_text, evidence)
+            # OCR ran without an evidence-row lock. Reacquire the source and
+            # analysis rows only now, and reject stale work if deletion or a
+            # concurrent retry changed either record while extraction ran.
+            evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+            if current_upload.sha256 != upload.sha256:
+                db.rollback()
+                raise HTTPException(status_code=409, detail="The original document changed during extraction")
+            current_row = db.query(CaptureAnalysis).filter(
+                CaptureAnalysis.id == row.id,
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.source_evidence_id == evidence_id,
+            ).populate_existing().with_for_update().first()
+            if current_row is None:
+                db.rollback()
+                raise HTTPException(status_code=409, detail="The document extraction changed while retrying")
+            if dict(current_row.candidates) != metadata or current_row.source_text != (row.source_text or ""):
+                db.rollback()
+                return _response(current_row)
+            row = current_row
+            metadata = dict(row.candidates) if isinstance(row.candidates, dict) else {}
             attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
             page_retry_attempts = dict(metadata.get("page_retry_attempts") or {})
             retry_timestamp = datetime.now(timezone.utc).isoformat()
@@ -962,13 +998,38 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             db.commit()
             db.refresh(row)
             return _response(row)
+        evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+        if current_upload.sha256 != upload.sha256:
+            db.rollback()
+            raise HTTPException(status_code=409, detail="The original document changed during extraction")
+        current_row = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.id == row.id,
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id == evidence_id,
+        ).populate_existing().with_for_update().first()
+        if current_row is None:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="Document extraction no longer exists")
         db.commit()
-        db.refresh(row)
-        return _response(row)
+        db.refresh(current_row)
+        return _response(current_row)
 
     source_text, method = _extract(upload, content, evidence)
     source_text = _apply_capture_page_number(source_text, evidence)
-    extraction_status, extraction_metadata = _extraction_metadata(upload, source_text, method)
+    evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id)
+    if current_upload.sha256 != upload.sha256:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="The original document changed during extraction")
+    existing_after_extract = db.query(CaptureAnalysis).filter(
+        CaptureAnalysis.person_id == person_id,
+        CaptureAnalysis.source_evidence_id == evidence_id,
+    ).order_by(CaptureAnalysis.created_at.desc()).with_for_update().all()
+    for current_row in existing_after_extract:
+        current_metadata = dict(current_row.candidates) if isinstance(current_row.candidates, dict) else {}
+        if current_metadata.get("kind") == "document_extraction_v1":
+            db.rollback()
+            return _response(current_row)
+    extraction_status, extraction_metadata = _extraction_metadata(current_upload, source_text, method)
     analysis = CaptureAnalysis(
         person_id=person_id,
         caregiver_id=caregiver_id,
