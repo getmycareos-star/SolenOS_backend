@@ -6728,10 +6728,10 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
         if len(sentences) > 2 or len(text.split()) > 80 or questions > 1 or list_lines:
             return True
     if "PAUSE REQUEST" in guidance:
-        sentences = [part for part in re.split(r"(?<=[.!?])\\s+", text) if part.strip()]
+        sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         if text.count("?") or len(text.split()) > 45 or len(sentences) > 2:
             return True
-        if re.search(r"(?m)^\\s*(?:[-*•]|\\d+[.)])\\s+", text):
+        if re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text):
             return True
     if "CONTINUITY REPAIR" in guidance and re.search(
         r"\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
