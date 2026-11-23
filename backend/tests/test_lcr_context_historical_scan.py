@@ -46,6 +46,63 @@ def _care_events_schema(engine):
     return events
 
 
+def test_exact_ordered_history_pages_keep_counts_without_a_separate_count_query():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = [
+        {
+            "id": f"event-{index}",
+            "person_id": "person-a",
+            "event_type": "daily_observation",
+            "status": "recorded",
+            "occurred_at": now - timedelta(minutes=index),
+            "recorded_at": now - timedelta(minutes=index),
+            "created_at": now - timedelta(minutes=index),
+            "title": f"Care event {index}",
+            "description": f"Recorded care detail {index}.",
+        }
+        for index in range(5)
+    ]
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), rows)
+
+        with Session(engine) as db:
+            first_page = build_lcr_context(db, "person-a", limit_per_source=2, include_all_history=True)
+        first = first_page["sources"]["events"]
+        assert first["candidate_count"] == 5
+        assert first["returned_count"] == 2
+        assert first["has_more"] is True
+        assert [item["id"] for item in first["items"]] == ["event-0", "event-1"]
+
+        with Session(engine) as db:
+            last_page = build_lcr_context(
+                db, "person-a", limit_per_source=2, include_all_history=True,
+                source_offsets={"events": 4},
+            )
+        last = last_page["sources"]["events"]
+        assert last["candidate_count"] == 5
+        assert last["returned_count"] == 1
+        assert last["has_more"] is False
+        assert [item["id"] for item in last["items"]] == ["event-4"]
+
+        with Session(engine) as db:
+            beyond_end = build_lcr_context(
+                db, "person-a", limit_per_source=2, include_all_history=True,
+                source_offsets={"events": 10},
+            )
+        empty = beyond_end["sources"]["events"]
+        assert empty["candidate_count"] == 5
+        assert empty["returned_count"] == 0
+        assert empty["has_more"] is False
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
+
 
 def test_lcr_context_includes_scoped_evidence_reviews_and_assessment_history():
     _load_source_schema.cache_clear()
