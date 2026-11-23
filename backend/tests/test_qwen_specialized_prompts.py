@@ -52,6 +52,20 @@ def test_specialists_are_selective_and_capped_at_four():
     assert selected == ("lcr_retrieval", "care_extraction", "longitudinal_reasoning", "reconciliation")
 
 
+
+def test_explicit_solenos_workflow_ids_activate_their_specialists():
+    cases = {
+        "open_loops care_coverage_gap": "caregiver_continuity",
+        "medication_day": "medication_continuity",
+        "record_lifecycle": "event_lifecycle",
+        "delta_engine care_situation_change": "longitudinal_reasoning",
+        "living_care_record care_history_search": "lcr_retrieval",
+    }
+    for workflow, expected in cases.items():
+        selected = select_specialized_domains([{"role": "system", "content": workflow}])
+        assert expected in selected
+
+
 def test_no_specialist_is_loaded_for_unclassified_generic_inference():
     messages = [{"role": "user", "content": "Hello, how are you?"}]
     assert apply_specialized_intelligence(messages) == messages
