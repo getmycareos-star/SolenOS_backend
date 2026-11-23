@@ -2311,6 +2311,19 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
+def test_general_frustration_is_not_misclassified_as_a_system_repair_request():
+    general_distress = collaboration._caregiver_interaction_guidance("I'm frustrated and tired.")
+    assert "DISTRESS RESPONSE" in general_distress
+    assert "LOW-CAPACITY RESPONSE" in general_distress
+    assert "CONTINUITY REPAIR" not in general_distress
+
+    explicit_system_failure = collaboration._caregiver_interaction_guidance(
+        "I'm frustrated because you keep asking me to repeat the same information."
+    )
+    assert "CONTINUITY REPAIR" in explicit_system_failure
+    assert "DISTRESS RESPONSE" in explicit_system_failure
+
+
 def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
     for message in ("Sad.", "Angry.", "Frustrated."):
         assert "DISTRESS RESPONSE" in collaboration._caregiver_interaction_guidance(message)
