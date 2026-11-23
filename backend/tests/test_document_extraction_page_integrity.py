@@ -285,3 +285,61 @@ def test_legacy_pdf_page_gap_blocks_old_candidates_in_review_response():
     assert response["extraction_unprocessed_page_numbers"] == [2]
     assert response["interpretation_blocked"] is True
     assert response["observations"] == []
+
+
+def test_lifecycle_response_blocks_legacy_pdf_page_gaps_and_hides_old_candidates():
+    from types import SimpleNamespace
+
+    from app.api.document_lifecycle import _response
+
+    analysis = SimpleNamespace(
+        id="legacy-lifecycle-gap-analysis",
+        source_evidence_id="legacy-lifecycle-gap-evidence",
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        extraction_status="available",
+        candidates={
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+            "unprocessed_page_numbers": [],
+            "document_intelligence": {
+                "status": "available",
+                "observations": [{"subject": "Medication", "observation": "Old candidate"}],
+            },
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["page_count"] == 3
+    assert response["processed_page_numbers"] == [1, 3]
+    assert response["unprocessed_page_numbers"] == [2]
+    assert response["interpretation_blocked"] is True
+    assert response["candidate_count"] == 0
+
+
+def test_lifecycle_response_does_not_invent_missing_pages_for_standalone_scan():
+    from types import SimpleNamespace
+
+    from app.api.document_lifecycle import _response
+
+    analysis = SimpleNamespace(
+        id="standalone-scan-analysis",
+        source_evidence_id="standalone-scan-evidence",
+        source_text="[Page 3 OCR]\\nMedication review scheduled.",
+        extraction_status="available",
+        candidates={
+            "filename": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "page_count": 1,
+            "processed_page_numbers": [3],
+            "unprocessed_page_numbers": [],
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["page_count"] == 1
+    assert response["processed_page_numbers"] == [3]
+    assert response["unprocessed_page_numbers"] == []
+    assert response["interpretation_blocked"] is False
