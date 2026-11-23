@@ -128,3 +128,9 @@ def test_invalid_explicit_workflow_hint_fails_loudly():
 
     with pytest.raises(ValueError, match="Unsupported response-length intent hint"):
         resolve_response_length_policy("anything", intent_hint="unknown_workflow")
+
+
+def test_explicit_appointment_preparation_phrase_uses_longer_briefing_contract():
+    policy = resolve_response_length_policy("Please create an appointment preparation summary.")
+    assert policy.intent == "appointment_preparation"
+    assert (policy.target_words, policy.max_words) == (150, 250)
