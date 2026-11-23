@@ -37,6 +37,8 @@ def test_inability_to_continue_and_explicit_pause_use_low_capacity_budget():
         "I can't continue right now.",
         "I cannot keep doing this.",
         "I need a pause.",
+        "I don't want to talk about this anymore.",
+        "Please stop for now.",
     ):
         policy = resolve_response_length_policy(message)
         assert policy.intent == "low_capacity_support", message
