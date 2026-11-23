@@ -1212,3 +1212,72 @@ def test_one_failed_care_source_does_not_hide_successful_source_reads():
         connection.close()
         engine.dispose()
 
+
+
+
+def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps():
+    """Companion must see readable pages and explicit page gaps, not an empty document source."""
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            db.add(Person(id="partial-document-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="partial-document-caregiver",
+                name="Caregiver",
+                relationship="family",
+                person_id="partial-document-person",
+            ))
+            db.flush()
+            db.add(CaptureAnalysis(
+                id="partial-document-analysis",
+                person_id="partial-document-person",
+                caregiver_id="partial-document-caregiver",
+                source_evidence_id="partial-document-evidence",
+                source_text=(
+                    "[Page 1]\\nMedication list: take the listed tablet with breakfast.\\n"
+                    "[Page 2 OCR]\\n[No readable text detected on page 2]"
+                ),
+                extraction_status="partial",
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "page_count": 2,
+                    "processed_page_numbers": [1, 2],
+                    "unreadable_page_numbers": [2],
+                    "unprocessed_page_numbers": [],
+                    "retryable_page_numbers": [],
+                    "retry_exhausted_page_numbers": [],
+                    "extraction_method": "server_pdf_ocr",
+                    "document_intelligence": {
+                        "status": "partial",
+                        "observations": [{"source_quote": "take the listed tablet with breakfast"}],
+                    },
+                },
+                review_history=[],
+            ))
+            db.commit()
+            from app.services.lcr_context import _load_source_schema
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db,
+                "partial-document-person",
+                caregiver_id="partial-document-caregiver",
+                query="medication",
+            )
+        documents = context["sources"]["document_extractions"]
+        assert documents["returned_count"] == 1
+        item = documents["items"][0]
+        assert item["information_status"] == "document_extraction_partial"
+        assert item["extraction_metadata"]["unreadable_page_numbers"] == [2]
+        assert item["extraction_metadata"]["interpretation_status"] == "partial"
+        assert item["extraction_metadata"]["unreviewed_candidate_count"] == 1
+        assert "Unreadable pages: 2." in item["interpretation_limit"]
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert "document_extraction_partial" in prompt_context
+        assert "unreadable_page_numbers" in prompt_context
+        assert "take the listed tablet with breakfast" not in prompt_context, (
+            "unreviewed model candidate text must not be leaked into the LCR retrieval prompt"
+        )
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
