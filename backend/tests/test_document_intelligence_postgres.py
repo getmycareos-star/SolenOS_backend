@@ -866,11 +866,33 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
-        # Accepting the exact extracted statement creates the sole source-linked assertion.
+        # A caregiver decision from an older rendered candidate must not apply
+        # after the candidate subject has been corrected in another review.
+        stale_snapshot = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": "Person",
+            },
+        )
+        assert stale_snapshot.status_code == 409, stale_snapshot.text
+        assert "suggestion changed after it was displayed" in stale_snapshot.json()["detail"]
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
+        # Accepting the exact current statement creates the sole source-linked assertion.
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": caregiver_label,
+            },
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -887,7 +909,12 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         accepted_retry = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": caregiver_label,
+            },
         )
         assert accepted_retry.status_code == 200, accepted_retry.text
         assert accepted_retry.json()["source_record_ref"]["record_id"] == assertion_id
