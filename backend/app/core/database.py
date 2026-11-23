@@ -399,7 +399,15 @@ def database_schema_differences(bind=None):
         def normalize_index_predicate(value):
             if value is None:
                 return None
-            expression = " ".join(str(value).strip().split()).casefold().replace('"', "")
+            literal_values = []
+
+            def preserve_literal(match):
+                token = f"__literal_{len(literal_values)}__"
+                literal_values.append(match.group(0))
+                return token
+
+            expression = re.sub(r"'(?:''|[^'])*'", preserve_literal, str(value).strip())
+            expression = " ".join(expression.split()).casefold().replace('"', "")
             expression = re.sub(
                 r"::(?:character varying|double precision|timestamp with time zone|timestamp without time zone|[a-z_][a-z0-9_]*)(?:\[\])?",
                 "",
@@ -418,7 +426,10 @@ def database_schema_differences(bind=None):
                 clause = re.sub(r"\s*=\s*", " = ", clause)
                 clause = re.sub(r"\s*,\s*", ", ", clause)
                 clauses.append(" ".join(clause.split()))
-            return " AND ".join(sorted(clauses)) or None
+            normalized = " AND ".join(sorted(clauses))
+            for literal_index, literal_value in enumerate(literal_values):
+                normalized = normalized.replace(f"__literal_{literal_index}__", literal_value)
+            return normalized or None
 
         def expected_index_predicate(index):
             dialect_options = index.dialect_options.get(target.dialect.name, {})
