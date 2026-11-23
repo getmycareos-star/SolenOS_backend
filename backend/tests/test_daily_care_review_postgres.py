@@ -123,11 +123,33 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                 stale_snapshot_rejected = exc.status_code == 409
             assert stale_snapshot_rejected, "a stale Daily Care review snapshot must be rejected"
 
+            changed_observation_snapshot_rejected = False
+            try:
+                review_capture_candidate(
+                    analysis_id,
+                    CaptureCandidateReview(
+                        candidate_index=0,
+                        decision="correct",
+                        expected_source_quote=original_text,
+                        expected_subject="sleep",
+                        expected_observation="An older interpretation of the same source quote.",
+                        corrected_observation=corrected_observation,
+                    ),
+                    _request(person_id, caregiver_id),
+                    db,
+                )
+            except HTTPException as exc:
+                changed_observation_snapshot_rejected = exc.status_code == 409
+            assert changed_observation_snapshot_rejected, (
+                "a review must reject a changed observation even when its source quote and subject are unchanged"
+            )
+
             corrected = review_capture_candidate(
                 analysis_id,
                 CaptureCandidateReview(
                     candidate_index=0, decision="correct",
                     expected_source_quote=original_text, expected_subject="sleep",
+                    expected_observation=original_observation,
                     corrected_observation=corrected_observation,
                 ),
                 _request(person_id, caregiver_id),
@@ -141,7 +163,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
 
             accepted = review_capture_candidate(
                 analysis_id,
-                CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
+                CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep", expected_observation=original_observation),
                 _request(person_id, caregiver_id),
                 db,
             )
@@ -171,7 +193,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
 
             rejected = review_capture_candidate(
                 analysis_id,
-                CaptureCandidateReview(candidate_index=1, decision="reject", expected_source_quote=original_text, expected_subject="mood"),
+                CaptureCandidateReview(candidate_index=1, decision="reject", expected_source_quote=original_text, expected_subject="mood", expected_observation="Unconfirmed generated suggestion"),
                 _request(person_id, caregiver_id),
                 db,
             )
