@@ -179,7 +179,6 @@ def test_lcr_fact_projection_retains_verified_person_scoped_evidence_links():
                 },
             ])
             db.commit()
-            from app.services.lcr_context import _load_source_schema
             _load_source_schema.cache_clear()
             context = build_lcr_context(
                 db, "fact-lineage-person", caregiver_id="fact-lineage-caregiver",
@@ -1217,6 +1216,8 @@ def test_one_failed_care_source_does_not_hide_successful_source_reads():
 
 def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps():
     """Companion must see readable pages and explicit page gaps, not an empty document source."""
+    from app.services.lcr_context import _load_source_schema
+
     engine, connection, schema = _postgres_conversation_db()
     try:
         with Session(bind=connection) as db:
