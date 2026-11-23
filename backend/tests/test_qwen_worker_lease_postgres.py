@@ -437,3 +437,47 @@ def test_postgres_document_deletion_completes_while_extraction_is_running(monkey
                 person_id=person_id,
                 source_evidence_id=evidence_id,
             ).count() == 0
+
+
+def test_postgres_delete_is_not_blocked_by_document_ocr(monkeypatch):
+    monkeypatch.setenv("SOLENOS_QWEN_WORKER_ENABLED", "false")
+    entered, release = threading.Event(), threading.Event()
+    from app.api import document_lifecycle
+
+    def slow_extract(*args, **kwargs):
+        entered.set()
+        assert release.wait(15)
+        return "[Page 1]\\nCare note.", "server_utf8_text"
+
+    monkeypatch.setattr(document_lifecycle, "_extract", slow_extract)
+    with TestClient(app) as client:
+        created = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "OCR delete test"})
+        assert created.status_code == 201, created.text
+        headers = {"Authorization": "Bearer " + created.json()["access_token"]}
+        person_id, caregiver_id = created.json()["person"]["id"], created.json()["caregiver"]["id"]
+        uploaded = client.post(
+            "/api/v1/upload", headers=headers,
+            data={"person_id": person_id, "caregiver_id": caregiver_id, "evidence_type": "document"},
+            files={"file": ("ocr-race.txt", b"Original care note.", "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            extraction = pool.submit(client.post, f"/api/v1/documents/{evidence_id}/extract", headers=headers, json={})
+            assert entered.wait(10)
+            deletion = pool.submit(client.delete, f"/api/v1/documents/{evidence_id}", headers=headers)
+            completed_before_release = False
+            try:
+                deleted = deletion.result(timeout=5)
+                completed_before_release = True
+            except TimeoutError:
+                release.set()
+                deleted = deletion.result(timeout=15)
+            finally:
+                release.set()
+            extracted = extraction.result(timeout=15)
+        assert completed_before_release
+        assert deleted.status_code == 200, deleted.text
+        assert extracted.status_code == 404, extracted.text
+        with SessionLocal() as db:
+            assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
