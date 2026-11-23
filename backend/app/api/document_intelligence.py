@@ -117,11 +117,28 @@ def _metadata(analysis: CaptureAnalysis) -> dict:
     return value
 
 
+def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | None = None) -> list[int]:
+    """Combine explicit failure markers with missing page markers persisted at extraction time."""
+    value = metadata if isinstance(metadata, dict) else (
+        analysis.candidates if isinstance(analysis.candidates, dict) else {}
+    )
+    recorded = value.get("unprocessed_page_numbers")
+    persisted = {
+        page for page in recorded
+        if isinstance(recorded, list)
+        and isinstance(page, int)
+        and not isinstance(page, bool)
+        and page > 0
+    } if isinstance(recorded, list) else set()
+    return sorted(set(_unprocessed_page_numbers(analysis.source_text or "")) | persisted)
+
+
 def _require_complete_extraction(analysis: CaptureAnalysis) -> None:
     """Do not interpret or accept facts from a document with missing page content."""
     source_text = analysis.source_text or ""
     unreadable_pages = _unreadable_page_numbers(source_text)
-    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    metadata = _metadata(analysis)
+    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata)
     if analysis.extraction_status != "available" or unreadable_pages or unprocessed_pages:
         details = []
         if unreadable_pages:
@@ -626,7 +643,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
     intelligence = _intelligence(analysis)
     source_text = analysis.source_text or ""
     page_count = _page_count(source_text)
-    unprocessed_pages = _unprocessed_page_numbers(source_text)
+    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata)
     retryable_pages = _retryable_page_numbers(source_text)
     blocked_pages = _blocked_page_numbers(source_text)
     unreadable_pages = _unreadable_page_numbers(source_text)
@@ -635,7 +652,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
     all_observations = stored_observations
     extraction_complete = (
         analysis.extraction_status == "available"
-        and not _unprocessed_page_numbers(source_text)
+        and not unprocessed_pages
         and not _unreadable_page_numbers(source_text)
     )
     if not extraction_complete:
