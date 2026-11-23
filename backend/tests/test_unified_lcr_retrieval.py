@@ -2286,3 +2286,74 @@ def test_curated_breathing_paraphrase_retrieves_differently_worded_symptom_repor
         unrelated, "shortness of breath", direct, expanded
     )
 
+def test_postgres_source_query_failure_is_distinct_from_an_empty_source(monkeypatch):
+    from sqlalchemy import event
+
+    from app.services.lcr_context import _load_source_schema
+
+    engine, connection, schema = _postgres_conversation_db()
+    dropped = {"value": False}
+
+    connection.exec_driver_sql("""
+        CREATE TABLE retrieval_failure_events (
+            id VARCHAR PRIMARY KEY,
+            person_id VARCHAR NOT NULL,
+            title VARCHAR,
+            created_at TIMESTAMPTZ
+        )
+    """)
+    connection.exec_driver_sql("""
+        CREATE TABLE retrieval_empty_evidence (
+            id VARCHAR PRIMARY KEY,
+            person_id VARCHAR NOT NULL,
+            source_text TEXT,
+            created_at TIMESTAMPTZ
+        )
+    """)
+    connection.commit()
+
+    def drop_events_table_before_query(conn, cursor, statement, parameters, context, executemany):
+        if not dropped["value"] and "FROM retrieval_failure_events" in statement:
+            dropped["value"] = True
+            with engine.connect() as ddl_connection:
+                ddl_connection.exec_driver_sql(f'SET search_path TO "{schema}"')
+                ddl_connection.exec_driver_sql("DROP TABLE retrieval_failure_events")
+                ddl_connection.commit()
+
+    event.listen(engine, "before_cursor_execute", drop_events_table_before_query)
+    monkeypatch.setattr(
+        "app.services.lcr_context.SOURCE_SPECS",
+        {
+            "events": {
+                "table": "retrieval_failure_events",
+                "required": True,
+                "fields": ["id", "person_id", "title", "created_at"],
+                "order": ["created_at"],
+            },
+            "evidence": {
+                "table": "retrieval_empty_evidence",
+                "required": True,
+                "fields": ["id", "person_id", "source_text", "created_at"],
+                "order": ["created_at"],
+            },
+        },
+    )
+    _load_source_schema.cache_clear()
+    try:
+        with Session(bind=connection) as db:
+            context = build_lcr_context(
+                db, "failure-versus-empty-person", query="sleep", limit_per_source=10,
+            )
+
+        assert dropped["value"] is True
+        assert context["sources"]["events"]["status"] == "failed"
+        assert context["sources"]["evidence"]["status"] == "empty"
+        assert context["failed_sources"] == ["events"]
+        assert context["history_coverage"] == "partial_source_history"
+        assert context["retrieval_scan_complete"] is False
+        assert context["retrieval_projection_complete"] is False
+    finally:
+        event.remove(engine, "before_cursor_execute", drop_events_table_before_query)
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
