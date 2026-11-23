@@ -2509,6 +2509,15 @@ def test_caregiver_pause_request_is_respected_without_follow_up_questions():
     assert "PAUSE REQUEST" in combined
     assert "pause request takes precedence" in combined
 
+    assert not collaboration._caregiver_response_needs_revision(
+        "I can't continue right now. Please stop asking me questions.",
+        "I hear you. We can pause here.",
+    )
+    assert collaboration._caregiver_response_needs_revision(
+        "I can't continue right now. Please stop asking me questions.",
+        "I understand. Would you like to tell me what happened?",
+    )
+
 
 def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflow():
     guidance = collaboration._caregiver_interaction_guidance(
