@@ -112,3 +112,35 @@ def test_standalone_scan_preserves_original_page_label_without_inventing_missing
     assert metadata["page_count"] == 1
     assert metadata["processed_page_numbers"] == [3]
     assert metadata["unprocessed_page_numbers"] == []
+
+
+def test_document_review_response_reports_missing_page_and_hides_old_candidates():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="analysis-page-gap",
+        source_evidence_id="evidence-page-gap",
+        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        extraction_status="partial",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "care-plan.pdf",
+            "document_type": "general_care_document",
+            "page_count": 3,
+            "unprocessed_page_numbers": [2],
+            "document_intelligence": {
+                "status": "available",
+                "observations": [{"subject": "Medication", "observation": "Old candidate"}],
+            },
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["page_count"] == 3
+    assert response["extraction_processed_page_numbers"] == [1, 3]
+    assert response["extraction_unprocessed_page_numbers"] == [2]
+    assert response["observations"] == []
+    assert response["interpretation_blocked"] is True
