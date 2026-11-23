@@ -933,6 +933,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             resume_intelligence = existing
         else:
             try:
+                evidence, upload, current_analysis = _lock_document_source_and_analysis(
+                    db, evidence_id, person_id, str(analysis.id), upload.sha256
+                )
+                if _metadata(current_analysis) != original_candidates:
+                    db.rollback()
+                    return _response(current_analysis)
+                analysis = current_analysis
                 persist_source_clarification_questions(
                     db,
                     person_id=person_id,
@@ -966,6 +973,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         if not isinstance(next_offset, int) or next_offset < 0:
             next_offset = min(MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))
         if next_offset < len(stored) and batch_final:
+            evidence, upload, current_analysis = _lock_document_source_and_analysis(
+                db, evidence_id, person_id, str(analysis.id), upload.sha256
+            )
+            if _metadata(current_analysis) != original_candidates:
+                db.rollback()
+                return _response(current_analysis)
+            analysis = current_analysis
             updated = copy.deepcopy(metadata)
             intelligence = updated["document_intelligence"]
             end = min(next_offset + MAX_DOCUMENT_CANDIDATE_BATCH, len(stored))
@@ -979,7 +993,11 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             db.refresh(analysis)
             return _response(analysis)
         if next_offset < len(stored):
-            return _response(analysis)
+            evidence, upload, current_analysis = _lock_document_source_and_analysis(
+                db, evidence_id, person_id, str(analysis.id), upload.sha256
+            )
+            db.rollback()
+            return _response(current_analysis)
 
     source_text = (analysis.source_text or "").strip()
     if not source_text:
@@ -1284,6 +1302,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
         "model_authority": "review_only",
         "source_text_sha256": hashlib.sha256(source_text.encode("utf-8")).hexdigest(),
     }
+    evidence, upload, current_analysis = _lock_document_source_and_analysis(
+        db, evidence_id, person_id, str(analysis.id), upload.sha256
+    )
+    if _metadata(current_analysis) != original_candidates:
+        db.rollback()
+        return _response(current_analysis)
+    analysis = current_analysis
     analysis.candidates = metadata
     db.add(analysis)
     persist_source_clarification_questions(
