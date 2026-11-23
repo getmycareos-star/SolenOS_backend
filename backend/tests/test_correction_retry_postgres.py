@@ -147,8 +147,18 @@ def test_postgres_correction_receipt_is_durable_idempotent_retryable_and_scoped(
             assert persisted.processing_status == "pending"
             assert persisted.processing_attempts == 1
             assert persisted.next_retry_at is not None
+            persisted.next_retry_at = datetime.now(timezone.utc) + timedelta(hours=1)
             original = db.query(CareEvent).filter(CareEvent.id == event_id).one()
             assert original.description == "Original report text remains unchanged."
+            db.commit()
+
+        # An identical POST is idempotent but must not bypass the persisted
+        # backoff. The explicit retry endpoint is the deliberate override.
+        pending_replay = client.post("/api/v1/corrections", headers=headers, json=payload)
+        assert pending_replay.status_code == 200, pending_replay.text
+        assert pending_replay.json()["processing_status"] == "pending"
+        assert pending_replay.json()["processing_attempts"] == 1
+        assert calls["reconciliation"] == 1
 
         retry = client.post(
             f"/api/v1/corrections/{person_id}/{correction_id}/retry",
