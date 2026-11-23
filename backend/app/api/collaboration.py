@@ -5060,6 +5060,16 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 "missing_required_sources": shared_lcr_context.get("missing_required_sources", []),
                 "missing_optional_sources": shared_lcr_context.get("missing_optional_sources", []),
                 "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
+                "source_limits": [
+                    {
+                        "source_type": name,
+                        "status": source.get("status"),
+                        "interpretation_limit": source.get("interpretation_limit"),
+                    }
+                    for name, source in shared_lcr_context.get("sources", {}).items()
+                    if source.get("status") in {"failed", "partial", "unsearchable"}
+                    and source.get("interpretation_limit")
+                ][:20],
                 "sources": {
                     name: {
                         "status": source.get("status"),
@@ -5450,6 +5460,16 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "prompt_context_complete": not shared_context_truncated,
             "missing_required_sources": list(shared_lcr_context.get("missing_required_sources") or []),
             "missing_optional_sources": list(shared_lcr_context.get("missing_optional_sources") or []),
+            "source_limits": [
+                {
+                    "source_type": name,
+                    "status": source.get("status"),
+                    "interpretation_limit": source.get("interpretation_limit"),
+                }
+                for name, source in shared_lcr_context.get("sources", {}).items()
+                if source.get("status") in {"failed", "partial", "unsearchable"}
+                and source.get("interpretation_limit")
+            ][:20],
             "sources": {
                 name: {
                     "status": source.get("status"),
