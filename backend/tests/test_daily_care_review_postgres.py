@@ -162,6 +162,24 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             assert corrected["candidate"]["corrected_observation"] == corrected_observation
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
+            stale_pre_correction_accept_rejected = False
+            try:
+                review_capture_candidate(
+                    analysis_id,
+                    CaptureCandidateReview(
+                        candidate_index=0, decision="accept",
+                        expected_source_quote=original_text, expected_subject="sleep",
+                        expected_observation=original_observation,
+                    ),
+                    _request(person_id, caregiver_id),
+                    db,
+                )
+            except HTTPException as exc:
+                stale_pre_correction_accept_rejected = exc.status_code == 409
+            assert stale_pre_correction_accept_rejected, (
+                "approval from the pre-correction screen must not accept the corrected Daily Care candidate"
+            )
+
             accepted = review_capture_candidate(
                 analysis_id,
                 CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep", expected_observation=original_observation, expected_corrected_observation=corrected_observation),
