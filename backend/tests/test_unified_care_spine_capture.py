@@ -208,6 +208,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert own_document_analysis_id in document_ids
             assert peer_document_analysis_id not in document_ids
 
+        reported_event_time = datetime.now(timezone.utc) - timedelta(hours=2)
         with TestClient(app) as client:
             response = client.post(
                 "/api/v1/daily/log",
@@ -216,6 +217,8 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                     "person_id": person_id,
                     "caregiver_id": caregiver_id,
                     "capture_idempotency_key": "daily-capture-" + suffix,
+                    "occurred_at": reported_event_time.isoformat(),
+                    "occurred_at_timezone": "Africa/Lagos",
                     "notes": "Mum was unusually confused this afternoon and refused lunch.",
                 },
             )
@@ -361,6 +364,8 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                     "person_id": person_id,
                     "caregiver_id": caregiver_id,
                     "capture_idempotency_key": "daily-capture-" + suffix,
+                    "occurred_at": reported_event_time.isoformat(),
+                    "occurred_at_timezone": "Africa/Lagos",
                     "notes": "Mum was unusually confused this afternoon and refused lunch.",
                 },
             )
@@ -391,6 +396,10 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 ).one()
                 assert event.evidence_ids == [evidence_id]
                 assert event.created_by_caregiver_id == caregiver_id
+                assert event.occurred_at == reported_event_time
+                assert event.occurred_at_timezone == "Africa/Lagos"
+                assert evidence.occurred_at == reported_event_time
+                assert evidence.occurred_at_timezone == "Africa/Lagos"
                 assert evidence.reported_by_caregiver_id == caregiver_id
                 assert evidence.epistemic_status == "caregiver_reported"
 
@@ -423,6 +432,9 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             assert len(event_rows) == 1
             assert len(evidence_rows) == 1
             assert event_rows[0]["evidence_ids"] == [evidence_id]
+            assert event_rows[0]["occurred_at_timezone"] == "Africa/Lagos"
+            assert event_rows[0]["occurred_at"] == reported_event_time.isoformat()
+            assert evidence_rows[0]["occurred_at_timezone"] == "Africa/Lagos"
             assert evidence_rows[0]["epistemic_status"] == "caregiver_reported"
             assert context["retrieval_contract"]["caregiver_scope_applied"] is True
 
