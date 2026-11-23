@@ -131,8 +131,22 @@ def _build_unified_lcr_context_or_422(*args, **kwargs):
 
 
 def _should_fetch_full_lcr_context_pages(context: dict, care_journey_request: bool) -> bool:
-    """Page through broad histories and every explicitly requested temporal window."""
-    return bool(care_journey_request or context.get("temporal_window"))
+    """Page through broad, temporal, and truncated lexical histories.
+
+    A topic-specific question can still match more records than the initial
+    ranked window. If any canonical source reports more rows, fetch subsequent
+    pages rather than allowing an older matching event to disappear behind the
+    first page's ranking limit.
+    """
+    if care_journey_request or context.get("temporal_window"):
+        return True
+    sources = context.get("sources") if isinstance(context.get("sources"), dict) else {}
+    return any(
+        name != "companion_conversation"
+        and isinstance(source, dict)
+        and source.get("has_more") is True
+        for name, source in sources.items()
+    )
 
 
 def _lcr_history_page_limit(care_journey_request: bool) -> int:
