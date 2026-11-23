@@ -844,7 +844,9 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     # Commit the canonical evidence/change reconciliation and release source
     # row locks before model-backed Delta inference. The Delta Engine opens its
     # own session and revalidates the source snapshot immediately before save.
-    current_job.locked_at = datetime.now(timezone.utc)
+    # Lease renewal is owned exclusively by _maintain_qwen_job_lease.
+    # Committing the reconciliation releases row locks; changing locked_at here
+    # would invalidate the heartbeat's compare-and-swap ownership token.
     db.commit()
     if quick_check_in_capture:
         delta_reconciliation = {"status": "not_applicable"}
@@ -865,8 +867,6 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
     if current_job is None or current_job.status != "processing":
         db.rollback()
         return True
-    current_job.locked_at = datetime.now(timezone.utc)
-
     logger.info(
         "Daily Care Delta reconciliation finished job=%s person=%s event=%s status=%s run_id=%s",
         job_id,
