@@ -772,8 +772,8 @@ def _safe_appointment_workspace_payload(value: Any) -> dict[str, Any]:
     return result
 
 
-def _document_extraction_metadata(value: Any) -> dict[str, Any]:
-    """Expose bounded processing facts without exposing unreviewed AI candidates."""
+def _document_extraction_metadata(value: Any, source_text: str | None = None) -> dict[str, Any]:
+    """Expose bounded processing facts and fail closed on incomplete PDF page coverage."""
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -795,6 +795,35 @@ def _document_extraction_metadata(value: Any) -> dict[str, Any]:
         for key in allowed
         if key in value
     }
+
+    mime_type = str(value.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+    filename = str(value.get("filename") or "").casefold()
+    is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
+    page_count = value.get("page_count")
+    if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
+        processed = value.get("processed_page_numbers")
+        if isinstance(processed, list):
+            observed_pages = {
+                page for page in processed
+                if isinstance(page, int) and not isinstance(page, bool) and page > 0
+            }
+        else:
+            observed_pages = {
+                int(match.group(1))
+                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text or "")
+            }
+        explicit_unprocessed = value.get("unprocessed_page_numbers")
+        unprocessed = {
+            page for page in explicit_unprocessed
+            if isinstance(explicit_unprocessed, list)
+            and isinstance(page, int)
+            and not isinstance(page, bool)
+            and page > 0
+        } if isinstance(explicit_unprocessed, list) else set()
+        unprocessed.update(set(range(1, page_count + 1)) - observed_pages)
+        if unprocessed:
+            metadata["unprocessed_page_numbers"] = sorted(unprocessed)
+
     intelligence = value.get("document_intelligence")
     if isinstance(intelligence, dict):
         metadata["interpretation_status"] = intelligence.get("status")
@@ -1061,7 +1090,7 @@ def build_lcr_context(
                         continue
                     item = {key: _safe_value(value, key) for key, value in dict(row).items()}
                     if source_name == "document_extractions":
-                        item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None))
+                        item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
                         item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
                     information_status, interpretation_limit = _information_status(source_name, item)
