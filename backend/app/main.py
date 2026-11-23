@@ -2205,7 +2205,7 @@ def readiness_check(db: Session = Depends(get_db)):
     try:
         differences = database_schema_differences(db.get_bind())
     except Exception as exc:
-        logger.error("Readiness failed: ORM schema verification exception type=%s", type(exc).__name__)
+        logger.exception("Readiness failed: ORM schema verification exception type=%s", type(exc).__name__)
         raise HTTPException(status_code=503, detail="Database schema could not be verified") from exc
     if differences:
         logger.error(
