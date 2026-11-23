@@ -14,7 +14,8 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.models.collaboration import CommunityPost, ConversationMessage, EvidenceUpload
-from app.models.care import CareEvent, Caregiver, Evidence, Person
+from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
+from app.models.care_continuity import CareRecordRelationship
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
 
@@ -2199,3 +2200,67 @@ def test_emergency_readiness_does_not_apply_empty_context_copy_over_an_active_em
         assert response.json()["reply"] == "Call local emergency services now."
     finally:
         teardown()
+
+def test_qwen_support_workflow_marks_corrected_event_as_historical(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        event_id = "support-corrected-event"
+        correction_id = "support-event-correction"
+        with TestingSessionLocal() as db:
+            db.add(CareEvent(
+                id=event_id, person_id=person_id,
+                event_type="observation", status="recorded",
+                occurred_at=datetime.now(timezone.utc) - timedelta(hours=2),
+                title="Medication was given",
+                description="Caregiver reported that the medicine was given.",
+                evidence_ids=[], created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+            db.flush()
+            db.add(Correction(
+                id=correction_id, person_id=person_id,
+                target_type="care_event", target_id=event_id,
+                original_text="The medicine was given.",
+                corrected_text="The caregiver did not witness the medicine being given.",
+                reason="The earlier report overstated what was observed.",
+                caregiver_id=caregiver_id,
+                processing_status="completed",
+                processing_attempts=1,
+            ))
+            db.flush()
+            db.add(CareRecordRelationship(
+                id="support-event-correction-link", person_id=person_id,
+                source_type="correction", source_id=correction_id,
+                relationship_type="corrects", target_type="care_event",
+                target_id=event_id,
+                provenance="Caregiver correction; original report retained.",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        captured = []
+
+        def fake_qwen(messages, **kwargs):
+            captured.append(messages)
+            return "The earlier report was corrected. The caregiver did not witness it."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"workflow": "living_care_record", "text": "What is recorded about the medicine?"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = "\\n".join(
+            str(message.get("content") or "")
+            for message in captured[0]
+        )
+        assert "information_status=historical_event" in prompt
+        assert "The caregiver did not witness the medicine being given." in prompt
+        assert event_id in response.json()["source_event_ids"]
+        assert response.json()["written_to_lcr"] is False
+    finally:
+        teardown()
+
