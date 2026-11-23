@@ -50,6 +50,22 @@ _EMOTIONAL = re.compile(
     r"i just want a break|i've had enough|i have had enough|i can't take this|i cannot take this)\b",
     re.I,
 )
+_PATIENT_EMOTIONAL_REPORT = re.compile(
+    r"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+    r"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
+    r".{0,40}\\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been)\\b"
+    r".{0,24}\\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
+    r"helpless|frustrated|furious|overwhelmed|exhausted|burnt out|burned out|grieving)\\b",
+    re.I,
+)
+_CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
+    r"\\b(?:i(?:'m| am| feel| have)|i've)\\b.{0,60}\\b(?:exhausted|overwhelmed|"
+    r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
+    r"lonely|anxious|grieving|frustrated|furious|helpless|at my limit|falling apart|"
+    r"can't cope|cannot cope|can't take this|cannot take this|can't stop crying|"
+    r"need a break|have had enough|had enough)\\b",
+    re.I,
+)
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
@@ -124,7 +140,10 @@ def resolve_response_length_policy(
     value = " ".join((message or "").casefold().split())
     if is_critical_safety_message(value):
         return _POLICIES["critical_safety"]
-    if _EMOTIONAL.search(value):
+    emotional_report = bool(_EMOTIONAL.search(value))
+    patient_emotional_report = bool(_PATIENT_EMOTIONAL_REPORT.search(value))
+    caregiver_first_person_distress = bool(_CAREGIVER_FIRST_PERSON_DISTRESS.search(value))
+    if emotional_report and (not patient_emotional_report or caregiver_first_person_distress):
         return _POLICIES["low_capacity_support"]
 
     if intent_hint:
