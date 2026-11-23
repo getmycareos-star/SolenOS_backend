@@ -2020,3 +2020,63 @@ def test_delta_freshness_tracks_real_orm_updates_to_baselines_changes_and_situat
         assert "care_record_context_changed_after_review" in run["source_freshness"]["reasons"]
     finally:
         teardown()
+
+
+def test_lcr_assist_anchors_the_newly_saved_event_beyond_recent_limit(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import app.api.collaboration as collaboration
+
+        captured = []
+        monkeypatch.setattr(
+            collaboration,
+            "qwen_chat",
+            lambda messages, **kwargs: captured.append(messages) or "The saved update can be compared with earlier care information.",
+        )
+        now = datetime.now(timezone.utc)
+        anchor_id = "lcr-assist-anchor-event"
+        db = TestingSessionLocal()
+        try:
+            db.add(CareEvent(
+                id=anchor_id,
+                person_id=person_id,
+                event_type="structured_daily_capture",
+                status="recorded",
+                occurred_at=now - timedelta(days=30),
+                title="Newly saved caregiver update",
+                description="ANCHOR_EVENT_SOURCE_TEXT: breakfast intake was lower today.",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.add_all([
+                CareEvent(
+                    id=f"lcr-assist-recent-{index}",
+                    person_id=person_id,
+                    event_type="structured_daily_capture",
+                    status="recorded",
+                    occurred_at=now - timedelta(minutes=index),
+                    title=f"Recent care update {index}",
+                    description=f"Recent unrelated care detail {index}.",
+                    created_by_caregiver_id=caregiver_id,
+                )
+                for index in range(10)
+            ])
+            db.commit()
+        finally:
+            db.close()
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "living_care_record",
+                "source_event_id": anchor_id,
+                "text": "Put this newly saved caregiver update in context.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert anchor_id in response.json()["source_event_ids"]
+        assert captured
+        prompt = captured[0][0]["content"]
+        assert "ANCHOR_EVENT_SOURCE_TEXT: breakfast intake was lower today." in prompt
+    finally:
+        teardown()
