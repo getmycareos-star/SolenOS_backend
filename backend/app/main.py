@@ -36,7 +36,7 @@ from app.api.appointment_workspace import router as appointment_workspace_router
 from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.time_location import Appointment as LegacyAppointmentModel
 from app.services.lcr_context import build_lcr_context, format_lcr_context_for_prompt
-from app.services.response_length_policy import resolve_response_length_policy
+from app.services.response_length_policy import count_response_words, resolve_response_length_policy
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.care_continuity import (
     explicit_caregiver_gap_assessment,
@@ -1645,7 +1645,7 @@ async def generate_lcr_orientation(
     def validate_reply(candidate):
         candidate = (candidate or "").strip()
         sentence_count = len([part for part in re.split(r"(?<=[.!?])\s+", candidate) if part.strip()])
-        word_count = len(candidate.split())
+        word_count = count_response_words(candidate)
         max_words = response_length_policy.max_words
         max_sentences = None if max_words is None else (2 if is_greeting else (8 if max_words > 180 else 5 if max_words > 60 else 3))
         max_chars = None if max_words is None else max(700, max_words * 16)
