@@ -1,4 +1,5 @@
 import io
+import http.client
 import json
 import urllib.error
 
@@ -126,7 +127,7 @@ def test_qwen_gateway_retries_remote_disconnect_during_model_cold_start(monkeypa
         ConnectionResetError,
         ConnectionAbortedError,
         BrokenPipeError,
-        __import__("http.client", fromlist=["RemoteDisconnected"]).RemoteDisconnected,
+        http.client.RemoteDisconnected,
     ],
 )
 def test_qwen_gateway_retries_direct_connection_failures_during_model_cold_start(
