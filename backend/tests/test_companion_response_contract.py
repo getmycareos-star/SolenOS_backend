@@ -2400,6 +2400,21 @@ def test_general_frustration_is_not_misclassified_as_a_system_repair_request():
     assert "DISTRESS RESPONSE" in explicit_system_failure
 
 
+def test_emotional_disclosure_does_not_block_a_requested_factual_answer():
+    user_text = (
+        "I'm sad about how things are going. Please explain what the record says about sleep in detail."
+    )
+    detailed_reply = (
+        "The saved care notes describe repeated waking on three nights this week, with restlessness before "
+        "settling. The record attributes this information to the caregiver's report; it does not establish "
+        "a medical cause or confirm that the pattern will continue. The notes do not include a verified "
+        "sleep assessment from a healthcare professional. This is the full sleep information currently "
+        "available in the record, and the event dates should be checked against the original entries."
+    )
+    assert "DISTRESS RESPONSE" in collaboration._caregiver_interaction_guidance(user_text)
+    assert not collaboration._caregiver_response_needs_revision(user_text, detailed_reply)
+
+
 def test_distress_replies_stay_brief_and_do_not_force_a_workflow():
     for message in ("Sad.", "Angry.", "Frustrated."):
         assert "DISTRESS RESPONSE" in collaboration._caregiver_interaction_guidance(message)
