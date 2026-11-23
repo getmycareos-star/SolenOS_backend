@@ -449,6 +449,7 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         "person-test",
         "caregiver-test",
         expected_locked_at=original_lock,
+        lease_state=lease_state,
         now=refreshed_at,
     ) is True
 
@@ -482,6 +483,7 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         "person-test",
         "caregiver-test",
         expected_locked_at=refreshed_at,
+        lease_state=lease_state,
     ) is False
 
     db = sessions()
@@ -499,6 +501,7 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         "person-test",
         "caregiver-test",
         expected_locked_at=newer_lock,
+        lease_state=lease_state,
     ) is False
     assert worker._refresh_qwen_job_lease_once(
         job_id,
@@ -510,11 +513,13 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
 
 def test_worker_lease_maintainer_stops_when_another_worker_reclaims_job(monkeypatch):
     claimed_at = datetime.now(timezone.utc)
-    lease_state = {"locked_at": claimed_at, "lost": False}
+    lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
     calls = []
 
     def reject_old_lease(job_id, person_id, caregiver_id, *, expected_locked_at, now):
         calls.append((job_id, person_id, caregiver_id, expected_locked_at))
+        with lease_state["_lock"]:
+            lease_state["lost"] = True
         return False
 
     monkeypatch.setattr(worker, "_refresh_qwen_job_lease_once", reject_old_lease)
@@ -533,12 +538,17 @@ def test_worker_lease_maintainer_stops_when_another_worker_reclaims_job(monkeypa
 
 def test_worker_lease_maintainer_advances_only_after_successful_compare_and_swap(monkeypatch):
     claimed_at = datetime.now(timezone.utc)
-    lease_state = {"locked_at": claimed_at, "lost": False}
+    lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
     calls = []
 
     def accept_current_lease(job_id, person_id, caregiver_id, *, expected_locked_at, now):
         calls.append((expected_locked_at, now))
-        return len(calls) == 1
+        with lease_state["_lock"]:
+            if len(calls) == 1:
+                lease_state["locked_at"] = now
+                return True
+            lease_state["lost"] = True
+        return False
 
     monkeypatch.setattr(worker, "_refresh_qwen_job_lease_once", accept_current_lease)
     # Stop after the first successful renewal by making the next attempt fail.
