@@ -61,7 +61,7 @@ _PATIENT_EMOTIONAL_REPORT = re.compile(
 _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
     r"\b(?:i(?:'m| am| feel| have)|i've|i just want|i want|i need)\b.{0,60}\b(?:exhausted|overwhelmed|"
     r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
-    r"lonely|anxious|grieving|frustrated|furious|helpless|at my limit|falling apart|"
+    r"lonely|anxious|grieving|frustrated|furious|helpless|hopeless|at my limit|falling apart|"
     r"can't cope|cannot cope|can't take this|cannot take this|can't stop crying|"
     r"break|have had enough|had enough|struggling|"
     r"been crying|can't stop crying|feel like crying)\b",
