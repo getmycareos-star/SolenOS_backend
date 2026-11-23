@@ -481,3 +481,53 @@ def test_postgres_delete_is_not_blocked_by_document_ocr(monkeypatch):
         assert extracted.status_code == 404, extracted.text
         with SessionLocal() as db:
             assert db.query(CaptureAnalysis).filter_by(source_evidence_id=evidence_id).count() == 0
+
+
+def test_postgres_delete_is_not_blocked_by_document_interpretation(monkeypatch):
+    monkeypatch.setenv("SOLENOS_QWEN_WORKER_ENABLED", "false")
+    entered, release = threading.Event(), threading.Event()
+    from app.api import document_intelligence
+
+    def slow_interpretation(*args, **kwargs):
+        entered.set()
+        assert release.wait(15)
+        return {"observations": [], "open_questions": []}
+
+    monkeypatch.setattr(document_intelligence, "extract_review_candidates", slow_interpretation)
+    with TestClient(app) as client:
+        created = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Interpretation delete test"})
+        assert created.status_code == 201, created.text
+        headers = {"Authorization": "Bearer " + created.json()["access_token"]}
+        person_id, caregiver_id = created.json()["person"]["id"], created.json()["caregiver"]["id"]
+        uploaded = client.post(
+            "/api/v1/upload", headers=headers,
+            data={"person_id": person_id, "caregiver_id": caregiver_id, "evidence_type": "document"},
+            files={"file": ("interpretation-race.txt", b"Hospital note: follow-up review recommended.", "text/plain")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        evidence_id = uploaded.json()["evidence_id"]
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=headers, json={})
+        assert extracted.status_code == 201, extracted.text
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            interpretation = pool.submit(
+                client.post, f"/api/v1/documents/{evidence_id}/intelligence", headers=headers, json={}
+            )
+            assert entered.wait(10)
+            deletion = pool.submit(client.delete, f"/api/v1/documents/{evidence_id}", headers=headers)
+            completed_before_release = False
+            try:
+                deleted = deletion.result(timeout=5)
+                completed_before_release = True
+            except TimeoutError:
+                release.set()
+                deleted = deletion.result(timeout=15)
+            finally:
+                release.set()
+            interpreted = interpretation.result(timeout=15)
+        assert completed_before_release
+        assert deleted.status_code == 200, deleted.text
+        assert interpreted.status_code == 404, interpreted.text
+        with SessionLocal() as db:
+            assert db.query(CaptureAnalysis).filter_by(
+                person_id=person_id, source_evidence_id=evidence_id
+            ).count() == 0
