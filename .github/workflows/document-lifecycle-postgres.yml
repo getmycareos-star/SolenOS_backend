@@ -43,10 +43,10 @@ permissions:
   statuses: write
 
 concurrency:
-  # Each run owns a disposable PostgreSQL database and Silo container. Cancel
-  # obsolete revisions so current-main document verification is not starved.
+  # Keep one active PostgreSQL document-lifecycle run alive until it finishes.
+  # GitHub retains only the newest pending run for this concurrency group.
   group: document-lifecycle-postgres-current-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   document-lifecycle-postgres:
