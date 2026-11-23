@@ -3136,6 +3136,8 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
                 "caregiver_perspectives": "caregiver_perspective",
                 "corrections": "care_correction",
                 "appointments": "appointment",
+                "appointment_workspaces": "appointment_workspace",
+                "appointment_workspace_revisions": "appointment_workspace_revision",
             }
             record_type = source_type_map.get(source_type, source_type)
             record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
@@ -8755,6 +8757,39 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # use. A sentence is linked only when its wording appears in that source;
     # paraphrases and unmatched statements are explicitly left unsupported.
     claim_source_records = []
+    # Appointment workspace notes and immutable revisions are supplemental
+    # caregiver-authored context, not canonical LCR assertions. Include them
+    # in claim provenance only when the ranked retrieval actually supplied them.
+    for line in shared_lcr_lines:
+        try:
+            wrapped = json.loads(line[line.index("{"):])
+            source_type = wrapped.get("source_type")
+            record = wrapped.get("record") if isinstance(wrapped.get("record"), dict) else {}
+            if source_type not in {"appointment_workspaces", "appointment_workspace_revisions"}:
+                continue
+            record_id = wrapped.get("source_id") or record.get("id")
+            if not record_id:
+                continue
+            is_revision = source_type == "appointment_workspace_revisions"
+            claim_source_records.append({
+                "record_type": "appointment_workspace_revision" if is_revision else "appointment_workspace",
+                "record_id": str(record_id),
+                "label": "Earlier appointment notes" if is_revision else "Caregiver appointment notes",
+                "source_text": json.dumps(record, ensure_ascii=False, default=str),
+                "occurred_at": (
+                    record.get("changed_at") if is_revision
+                    else record.get("updated_at") or record.get("created_at")
+                ),
+                "recorded_at": record.get("changed_at") if is_revision else record.get("created_at"),
+                "record_status": (
+                    f"historical revision {record.get('revision_number')}" if is_revision
+                    else record.get("status")
+                ),
+                "appointment_id": record.get("appointment_id"),
+                "workspace_version": record.get("version_number"),
+            })
+        except (ValueError, TypeError, json.JSONDecodeError):
+            continue
     handoff_ids = list(dict.fromkeys(selected_ids_by_type.get("handoffs", [])))
     handoff_rows = db.query(CaregiverHandoff).filter(
         CaregiverHandoff.person_id == person_id,
