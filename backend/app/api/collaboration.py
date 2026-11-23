@@ -80,7 +80,7 @@ from app.services.document_binary_storage import (
 
 
 from app.services.lcr_context import _expanded_search_terms
-from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, resolve_response_length_policy, resolve_workflow_response_length_policy
+from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -6540,21 +6540,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"this keeps failing)\b",
         text,
     )
-    overload = re.search(
-        r"\b(?:i(?:'m| am) (?:really |very |so )?overwhelmed|i(?:'m| am) (?:really |very |so )?exhausted|i feel (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
-        r"i(?:'m| am) (?:really |very |so )?(?:tired|worn out|drained)|i can't keep up|i cannot keep up|"
-        r"i (?:really )?(?:don't|do not) even know what i'm supposed to do anymore|"
-        r"i don't know what to do anymore|everything is too much|"
-        r"i can't manage(?: all this)?|i cannot manage(?: all this)?|"
-        r"i can't cope|i cannot cope|i can't do this anymore|i cannot do this anymore|"
-        r"every day there's something new and i can't keep up)\b",
-        text,
-    )
-    unable_to_continue = re.search(
-        r"\b(?:i can't continue|i cannot continue|i can't keep doing this|i cannot keep doing this|"
-        r"i can't do this any longer|i cannot do this any longer)\b",
-        text,
-    )
+    low_capacity = is_low_capacity_caregiver_message(text)
     pause_request = re.search(
         r"\b(?:please stop|stop for now|enough for now|i need to stop|i want to stop|"
         r"i need a pause|i want a pause|let's pause|not now|"
@@ -6598,10 +6584,6 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"we got through today)\b",
         text,
     )
-    standalone_overload = re.fullmatch(
-        r"(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*",
-        text,
-    )
     standalone_distress = re.fullmatch(
         r"(?:really |very |so )?(?:sad|angry|upset|lonely|scared|frightened|afraid|anxious|"
         r"helpless|frustrated|furious|fed up)[.!?]*",
@@ -6639,7 +6621,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "If the caregiver also asked to stop or pause, the pause request takes precedence: do not continue the "
             "retrieval workflow or ask for more details."
         )
-    if overload or standalone_overload or unable_to_continue:
+    if low_capacity:
         guidance.append(
             "LOW-CAPACITY RESPONSE: The caregiver explicitly signals overload or exhaustion. Keep the response "
             "short and grounded in the retrieved situation. Do not produce a checklist, broad care lecture, "
