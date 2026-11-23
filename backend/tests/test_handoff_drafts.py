@@ -1292,6 +1292,8 @@ def test_qwen_appointment_briefing_uses_only_lcr_snapshot_and_appointment_contex
     assert request_payload["sources"][0]["source_ref"] == "appointments:visit-1"
     assert "appointment briefing" in system_prompt.lower()
     assert "do not use model memory" in system_prompt.lower()
+    assert "target: 150 words; hard maximum: 250" in system_prompt
+    assert observed["options"]["num_predict"] == 768
     assert result["sections"][0]["supporting_quote"] == "Follow-up visit scheduled."
 
 
@@ -1664,7 +1666,7 @@ def test_qwen_handoff_generation_uses_cold_start_timeout_and_bounded_output(monk
 
     assert result["status"] == "generated"
     assert observed["timeout"] == 150
-    assert observed["options"]["num_predict"] == 512
+    assert observed["options"]["num_predict"] == 768
     assert observed["response_format"]["properties"]["items"]["maxItems"] == 6
     assert "summary" in observed["response_format"]["properties"]["items"]["items"]["required"]
     assert "supporting_quote" in observed["response_format"]["properties"]["items"]["items"]["required"]
