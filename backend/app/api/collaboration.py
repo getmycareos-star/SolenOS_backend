@@ -2813,8 +2813,17 @@ def _collect_full_lcr_context_pages(
                     "A later page of this care-information source could not be fully retrieved. "
                     "Do not treat the partial result as a complete history."
                 )
-            elif page_status == "available" and source.get("status") == "empty":
-                source["status"] = "available"
+            elif (
+                page_status in {"available", "empty"}
+                and source.get("status") in {"failed", "empty"}
+                and not source.get("items")
+            ):
+                # The first scan may fail transiently before returning any
+                # rows. A successful retry from the same offset can recover
+                # that source; a partial first page cannot be silently healed.
+                source["status"] = page_status
+                source.pop("error_code", None)
+                source.pop("interpretation_limit", None)
             existing_ids = {
                 str(item.get("id"))
                 for item in source.get("items", [])
