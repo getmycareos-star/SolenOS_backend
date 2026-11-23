@@ -146,8 +146,8 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
         "fields": ["id", "subject_type", "subject_id", "field", "assertion_kind", "asserted_value",
                    "source_event_id", "source_label", "source_text", "source_context", "source_conversation_id",
                    "source_message_id", "source_proposal_id", "event_time_text", "evidence_ids",
-                   "epistemic_state", "assertion_status", "observed_at", "review_after_days", "created_by_caregiver_id",
-                   "recorded_at"],
+                   "epistemic_state", "assertion_status", "observed_at", "review_after_days",
+                   "created_by_caregiver_id", "updated_by_caregiver_id", "recorded_at"],
         "order": ["recorded_at", "created_at"],
     },
     "decisions": {
@@ -1024,10 +1024,12 @@ def build_lcr_context(
             # rejections remain explainable. Model-only proposals without
             # caregiver attribution remain excluded.
             accepted_or_legacy = table.c.assertion_status.in_(("accepted", "caregiver_reviewed"))
-            caregiver_origin = (
-                table.c.created_by_caregiver_id.is_not(None)
-                if "created_by_caregiver_id" in table.c else None
-            )
+            caregiver_origin_fields = [
+                table.c[name].is_not(None)
+                for name in ("created_by_caregiver_id", "updated_by_caregiver_id")
+                if name in table.c
+            ]
+            caregiver_origin = or_(*caregiver_origin_fields) if caregiver_origin_fields else None
             caregiver_report = and_(
                 table.c.assertion_status == "reported",
                 caregiver_origin,
