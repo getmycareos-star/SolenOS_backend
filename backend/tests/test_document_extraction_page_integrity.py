@@ -144,3 +144,28 @@ def test_document_review_response_reports_missing_page_and_hides_old_candidates(
     assert response["extraction_unprocessed_page_numbers"] == [2]
     assert response["observations"] == []
     assert response["interpretation_blocked"] is True
+
+
+def test_document_review_response_uses_persisted_page_numbers_for_standalone_scan():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="scan-analysis",
+        source_evidence_id="scan-evidence",
+        source_text="[Page 3 OCR]\nMedication review scheduled.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "page_count": 1,
+            "processed_page_numbers": [3],
+            "unprocessed_page_numbers": [],
+        },
+    )
+
+    response = _response(analysis)
+    assert response["page_count"] == 1
+    assert response["extraction_processed_page_count"] == 1
+    assert response["extraction_processed_page_numbers"] == [3]
+    assert response["extraction_unprocessed_page_numbers"] == []
