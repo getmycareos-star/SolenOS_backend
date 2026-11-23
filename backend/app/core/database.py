@@ -237,27 +237,43 @@ def database_schema_differences(bind=None):
                 f"{table_name}: nullability differs for {', '.join(nullability_mismatches)}"
             )
 
+        def normalize_fk_action(value):
+            normalized = str(value or "").strip().upper().replace("_", " ")
+            # PostgreSQL reports the default NO ACTION explicitly while
+            # SQLAlchemy metadata commonly leaves the equivalent action unset.
+            return None if normalized in {"", "NO ACTION"} else normalized
+
         expected_foreign_keys = set()
         for constraint in table.foreign_key_constraints:
             local_columns = tuple(element.parent.name for element in constraint.elements)
             referred_table = next(iter(constraint.elements)).column.table.name
             referred_columns = tuple(element.column.name for element in constraint.elements)
-            expected_foreign_keys.add((local_columns, referred_table, referred_columns))
+            ondelete = normalize_fk_action(next(iter(constraint.elements)).ondelete)
+            onupdate = normalize_fk_action(next(iter(constraint.elements)).onupdate)
+            expected_foreign_keys.add(
+                (local_columns, referred_table, referred_columns, ondelete, onupdate)
+            )
         actual_foreign_keys = {
             (
                 tuple(item.get("constrained_columns") or []),
                 item.get("referred_table"),
                 tuple(item.get("referred_columns") or []),
+                normalize_fk_action((item.get("options") or {}).get("ondelete")),
+                normalize_fk_action((item.get("options") or {}).get("onupdate")),
             )
             for item in inspector.get_foreign_keys(table_name)
         }
         missing_foreign_keys = expected_foreign_keys - actual_foreign_keys
         if missing_foreign_keys:
             differences.append(
-                f"{table_name}: missing foreign keys "
+                f"{table_name}: missing foreign keys or foreign-key actions "
                 + "; ".join(
-                    f"{local} -> {remote_table}({remote})"
-                    for local, remote_table, remote in sorted(missing_foreign_keys)
+                    f"{local} -> {remote_table}({remote}) "
+                    f"[ondelete={ondelete or 'NO ACTION'}, onupdate={onupdate or 'NO ACTION'}]"
+                    for local, remote_table, remote, ondelete, onupdate in sorted(
+                        missing_foreign_keys,
+                        key=lambda item: tuple(str(value) for value in item),
+                    )
                 )
             )
 
