@@ -2311,6 +2311,20 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
+def test_companion_prompt_keeps_interaction_dimensions_independent():
+    contract = collaboration.COMPANION_INTERACTION_INTERPRETATION_CONTRACT
+    for dimension in (
+        "intent", "expressed emotion", "capacity", "urgency",
+        "information state", "conversation state",
+    ):
+        assert dimension in contract
+    assert "do not collapse them into one label" in contract
+    assert "without treating an interpretation as a psychological diagnosis" in contract
+    assert "An angry caregiver may also be frightened" in contract
+    assert "a sad caregiver may still want a detailed factual answer" in contract
+    assert "Acknowledge positive moments without turning them into a crisis" in contract
+
+
 def test_general_frustration_is_not_misclassified_as_a_system_repair_request():
     general_distress = collaboration._caregiver_interaction_guidance("I'm frustrated and tired.")
     assert "DISTRESS RESPONSE" in general_distress
