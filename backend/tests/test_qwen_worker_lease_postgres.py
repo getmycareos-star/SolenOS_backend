@@ -17,7 +17,8 @@ pytestmark = pytest.mark.skipif(
 
 from app.core.database import SessionLocal
 from app.main import app
-from app.models.care import CaptureAnalysis, Caregiver, Person
+from app.models.care import Caregiver, Person
+from app.models.capture_analysis import CaptureAnalysis
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput
 from app.services import qwen_background_worker as worker
 
