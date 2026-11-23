@@ -1477,3 +1477,73 @@ def test_create_idempotency_rejects_changed_deadline_and_evidence():
     listed = client.get("/api/v1/open-loops", headers=headers)
     assert listed.status_code == 200, listed.text
     assert len(listed.json()["items"]) == 1
+
+
+def test_lifecycle_decisions_reject_missing_and_stale_versions():
+    client = TestClient(app)
+    _, headers = session(client, "Stale lifecycle recipient")
+
+    closable = create_loop(client, headers, "follow_up")
+    missing_version = client.post(
+        f"/api/v1/open-loops/{closable['id']}/close",
+        headers=headers,
+        json={"text": "Attempt closure without the displayed version.", "evidence": [{"kind": "closure_review"}]},
+    )
+    assert missing_version.status_code == 409, missing_version.text
+
+    stale_version = closable["version"]
+    edited = client.patch(
+        f"/api/v1/open-loops/{closable['id']}",
+        headers=headers,
+        json={"title": "Updated follow-up title"},
+    )
+    assert edited.status_code == 200, edited.text
+    stale_close = client.post(
+        f"/api/v1/open-loops/{closable['id']}/close",
+        headers=headers,
+        json={
+            "expected_version": stale_version,
+            "text": "Attempt closure against the earlier version.",
+            "evidence": [{"kind": "closure_review"}],
+        },
+    )
+    assert stale_close.status_code == 409, stale_close.text
+
+    cancellable = create_loop(client, headers, "follow_up")
+    stale_cancel_version = cancellable["version"]
+    edited_cancel = client.patch(
+        f"/api/v1/open-loops/{cancellable['id']}",
+        headers=headers,
+        json={"title": "Updated before cancellation"},
+    )
+    assert edited_cancel.status_code == 200, edited_cancel.text
+    stale_cancel = client.post(
+        f"/api/v1/open-loops/{cancellable['id']}/cancel",
+        headers=headers,
+        json={
+            "expected_version": stale_cancel_version,
+            "text": "Attempt cancellation against the earlier version.",
+        },
+    )
+    assert stale_cancel.status_code == 409, stale_cancel.text
+
+    current_cancel_version = current_loop_version(client, headers, cancellable["id"])
+    cancelled = client.post(
+        f"/api/v1/open-loops/{cancellable['id']}/cancel",
+        headers=headers,
+        json={"expected_version": current_cancel_version, "text": "Cancel after reviewing the current follow-up."},
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    stale_reopen = client.post(
+        f"/api/v1/open-loops/{cancellable['id']}/reopen",
+        headers=headers,
+        json={"expected_version": current_cancel_version, "text": "Attempt reopening with the pre-cancellation version."},
+    )
+    assert stale_reopen.status_code == 409, stale_reopen.text
+    current_reopen_version = cancelled.json()["loop"]["version"]
+    reopened = client.post(
+        f"/api/v1/open-loops/{cancellable['id']}/reopen",
+        headers=headers,
+        json={"expected_version": current_reopen_version, "text": "Reopen after reviewing the cancelled follow-up."},
+    )
+    assert reopened.status_code == 200, reopened.text
