@@ -1,6 +1,7 @@
 from app.services.response_length_policy import (
     count_response_words,
     is_critical_safety_message,
+    is_self_harm_safety_message,
     is_greeting_message,
     resolve_response_length_policy,
     resolve_workflow_response_length_policy,
@@ -54,6 +55,24 @@ def test_critical_safety_has_no_generic_word_ceiling():
     assert policy.intent == "critical_safety"
     assert policy.max_words is None
     assert not response_exceeds_hard_maximum("Call emergency services now. " + "Important detail. " * 80, policy)
+
+
+def test_explicit_and_indirect_self_harm_language_is_critical_safety():
+    for message in (
+        "I want to die.",
+        "I don't want to live anymore.",
+        "I wish I were dead.",
+        "Everyone would be better off without me.",
+        "I can't keep myself safe tonight.",
+        "I'm afraid I might hurt myself.",
+        "Mum says she would be better off dead.",
+    ):
+        assert is_self_harm_safety_message(message), message
+        assert is_critical_safety_message(message), message
+        assert resolve_response_length_policy(message).intent == "critical_safety", message
+
+    assert not is_self_harm_safety_message("I'm exhausted and need a break.")
+    assert not is_self_harm_safety_message("I'm worried Mum may fall again.")
 
 
 def test_word_counter_handles_apostrophes_and_punctuation():
