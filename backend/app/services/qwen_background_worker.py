@@ -1284,7 +1284,13 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             .filter(
                 or_(
                     QwenBackgroundJob.status == "queued",
-                    (QwenBackgroundJob.status == "processing") & (QwenBackgroundJob.locked_at < stale_before),
+                    (
+                        (QwenBackgroundJob.status == "processing")
+                        & or_(
+                            QwenBackgroundJob.locked_at.is_(None),
+                            QwenBackgroundJob.locked_at < stale_before,
+                        )
+                    ),
                 ),
                 QwenBackgroundJob.available_at <= now,
                 *([QwenBackgroundJob.id == job_id] if job_id else []),
