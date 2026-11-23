@@ -53,7 +53,7 @@ _EMOTIONAL = re.compile(
 _PATIENT_EMOTIONAL_REPORT = re.compile(
     r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
     r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
-    r".{0,40}\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been)\b"
+    r".{0,40}\b(?:is|was|seems?|seemed|feels?|felt|looks?|looked|has been|have been|has seemed|have seemed)\b"
     r".{0,24}\b(?:sad|angry|upset|lonely|alone|anxious|scared|frightened|afraid|"
     r"helpless|frustrated|furious|overwhelmed|exhausted|burnt out|burned out|grieving)\b",
     re.I,
