@@ -97,3 +97,18 @@ def test_document_interpretation_is_blocked_when_persisted_page_metadata_has_a_g
         assert "2" in exc.detail
     else:
         raise AssertionError("Document interpretation must remain blocked while page 2 is missing.")
+
+
+def test_standalone_scan_preserves_original_page_label_without_inventing_missing_pages():
+    upload = _upload()
+    upload.mime_type = "image/jpeg"
+    status, metadata = _extraction_metadata(
+        upload,
+        "[Page 3 OCR]\nMedication review scheduled.",
+        "pdf_ocr",
+    )
+
+    assert status == "available"
+    assert metadata["page_count"] == 1
+    assert metadata["processed_page_numbers"] == [3]
+    assert metadata["unprocessed_page_numbers"] == []
