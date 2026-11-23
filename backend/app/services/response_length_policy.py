@@ -66,15 +66,25 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
         return True
 
     capacity_terms = r"(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)"
-    first_person_capacity = re.search(
-        rf"\bi(?:'m| am| feel)\b[^.!?]{0,50}\b{capacity_terms}\b",
-        value,
-    )
+    first_person = re.search(r"\bi(?:'m| am| feel)\b", value)
+    if first_person is None:
+        return False
+    tail = value[first_person.end():]
+    capacity = re.search(rf"\b{capacity_terms}\b", tail)
+    if capacity is None:
+        return False
+    before_capacity = tail[:capacity.start()]
+    if re.search(
+        r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+        r"wife|husband|partner|he|she|they|the patient|care recipient)\b",
+        before_capacity,
+    ):
+        return False
     explicitly_negated = re.search(
         rf"\b(?:not|never|no longer)\s+(?:(?:really|very|so)\s+)?{capacity_terms}\b",
-        value,
+        tail,
     )
-    return bool(first_person_capacity and not explicitly_negated)
+    return explicitly_negated is None
 
 _SELF_HARM_CRITICAL = re.compile(
     r"\b(?:suicidal|suicide attempt|suicide plan|thinking about suicide|"
