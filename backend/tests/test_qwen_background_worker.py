@@ -361,11 +361,19 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         locked_at=datetime.now(timezone.utc) - timedelta(minutes=9),
     )
 
+    original_lock = datetime.now(timezone.utc) - timedelta(minutes=9)
+    db = sessions()
+    claimed = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    claimed.locked_at = original_lock
+    db.commit()
+    db.close()
+
     refreshed_at = datetime.now(timezone.utc)
     assert worker._refresh_qwen_job_lease_once(
         job_id,
         "person-test",
         "caregiver-test",
+        expected_locked_at=original_lock,
         now=refreshed_at,
     ) is True
 
@@ -385,15 +393,43 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
     db.commit()
     db.close()
 
+    # A worker holding an older lease must not refresh a newer worker's
+    # processing lease, even when the job and caregiver IDs still match.
+    newer_lock = refreshed_at + timedelta(minutes=1)
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    job.status = "processing"
+    job.locked_at = newer_lock
+    db.commit()
+    db.close()
     assert worker._refresh_qwen_job_lease_once(
         job_id,
         "person-test",
         "caregiver-test",
+        expected_locked_at=refreshed_at,
+    ) is False
+
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    persisted_lock = job.locked_at
+    if persisted_lock.tzinfo is None:
+        persisted_lock = persisted_lock.replace(tzinfo=timezone.utc)
+    assert persisted_lock == newer_lock
+    job.status = "cancelled"
+    db.commit()
+    db.close()
+
+    assert worker._refresh_qwen_job_lease_once(
+        job_id,
+        "person-test",
+        "caregiver-test",
+        expected_locked_at=newer_lock,
     ) is False
     assert worker._refresh_qwen_job_lease_once(
         job_id,
         "person-test",
         "different-caregiver",
+        expected_locked_at=newer_lock,
     ) is False
 
 
