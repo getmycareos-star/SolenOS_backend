@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
+from app.models.time_location import Appointment
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision, EvidenceObservation
@@ -1316,6 +1317,72 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         assert any(item["id"] == "partial-document-analysis" for item in uncertainty_documents["items"]), (
             "a question about uncertainty must retrieve a partially unreadable document even when its text does not contain the word"
         )
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
+
+
+def test_postgres_appointment_retrieval_preserves_timezone_and_preparation_context():
+    """Companion must retrieve the real appointment questions, documents and time basis."""
+    from app.services.lcr_context import _load_source_schema
+
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        scheduled_at = datetime(2026, 12, 2, 14, 30, tzinfo=UTC)
+        with Session(bind=connection) as db:
+            db.add(Person(id="appointment-context-person", name="Care recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id="appointment-context-caregiver",
+                name="Family caregiver",
+                relationship="family",
+                person_id="appointment-context-person",
+            ))
+            db.flush()
+            db.add(Appointment(
+                id="appointment-context-record",
+                person_id="appointment-context-person",
+                title="Memory clinic follow-up",
+                status="scheduled",
+                scheduled_at=scheduled_at,
+                scheduled_at_timezone="Africa/Lagos",
+                location="Memory clinic",
+                location_type="clinic",
+                provider="Dr. Example",
+                healthcare_org="Community Health Centre",
+                preparation_notes="Ask about the recent sleep change and medication timing.",
+                documents_to_bring=["Current medication list", "Recent sleep notes"],
+                medication_questions=["Should the evening dose time change?"],
+                travel_notes="Family caregiver will accompany the person.",
+                time_provenance="caregiver_reported",
+                location_provenance="caregiver_reported",
+                evidence_ids=[],
+                created_by_caregiver_id="appointment-context-caregiver",
+            ))
+            db.commit()
+            _load_source_schema.cache_clear()
+            context = build_lcr_context(
+                db,
+                "appointment-context-person",
+                caregiver_id="appointment-context-caregiver",
+                query="appointment medication",
+            )
+        appointments = context["sources"]["appointments"]
+        assert appointments["returned_count"] == 1
+        item = appointments["items"][0]
+        assert item["scheduled_at_timezone"] == "Africa/Lagos"
+        assert item["location"] == "Memory clinic"
+        assert item["provider"] == "Dr. Example"
+        assert item["healthcare_org"] == "Community Health Centre"
+        assert item["preparation_notes"] == "Ask about the recent sleep change and medication timing."
+        assert item["documents_to_bring"] == ["Current medication list", "Recent sleep notes"]
+        assert item["medication_questions"] == ["Should the evening dose time change?"]
+        assert item["travel_notes"] == "Family caregiver will accompany the person."
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert "Africa/Lagos" in prompt_context
+        assert "Current medication list" in prompt_context
+        assert "Should the evening dose time change?" in prompt_context
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
