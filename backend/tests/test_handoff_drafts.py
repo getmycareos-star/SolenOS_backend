@@ -2398,3 +2398,64 @@ def test_qwen_handoff_repairs_total_summary_word_count_and_revalidates(monkeypat
     assert "total word count" in calls[1][0][-1]["content"].lower()
     assert "Preserve every supported distinction" in calls[1][0][-1]["content"]
     assert result["sections"][0]["summary"] == "The caregiver reported a quiet morning with no other detail."
+
+def test_handoff_snapshot_marks_corrected_and_uncheckable_events_as_historical():
+    import app.api.handoff_drafts as handoff_drafts
+
+    records = [{
+        "source_table": "care_events",
+        "source_id": "corrected-event",
+        "source_type": "care_event",
+        "text": "The original caregiver report.",
+        "details": {},
+        "stale_warning": False,
+    }, {
+        "source_table": "care_events",
+        "source_id": "missing-lineage-event",
+        "source_type": "care_event",
+        "text": "A separate caregiver report.",
+        "details": {},
+        "stale_warning": False,
+    }]
+    context = {
+        "sources": {
+            "events": {
+                "items": [{
+                    "id": "corrected-event",
+                    "correction_lineage_status": "checked",
+                    "information_status": "historical_event",
+                    "interpretation_limit": "A correction superseded the original report.",
+                    "superseded_by_corrections": [{
+                        "corrected_text": "The corrected caregiver account.",
+                    }],
+                }],
+            },
+        },
+    }
+
+    attached = handoff_drafts._attach_event_correction_lineage(records, context)
+    by_id = {item["source_id"]: item for item in attached}
+    assert by_id["corrected-event"]["information_status"] == "historical_event"
+    assert by_id["corrected-event"]["details"]["corrections"][0]["corrected_text"] == (
+        "The corrected caregiver account."
+    )
+    assert by_id["missing-lineage-event"]["information_status"] == "event_currentness_unknown"
+    assert by_id["missing-lineage-event"]["stale_warning"] is True
+
+    provenance = handoff_drafts._handoff_claim_provenance({
+        "generation": {
+            "status": "generated",
+            "sections": [{
+                "source_ref": "care_events:corrected-event",
+                "summary": "The original caregiver report.",
+                "supporting_quote": "The original caregiver report.",
+            }],
+        },
+    }, {"source_records": attached})
+    claim = provenance["claims"][0]
+    assert claim["support_status"] == "matched_historical_only"
+    assert claim["source_references"][0]["information_status"] == "historical_event"
+    assert claim["source_references"][0]["corrections"][0]["corrected_text"] == (
+        "The corrected caregiver account."
+    )
+
