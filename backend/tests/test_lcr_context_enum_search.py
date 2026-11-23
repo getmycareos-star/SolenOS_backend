@@ -136,7 +136,7 @@ def test_postgres_unsearchable_optional_source_marks_projection_incomplete(monke
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     import app.services.lcr_context as lcr_context
-    from app.services.lcr_context import _load_source_schema, build_lcr_context
+    from app.services.lcr_context import _load_source_schema, build_lcr_context, format_lcr_context_for_prompt
 
     database_url = os.environ.get("DATABASE_URL", "")
     if database_url.startswith("postgresql+psycopg://"):
@@ -172,6 +172,10 @@ def test_postgres_unsearchable_optional_source_marks_projection_incomplete(monke
         assert context["retrieval_scan_complete"] is False
         assert context["retrieval_projection_complete"] is False
         assert context["history_coverage"] == "partial_source_history"
+        prompt_context = format_lcr_context_for_prompt(context)
+        assert '"history_coverage":"partial_source_history"' in prompt_context
+        assert "[evidence_reviews; status=unsearchable;" in prompt_context
+        assert "cannot be searched for this topic" in prompt_context
     finally:
         _load_source_schema.cache_clear()
         connection.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
