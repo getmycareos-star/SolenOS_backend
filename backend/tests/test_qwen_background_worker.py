@@ -507,11 +507,13 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         expected_locked_at=newer_lock,
         lease_state=lease_state,
     ) is False
+    other_worker_state = {"locked_at": newer_lock, "lost": False, "_lock": threading.Lock()}
     assert worker._refresh_qwen_job_lease_once(
         job_id,
         "person-test",
         "different-caregiver",
         expected_locked_at=newer_lock,
+        lease_state=other_worker_state,
     ) is False
 
 
