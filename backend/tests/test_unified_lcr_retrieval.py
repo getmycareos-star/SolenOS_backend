@@ -2250,6 +2250,8 @@ def test_medication_lexical_expansion_retrieves_common_caregiver_paraphrases():
         ("meds", "The caregiver recorded the evening medication dose."),
         ("prescription", "The family reviewed the evening medication schedule."),
         ("prescribed", "The note says the person takes the evening medicine."),
+        ("dose", "The caregiver noted the evening medication schedule."),
+        ("tablet", "The caregiver recorded the medication schedule."),
     ]
     unrelated = {
         "title": "Clinic transport",
