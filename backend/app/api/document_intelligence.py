@@ -89,6 +89,7 @@ class CandidateReview(BaseModel):
     # candidate ordering changes between render and submission.
     expected_source_quote: str | None = Field(default=None, max_length=20000)
     expected_subject: str | None = Field(default=None, max_length=120)
+    expected_candidate_id: str | None = Field(default=None, max_length=128)
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
     rationale: str | None = Field(default=None, max_length=1000)
@@ -1529,6 +1530,19 @@ def review_document_candidate(
     if (
         payload.expected_subject is not None
         and candidate.get("subject") != payload.expected_subject
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
+        )
+    canonical_candidate = candidate.get("canonical_candidate")
+    current_candidate_id = (
+        canonical_candidate.get("candidate_id")
+        if isinstance(canonical_candidate, dict) else None
+    )
+    if (
+        payload.expected_candidate_id is not None
+        and current_candidate_id != payload.expected_candidate_id
     ):
         raise HTTPException(
             status_code=409,
