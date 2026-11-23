@@ -1328,9 +1328,9 @@ def build_lcr_context(
                             else original_quote[:20000] + "… [truncated]"
                         )
                     if source_name == "document_extractions":
-                        if direct_terms and isinstance(row_values.get("source_text"), str):
+                        if terms and isinstance(row_values.get("source_text"), str):
                             item["retrieved_source_passages"] = _exact_source_passages(
-                                row_values["source_text"], direct_terms,
+                                row_values["source_text"], terms,
                             )
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
