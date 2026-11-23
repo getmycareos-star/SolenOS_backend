@@ -40,10 +40,10 @@ permissions:
   contents: read
 
 concurrency:
-  # Every test run uses disposable databases/containers. Cancel obsolete
-  # revisions so current-main regression evidence is not starved by stale runs.
+  # Keep one active disposable-database test run alive until it finishes.
+  # GitHub retains only the newest pending run for this concurrency group.
   group: backend-tests-current-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
