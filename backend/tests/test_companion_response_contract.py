@@ -3851,3 +3851,40 @@ def test_patient_emotional_state_does_not_trigger_caregiver_capacity_guidance():
         guidance = collaboration._caregiver_interaction_guidance(message)
         assert "LOW-CAPACITY RESPONSE" not in guidance, message
         assert "DISTRESS RESPONSE" not in guidance, message
+
+
+@pytest.mark.parametrize(
+    ("message", "required_guidance"),
+    [
+        ("I'm afraid about what happens as Mum's dementia progresses.", "FEAR AND UNCERTAINTY RESPONSE"),
+        ("I'm not sure whether this medication is safe.", "FEAR AND UNCERTAINTY RESPONSE"),
+        ("I feel completely alone in caring for Dad.", "LONELINESS RESPONSE"),
+        ("I have nobody to talk to about this.", "LONELINESS RESPONSE"),
+        ("I'm furious with the care team.", "ANGER RESPONSE"),
+        ("I'm angry at SolenOS because it lost what I told it.", "ANGER RESPONSE"),
+    ],
+)
+def test_companion_distinguishes_fear_loneliness_and_anger(message, required_guidance):
+    guidance = collaboration._caregiver_interaction_guidance(message)
+    assert required_guidance in guidance
+
+
+def test_companion_emotional_dimensions_can_coexist_without_being_collapsed():
+    guidance = collaboration._caregiver_interaction_guidance(
+        "I'm angry with the care team, frightened about the future, and overwhelmed."
+    )
+    assert "ANGER RESPONSE" in guidance
+    assert "FEAR AND UNCERTAINTY RESPONSE" in guidance
+    assert "LOW-CAPACITY RESPONSE" in guidance
+
+
+def test_companion_does_not_attribute_care_recipient_emotions_to_caregiver():
+    for message in (
+        "Mum is frightened about the future.",
+        "Dad feels lonely.",
+        "The care team is angry.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "FEAR AND UNCERTAINTY RESPONSE" not in guidance
+        assert "LONELINESS RESPONSE" not in guidance
+        assert "ANGER RESPONSE" not in guidance
