@@ -2965,6 +2965,34 @@ def _collect_full_lcr_context_pages(
     return merged
 
 
+def _lcr_retrieval_incomplete_notice(context: dict | None, *, prompt_context_truncated: bool = False) -> str | None:
+    """Return a caregiver-facing caveat whenever LCR coverage is not demonstrably complete."""
+    if not isinstance(context, dict):
+        return None
+    incomplete_statuses = {
+        "failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope",
+    }
+    source_failures = [
+        name for name, source in (context.get("sources") or {}).items()
+        if isinstance(source, dict) and source.get("status") in incomplete_statuses
+    ]
+    incomplete = bool(
+        context.get("retrieval_scan_complete") is not True
+        or context.get("missing_required_sources")
+        or source_failures
+        or context.get("page_limit_reached")
+        or prompt_context_truncated
+    )
+    if not incomplete:
+        return None
+    return (
+        "I couldn't check every part of the care record. This summary only reflects "
+        "the information I could retrieve. Missing details should not be treated as "
+        "proof that something did not happen or was never recorded. Refresh the care "
+        "record before relying on this as a complete history."
+    )
+
+
 def _filter_context_lines_to_query(query: str, lines: list[str]) -> list[str]:
     """Remove unrelated records from model context after ranking, preserving broad queries."""
     query_tokens = [
@@ -5634,6 +5662,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 for name, source in shared_lcr_context.get("sources", {}).items()
             },
         }
+        incomplete_notice = _lcr_retrieval_incomplete_notice(
+            shared_lcr_context,
+            prompt_context_truncated=shared_context_truncated,
+        )
+        if incomplete_notice and incomplete_notice not in reply:
+            reply = reply.rstrip() + "\n\n" + incomplete_notice
+            lcr_context_coverage["caregiver_notice"] = "incomplete_retrieval"
     return {
         "workflow": payload.workflow,
         "reply": reply,
