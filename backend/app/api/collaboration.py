@@ -2532,7 +2532,7 @@ _LCR_CONTEXT_SOURCE_PRIORITY = (
     "conflicts", "reconciliations", "information_gaps", "missing_information",
     "uncertainties", "uncertainty_assessments", "open_questions",
     "decision_outcomes", "decisions", "appointments", "appointment_workspaces",
-    "handoffs", "corrections", "facts",
+    "appointment_workspace_revisions", "handoffs", "corrections", "facts",
     "evidence_observations", "caregiver_observations", "timeline",
     "provenance", "follow_up_links", "open_loop_records",
     "caregiver_contexts", "caregiver_perspectives",
