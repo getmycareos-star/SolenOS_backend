@@ -474,6 +474,15 @@ def _apply_text_search_filter(statement, table: Table, source_name: str, terms: 
     if not terms or include_all_history:
         return statement, True
     predicates = _text_search_predicates(table, source_name, terms)
+    if source_name == "document_extractions" and "extraction_status" in table.c:
+        # A failed or still-running scan cannot match the caregiver's topic
+        # because its extracted text may be empty. Keep that document visible
+        # as an explicit evidence gap instead of making it disappear from LCR.
+        predicates.append(
+            table.c.extraction_status.in_(
+                ("partial", "failed", "pending", "processing", "queued", "running", "unavailable")
+            )
+        )
     if not predicates:
         return statement.where(false()), False
     return statement.where(or_(*predicates)), True
