@@ -364,7 +364,13 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "appointments": {
         "table": "appointments",
         "required": False,
-        "fields": ["id", "title", "status", "scheduled_at", "description", "created_at", "updated_at"],
+        "fields": [
+            "id", "title", "status", "scheduled_at", "scheduled_at_timezone",
+            "location", "location_type", "provider", "healthcare_org",
+            "preparation_notes", "documents_to_bring", "medication_questions",
+            "travel_notes", "time_provenance", "location_provenance", "evidence_ids",
+            "created_by_caregiver_id", "created_at", "updated_at", "completed_at", "resolved_at",
+        ],
         "order": ["scheduled_at", "created_at"],
     },
 }
@@ -400,7 +406,10 @@ SEARCH_FIELDS = {
     "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
     "corrections": ["target_type", "original_text", "corrected_text", "reason"],
     "open_loop_records": ["loop_type", "title", "description", "status", "request_text", "recipient_label"],
-    "appointments": ["title", "status", "description"],
+    "appointments": [
+        "title", "status", "location", "location_type", "provider", "healthcare_org",
+        "preparation_notes", "travel_notes", "time_provenance", "location_provenance",
+    ],
 }
 
 def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
@@ -450,13 +459,14 @@ TEXT_FIELDS = {
     "decision_text", "context", "summary", "title", "question", "answer", "answer_provenance",
     "notes", "correction_text", "before_state", "after_state", "delta_json",
     "closed_reason", "necessity_rationale", "intended_answerer_label", "rationale", "topic", "perspective_text",
+    "preparation_notes", "travel_notes",
     "notes", "reason", "review_notes", "resolution",
 }
 MAX_TEXT_CHARS = 2400
 JSON_TEXT_FIELDS = {
     "evidence_ids", "source_ids", "claim_refs", "competing_claim_ids",
     "before_state", "after_state", "delta_json",
-    "source_assertion_ids", "matching_candidate_ids",
+    "source_assertion_ids", "matching_candidate_ids", "documents_to_bring", "medication_questions",
     "context", "metadata", "context_payload", "missing_information", "options", "priority_reasons",
 }
 
