@@ -23,6 +23,11 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.core.database import SessionLocal as TestingSessionLocal
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
+if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not POSTGRES_DATABASE:
+    raise RuntimeError("Live Companion Qwen acceptance requires PostgreSQL; refusing a skipped non-PostgreSQL run.")
 from app.models.care import Caregiver, CareEvent, Evidence
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
