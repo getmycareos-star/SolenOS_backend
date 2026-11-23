@@ -126,6 +126,8 @@ def review_capture_candidate(
         (candidate.get("source_quote") or "") != payload.expected_source_quote
         or (candidate.get("subject") or "") != payload.expected_subject
         or (candidate.get("observation") or "") != payload.expected_observation
+        or (candidate.get("corrected_subject") or "") != payload.expected_corrected_subject
+        or (candidate.get("corrected_observation") or "") != payload.expected_corrected_observation
     ):
         raise HTTPException(
             status_code=409,
