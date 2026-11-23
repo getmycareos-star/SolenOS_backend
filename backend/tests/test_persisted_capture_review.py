@@ -284,6 +284,8 @@ def _post_capture_review(client, path, headers, payload):
         "expected_source_quote": candidate.get("source_quote") or "",
         "expected_subject": candidate.get("subject") or "",
         "expected_observation": candidate.get("observation") or "",
+        "expected_corrected_subject": candidate.get("corrected_subject") or "",
+        "expected_corrected_observation": candidate.get("corrected_observation") or "",
     }
     return client.post(path, headers=headers, json=bound_payload)
 
@@ -420,6 +422,23 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert persisted_candidate["review_status"] == "corrected_pending_approval"
     assert persisted_correction.json()["review_required"] is True
     assert persisted_correction.json()["written_to_lcr"] is False
+
+    # A review rendered before the caregiver correction must not approve the
+    # newer corrected wording: the corrected fields are part of the snapshot.
+    stale_accept = client.post(
+        f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
+        headers=auth,
+        json={
+            "candidate_index": 0,
+            "decision": "accept",
+            "expected_source_quote": "Mum slept badly last night.",
+            "expected_subject": "sleep",
+            "expected_observation": "Mum slept badly last night.",
+            "expected_corrected_subject": "",
+            "expected_corrected_observation": "",
+        },
+    )
+    assert stale_accept.status_code == 409, stale_accept.text
 
     db = TestSessionLocal()
     try:
