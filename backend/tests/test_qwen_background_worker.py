@@ -47,7 +47,7 @@ def test_worker_does_not_persist_assistance_if_job_is_cancelled_during_inference
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def cancel_assist(payload, request, inference_db):
+    async def cancel_assist(payload, request, inference_db):
         assert threading.get_ident() != caller_thread_id
         assert payload.workflow == "appointment"
         current = inference_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
@@ -81,7 +81,7 @@ def test_worker_does_not_requeue_cancelled_job_when_inference_raises(tmp_path, m
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def cancel_then_fail(payload, request, inference_db):
+    async def cancel_then_fail(payload, request, inference_db):
         assert threading.get_ident() != caller_thread_id
         current = inference_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
         current.status = "cancelled"
@@ -111,7 +111,7 @@ def test_worker_cancels_job_when_caregiver_access_is_revoked_before_inference(tm
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def revoked_assist(payload, request, inference_db):
+    async def revoked_assist(payload, request, inference_db):
         raise HTTPException(status_code=403, detail="Caregiver access has been revoked.")
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -294,7 +294,7 @@ def test_background_job_retries_and_fails_closed_after_bounded_attempts(tmp_path
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def fail_assist(*args, **kwargs):
+    async def fail_assist(*args, **kwargs):
         raise HTTPException(status_code=503, detail="grounded response unavailable")
 
     monkeypatch.setattr(worker, "_classify_task", classify)
@@ -335,7 +335,7 @@ def test_worker_handles_structured_qwen_failures_without_sticking_jobs(
     async def classify(*args, **kwargs):
         return "appointment"
 
-    def fail_assist(*args, **kwargs):
+    async def fail_assist(*args, **kwargs):
         raise HTTPException(status_code=503, detail=detail)
 
     monkeypatch.setattr(worker, "_classify_task", classify)
