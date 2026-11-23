@@ -1418,7 +1418,7 @@ def build_lcr_context(
             )
         ),
         "query_applied": bool(terms),
-        "retrieval_strategy": "person_scoped_full_source_scan" if include_all_history else ("hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history"),
+        "retrieval_strategy": ("person_scoped_exact_count_ordered_history" if include_all_history and not terms and not temporal_window else "person_scoped_full_source_scan") if include_all_history else ("hybrid_lexical_semantic_temporal" if query or temporal_window else "bounded_recent_history"),
         "temporal_window": temporal_window,
         "schema_status": schema_status,
         "missing_required_sources": missing_required,
