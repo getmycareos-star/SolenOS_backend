@@ -119,6 +119,25 @@ def test_qwen_gateway_retries_remote_disconnect_during_model_cold_start(monkeypa
     assert attempts["count"] == 2
 
 
+def test_qwen_gateway_retries_direct_remote_disconnect_during_model_cold_start(monkeypatch):
+    from http.client import RemoteDisconnected
+
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("OLLAMA_STARTUP_RETRY_SECONDS", "5")
+    monkeypatch.setattr(qwen_gateway.time, "sleep", lambda _seconds: None)
+    attempts = {"count": 0}
+
+    def start_after_first_attempt(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RemoteDisconnected("connection closed before response headers")
+        return FakeResponse(json.dumps({"message": {"content": "Model is ready."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", start_after_first_attempt)
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Model is ready."
+    assert attempts["count"] == 2
+
+
 def test_qwen_gateway_distinguishes_timeout(monkeypatch):
     configure_gateway(monkeypatch)
     monkeypatch.setattr(
