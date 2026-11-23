@@ -129,8 +129,21 @@ def _ocr_quality_marker(image: Image.Image) -> str | None:
     )
 
 
+def _page_parsing_text(source_text: str) -> str:
+    """Normalize stored escaped and physical line endings for OCR page parsing only."""
+    text = source_text or ""
+    return (
+        text.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+    )
+
+
 def _page_count(source_text: str) -> int:
     """Return the highest persisted page number, or zero when no page markers exist."""
+    source_text = _page_parsing_text(source_text)
     page_numbers = [
         int(match.group(1))
         for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or "")
@@ -139,6 +152,7 @@ def _page_count(source_text: str) -> int:
 
 
 def _unreadable_page_numbers(source_text: str) -> list[int]:
+    source_text = _page_parsing_text(source_text)
     return [
         int(match.group(1))
         for match in re.finditer(
@@ -149,6 +163,7 @@ def _unreadable_page_numbers(source_text: str) -> list[int]:
 
 
 def _unprocessed_page_numbers(source_text: str) -> list[int]:
+    source_text = _page_parsing_text(source_text)
     return [
         int(match.group(1))
         for match in re.finditer(
@@ -159,6 +174,7 @@ def _unprocessed_page_numbers(source_text: str) -> list[int]:
 
 
 def _retryable_page_numbers(source_text: str) -> list[int]:
+    source_text = _page_parsing_text(source_text)
     """Return pages that failed transient processing, not pages blocked by limits."""
     return [
         int(match.group(1))
@@ -170,6 +186,7 @@ def _retryable_page_numbers(source_text: str) -> list[int]:
 
 
 def _blocked_page_numbers(source_text: str) -> list[int]:
+    source_text = _page_parsing_text(source_text)
     """Return pages that cannot be retried without changing the source or limits."""
     return [
         int(match.group(1))
@@ -181,6 +198,7 @@ def _blocked_page_numbers(source_text: str) -> list[int]:
 
 
 def _ocr_quality_by_page(source_text: str) -> list[dict]:
+    source_text = _page_parsing_text(source_text)
     results = []
     markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text or ""))
     for index, marker in enumerate(markers):
@@ -765,9 +783,10 @@ def _response(analysis: CaptureAnalysis) -> dict:
     stored_observations = intelligence.get("observations")
     stored_observations = stored_observations if isinstance(stored_observations, list) else []
     source_text = analysis.source_text or ""
+    page_text = _page_parsing_text(source_text)
     observed_pages = {
         int(match.group(1))
-        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
+        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", page_text)
     }
     is_paginated_pdf = (
         str(details.get("mime_type") or "").split(";", 1)[0].strip().casefold() == "application/pdf"
@@ -795,7 +814,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         | persisted_unprocessed_pages
         | missing_page_numbers
     )
-    unreadable_pages = _unreadable_page_numbers(source_text)
+    unreadable_pages = _unreadable_page_numbers(page_text)
     processed_pages = sorted(observed_pages - set(unprocessed_pages) - set(unreadable_pages))
     extraction_complete = (
         analysis.extraction_status == "available"
@@ -862,9 +881,10 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
     # sparse/retried extraction (for example pages 1 and 3) as a two-page file.
     # Derive the document extent from the highest observed page number and only
     # report pages with an actual extraction marker as processed.
+    page_text = _page_parsing_text(source_text)
     observed_pages = sorted({
         int(match.group(1))
-        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
+        for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", page_text)
     })
     is_paginated_pdf = (
         (upload.mime_type or "").split(";", 1)[0].strip().casefold() == "application/pdf"
@@ -879,7 +899,7 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         sorted(set(range(1, total_pages + 1)) - set(observed_pages))
         if is_paginated_pdf else []
     )
-    unprocessed_pages = sorted(set(_unprocessed_page_numbers(source_text)) | set(missing_page_numbers))
+    unprocessed_pages = sorted(set(_unprocessed_page_numbers(page_text)) | set(missing_page_numbers))
     processed_pages = sorted(set(observed_pages) - set(unprocessed_pages))
     extraction_status = "partial" if unreadable_pages or unprocessed_pages else "available"
     return extraction_status, {
