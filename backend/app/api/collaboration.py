@@ -5722,7 +5722,14 @@ _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
     r"(?:record(?:ed)?|log(?:ged)?|sav(?:e|ed)|not(?:e|ed)|enter(?:ed)?)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
     r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
-    r"(?:prescribe|recommend|change|set)\b",
+    r"(?:prescribe|recommend|change|set)\b|"
+    r"\bqu[eé]\s+(?:hemos|han|he|hab[eé]is)\s+(?:registrado|anotado|guardado|apuntado)\b|"
+    r"\bqu[eé]\s+(?:dice|dijo)\s+(?:el\s+)?(?:registro|historial|expediente)\b|"
+    r"\bqu['’]est-ce\s+qu['’]on\s+a\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
+    r"\bqu['’]est-ce\s+que\s+(?:j['’]ai|nous\s+avons|vous\s+avez)\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
+    r"\bque\s+dit\s+(?:le\s+)?(?:dossier|historique|registre)\b|"
+    r"\bqu[eé]lle\s+dose\s+(?:a\s+)?(?:prescrit|recommand[eé]|chang[eé])\b|"
+    r"\bqu[eé]\s+dosis\s+(?:indic[oó]|prescribi[oó]|recomend[oó]|cambi[oó])\b",
     re.IGNORECASE,
 )
 _CARE_HISTORY_STOPWORDS = {
