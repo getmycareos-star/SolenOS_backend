@@ -114,6 +114,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                         decision="correct",
                         expected_source_quote="A stale Daily Care quotation.",
                         expected_subject="sleep",
+                        expected_observation=original_observation,
                         corrected_observation=corrected_observation,
                     ),
                     _request(person_id, caregiver_id),
@@ -183,7 +184,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
+                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep", expected_observation=original_observation),
                     _request(person_id, caregiver_id),
                     db,
                 )
@@ -205,7 +206,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=1, decision="accept", expected_source_quote=original_text, expected_subject="mood"),
+                    CaptureCandidateReview(candidate_index=1, decision="accept", expected_source_quote=original_text, expected_subject="mood", expected_observation="Unconfirmed generated suggestion"),
                     _request(person_id, caregiver_id),
                     db,
                 )
