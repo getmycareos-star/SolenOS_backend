@@ -63,7 +63,8 @@ _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
     r"burnt out|burned out|scared|frightened|terrified|panicking|sad|angry|upset|"
     r"lonely|anxious|grieving|frustrated|furious|helpless|at my limit|falling apart|"
     r"can't cope|cannot cope|can't take this|cannot take this|can't stop crying|"
-    r"need a break|have had enough|had enough)\b",
+    r"need a break|just want a break|have had enough|had enough|struggling|"
+    r"been crying|can't stop crying|feel like crying)\b",
     re.I,
 )
 _CRITICAL = re.compile(
