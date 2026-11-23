@@ -287,6 +287,49 @@ def _post_capture_review(client, path, headers, payload):
     }
     return client.post(path, headers=headers, json=bound_payload)
 
+
+def test_capture_review_rejects_requests_without_the_displayed_candidate_snapshot(monkeypatch):
+    client = TestClient(app)
+    session = create_session(client, "Snapshot-required recipient")
+    auth = {"Authorization": f"Bearer {session["access_token"]}"}
+    source_quote = "Mum was restless after dinner."
+    monkeypatch.setattr(api_v1_module, "extract_review_candidates", lambda *args, **kwargs: {
+        "observations": [{
+            "subject": "sleep",
+            "observation": "Mum was restless after dinner.",
+            "source_quote": source_quote,
+            "review_status": "pending_review",
+        }],
+        "open_questions": [],
+        "possible_safety_flags": [],
+    })
+    saved = client.post(
+        "/api/v1/daily/log",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "notes": source_quote,
+            "medications": [],
+            "vitals": [],
+            "scales": [],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
+
+    response = client.post(
+        f"/api/v1/capture/analyses/{saved.json()["qwen_analysis_id"]}/review",
+        headers=auth,
+        json={"candidate_index": 0, "decision": "accept"},
+    )
+    assert response.status_code == 422, response.text
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(person_id=session["person"]["id"]).count() == 0
+    finally:
+        db.close()
+
 def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_assertion(monkeypatch):
     client = TestClient(app)
     session = create_session(client, "Care recipient")
