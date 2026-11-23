@@ -156,6 +156,67 @@ def resolve_response_length_policy(
     return _POLICIES["explanation"]
 
 
+_WORKFLOW_INTENT_HINTS: dict[str, str | None] = {
+    "daily_capture": "explanation",
+    "add_record": "explanation",
+    "document": "document_explanation",
+    "living_care_record": "complex_care_history",
+    "care_history_search": "complex_care_history",
+    "care_situation_change": "change_pattern",
+    "delta_engine": "change_pattern",
+    "evidence_provenance": "explanation",
+    "uncertainty_contradictions": "explanation",
+    "returning_caregiver": "returning_greeting",
+    "appointment": "appointment_preparation",
+    "after_appointment": "appointment_preparation",
+    "handoff": "care_handoff",
+    "professional_summary": "complex_care_history",
+    "open_loops": "explanation",
+    "two_week_review": "change_pattern",
+    "decision_outcome": "explanation",
+    "medication_day": "explanation",
+    "reminders_notifications": "simple_factual_answer",
+    "care_coordination": "care_handoff",
+    "companion": None,
+    "caregiver_feedback": "explanation",
+    "sharing_export": "care_handoff",
+    "roles_access": "simple_factual_answer",
+    "account_recovery": "simple_factual_answer",
+    "settings_security": "simple_factual_answer",
+    "record_lifecycle": "simple_factual_answer",
+    "offline_sync": "simple_factual_answer",
+    "ai_reliability": "simple_factual_answer",
+    "audit_review": "complex_care_history",
+    "care_transition": "care_handoff",
+    "incident_follow_through": "complex_care_history",
+    "emergency_readiness": "complex_care_history",
+    "care_coverage_gap": "change_pattern",
+    "care_instruction_change_tracker": "change_pattern",
+    "critical_information_completeness": "complex_care_history",
+    "personal_preferences_distress_context": "explanation",
+    "caregiver_strain_support": "low_capacity_support",
+    "document_validity_renewal": "document_explanation",
+}
+
+
+def resolve_workflow_response_length_policy(
+    workflow: str,
+    message: str,
+    caregiver_stage: str | None = None,
+    *,
+    critical_safety: bool = False,
+) -> ResponseLengthPolicy:
+    """Resolve a workflow-specific contract without another model classification call."""
+    if workflow not in _WORKFLOW_INTENT_HINTS:
+        raise ValueError(f"Unsupported Qwen response-length workflow: {workflow}")
+    return resolve_response_length_policy(
+        message,
+        caregiver_stage=caregiver_stage,
+        intent_hint=_WORKFLOW_INTENT_HINTS[workflow],
+        critical_safety=critical_safety,
+    )
+
+
 def count_response_words(text: str) -> int:
     # Match the frontend contract: whitespace-delimited words. Splitting on
     # punctuation made contractions and hyphenated words count differently
