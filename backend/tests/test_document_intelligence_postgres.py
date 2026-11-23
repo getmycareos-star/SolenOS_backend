@@ -472,19 +472,55 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
             assert reviewed_state["count"] == 1
             assert len(reviewed_state["items"][0]["observations"]) == 2
 
+        # Reject a stale UI decision before it can create an LCR assertion.
+        # The candidate index still exists, but its expected source quotation
+        # does not match the persisted suggestion currently at that position.
+        candidate_for_review = understood["observations"][1]
+        with Session() as db:
+            with pytest.raises(HTTPException) as stale_decision:
+                review_document_candidate(
+                    analysis_id,
+                    CandidateReview(
+                        candidate_index=1,
+                        decision="accept",
+                        expected_source_quote="A stale source quotation from an earlier render.",
+                        expected_subject=candidate_for_review["subject"],
+                    ),
+                    _request(person_id, caregiver_id),
+                    db,
+                )
+            assert stale_decision.value.status_code == 409
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # Reject one candidate (no assertion), accept the other (one attributed assertion).
+        candidate_to_reject = understood["observations"][0]
         with Session() as db:
             rejected = review_document_candidate(
-                analysis_id, CandidateReview(candidate_index=0, decision="reject"),
-                _request(person_id, caregiver_id), db,
+                analysis_id,
+                CandidateReview(
+                    candidate_index=0,
+                    decision="reject",
+                    expected_source_quote=candidate_to_reject["source_quote"],
+                    expected_subject=candidate_to_reject["subject"],
+                ),
+                _request(person_id, caregiver_id),
+                db,
             )
             assert rejected["written_to_lcr"] is False
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
         with Session() as db:
             accepted = review_document_candidate(
-                analysis_id, CandidateReview(candidate_index=1, decision="accept"),
-                _request(person_id, caregiver_id), db,
+                analysis_id,
+                CandidateReview(
+                    candidate_index=1,
+                    decision="accept",
+                    expected_source_quote=candidate_for_review["source_quote"],
+                    expected_subject=candidate_for_review["subject"],
+                ),
+                _request(person_id, caregiver_id),
+                db,
             )
             assert accepted["written_to_lcr"] is True
             assert accepted["longitudinal_retrieval_status"] == "verified"
