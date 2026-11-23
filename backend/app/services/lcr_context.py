@@ -134,7 +134,7 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "document_extractions": {
         "table": "capture_analyses",
         "required": False,
-        "fields": ["id", "source_evidence_id", "source_event_id", "source_text", "extraction_status", "created_at", "caregiver_id"],
+        "fields": ["id", "source_evidence_id", "source_event_id", "source_text", "extraction_status", "created_at", "caregiver_id", "candidates"],
         "order": ["created_at"],
     },
     "assertions": {
@@ -588,6 +588,20 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "assertions":
         return assertion_information_status(item.get("epistemic_state"), item.get("assertion_status"))
     if source_name == "document_extractions":
+        extraction_status = str(item.get("extraction_status") or "unknown").casefold()
+        metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
+        if extraction_status == "partial":
+            unreadable = metadata.get("unreadable_page_numbers") or []
+            unprocessed = metadata.get("unprocessed_page_numbers") or []
+            return (
+                "document_extraction_partial",
+                "Only part of this document could be read. Unreadable or unprocessed pages remain unknown; do not treat this extraction as the complete document.",
+            )
+        if extraction_status == "failed":
+            return (
+                "document_extraction_failed",
+                "The original document is saved, but text extraction failed. No care details can be established from this extraction.",
+            )
         return (
             "document_extracted_unreviewed",
             "Extracted document text is source material, not a verified care fact or accepted LCR assertion.",
@@ -602,6 +616,37 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         if item.get(key) is not None:
             return f"recorded_{str(item[key]).casefold()}", "This is the stored workflow status, not an independent truth judgment."
     return "recorded_status_unspecified", "No explicit epistemic status was stored for this record."
+
+
+def _document_extraction_metadata(value: Any) -> dict[str, Any]:
+    """Expose bounded processing facts without exposing unreviewed AI candidates."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+    if not isinstance(value, dict):
+        return {}
+    allowed = (
+        "page_count",
+        "processed_page_numbers",
+        "unreadable_page_numbers",
+        "unprocessed_page_numbers",
+        "retryable_page_numbers",
+        "retry_exhausted_page_numbers",
+        "extraction_method",
+    )
+    metadata = {
+        key: _safe_value(value.get(key), key)
+        for key in allowed
+        if key in value
+    }
+    intelligence = value.get("document_intelligence")
+    if isinstance(intelligence, dict):
+        metadata["interpretation_status"] = intelligence.get("status")
+        observations = intelligence.get("observations")
+        metadata["unreviewed_candidate_count"] = len(observations) if isinstance(observations, list) else 0
+    return metadata
 
 
 def _retrieval_score(item: dict[str, Any], query: str, direct_terms: list[str], expanded_terms: list[str]) -> int:
@@ -761,7 +806,7 @@ def build_lcr_context(
             if caregiver_id and "caregiver_id" in table.c:
                 statement = statement.where(table.c.caregiver_id == str(caregiver_id))
             if "extraction_status" in table.c:
-                statement = statement.where(table.c.extraction_status == "available")
+                statement = statement.where(table.c.extraction_status.in_(("available", "partial", "failed")))
             if "candidates" in table.c:
                 statement = statement.where(
                     table.c.candidates["kind"].as_string() == "document_extraction_v1"
@@ -866,6 +911,8 @@ def build_lcr_context(
                     if not query_scan and candidate_count > limit:
                         continue
                     item = {key: _safe_value(value, key) for key, value in dict(row).items()}
+                    if source_name == "document_extractions":
+                        item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None))
                     information_status, interpretation_limit = _information_status(source_name, item)
                     item["information_status"] = information_status
                     item["interpretation_limit"] = interpretation_limit
