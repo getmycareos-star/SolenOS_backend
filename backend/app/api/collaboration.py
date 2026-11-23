@@ -7402,6 +7402,16 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "query_applied": shared_lcr_context["query_applied"],
                 "missing_required_sources": shared_lcr_context["missing_required_sources"],
                 "missing_optional_sources": shared_lcr_context["missing_optional_sources"],
+                "source_limits": [
+                    {
+                        "source_type": name,
+                        "status": source.get("status"),
+                        "interpretation_limit": source.get("interpretation_limit"),
+                    }
+                    for name, source in shared_lcr_context.get("sources", {}).items()
+                    if source.get("status") in {"failed", "partial", "unsearchable"}
+                    and source.get("interpretation_limit")
+                ][:20],
                 "sources": {
                     name: {
                         "status": source.get("status", "unknown"),
