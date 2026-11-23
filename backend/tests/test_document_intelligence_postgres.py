@@ -1102,6 +1102,8 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             assert any(item["id"] == assertion_id for item in context_assertions)
             document_items = companion_context["sources"]["document_extractions"]["items"]
             assert any(item["id"] == analysis_id and quote_correct in item["source_text"] for item in document_items)
+            retrieved_document = next(item for item in document_items if item["id"] == analysis_id)
+            assert any(quote_correct in passage["text"] for passage in retrieved_document["retrieved_source_passages"])
 
         # The rotated token replaces the old capability; it cannot be reused.
         stale_token = client.get(
