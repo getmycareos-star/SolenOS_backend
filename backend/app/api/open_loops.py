@@ -476,14 +476,56 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
                             "source_type": payload.source_type},
                            sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(canonical.encode()).hexdigest()
+    request_payload = payload.model_dump(mode="json", exclude={"idempotency_key"})
+    request_payload["title"] = payload.title.strip()
+    request_payload["description"] = payload.description.strip()
+    for time_field in ("deadline_at", "review_at"):
+        normalized_time = _utc(getattr(payload, time_field))
+        request_payload[time_field] = normalized_time.isoformat() if normalized_time else None
+    request_canonical = json.dumps(
+        request_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )
+    request_fingerprint = hashlib.sha256(request_canonical.encode("utf-8")).hexdigest()
+
+    def assert_same_create_request(occurrence: OpenLoopOccurrence) -> None:
+        if occurrence.source_fingerprint != fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key was already used for a different Open Loop payload",
+            )
+        saved_event = db.query(OpenLoopEvent).filter(
+            OpenLoopEvent.person_id == person_id,
+            OpenLoopEvent.idempotency_key == payload.idempotency_key,
+        ).first()
+        saved_context = (
+            saved_event.after_state.get("event_context", {})
+            if saved_event is not None and isinstance(saved_event.after_state, dict)
+            else {}
+        )
+        saved_request_fingerprint = (
+            saved_context.get("request_fingerprint")
+            if isinstance(saved_context, dict) else None
+        )
+        # Older occurrences predate the complete request fingerprint. Keep
+        # their legacy core-payload comparison for backward compatibility;
+        # every new occurrence stores and checks the complete normalized body.
+        if saved_request_fingerprint is not None and saved_request_fingerprint != request_fingerprint:
+            raise HTTPException(
+                status_code=409,
+                detail="Idempotency key was already used for a different Open Loop payload",
+            )
+
+    request_event_context = (
+        {"request_fingerprint": request_fingerprint}
+        if payload.idempotency_key else None
+    )
     if payload.idempotency_key:
         replay = db.query(OpenLoopOccurrence).filter(
             OpenLoopOccurrence.person_id == person_id,
             OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
         ).first()
         if replay:
-            if replay.source_fingerprint != fingerprint:
-                raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
+            assert_same_create_request(replay)
             return _snapshot(_get_scoped(db, person_id, caregiver_id, replay.loop_id))
     if payload.source_id:
         replay = db.query(OpenLoopOccurrence).join(
@@ -512,7 +554,10 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         )
         db.add(occurrence)
         before = _snapshot(recurrence)
-        _audit(db, recurrence, "recurrence_linked", before, payload.evidence, payload.idempotency_key)
+        _audit(
+            db, recurrence, "recurrence_linked", before, payload.evidence,
+            payload.idempotency_key, event_context=request_event_context,
+        )
         db.commit()
         return {**_snapshot(recurrence), "recurrence_detected": True, "occurrence_id": occurrence.id}
     loop = OpenLoopRecord(
@@ -540,7 +585,10 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
     )
     db.add(occurrence)
     try:
-        _audit(db, loop, "created", None, payload.evidence, payload.idempotency_key)
+        _audit(
+            db, loop, "created", None, payload.evidence,
+            payload.idempotency_key, event_context=request_event_context,
+        )
     except HTTPException as exc:
         # A concurrent identical create can pass the first occurrence lookup,
         # then observe the winning request's audit row before its own commit.
@@ -557,11 +605,7 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
                 OpenLoopOccurrence.idempotency_key == payload.idempotency_key,
             ).first()
             if replay is not None:
-                if replay.source_fingerprint != fingerprint:
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Idempotency key was already used for a different Open Loop payload",
-                    )
+                assert_same_create_request(replay)
                 existing = _get_scoped(db, person_id, caregiver_id, replay.loop_id)
                 return {
                     **_snapshot(existing),
@@ -593,8 +637,8 @@ def create_loop(payload: LoopCreate, request: Request, db: Session = Depends(get
         replay = replay_query.first()
         if replay is None:
             raise HTTPException(status_code=409, detail="Open Loop creation conflicted with a concurrent write")
-        if payload.idempotency_key and replay.source_fingerprint != fingerprint:
-            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different Open Loop payload")
+        if payload.idempotency_key:
+            assert_same_create_request(replay)
         existing = _get_scoped(db, person_id, caregiver_id, replay.loop_id)
         return {**_snapshot(existing), "recurrence_detected": True, "occurrence_id": replay.id}
     db.refresh(loop)
