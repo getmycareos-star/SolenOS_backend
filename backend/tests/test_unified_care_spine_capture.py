@@ -375,7 +375,9 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 row for row in reviewed_history.json()["records"]
                 if row.get("source_id") == event_id
             )
-            assert reviewed_capture["capture_processing"]["review_required"] is False
+            assert reviewed_capture["capture_processing"]["review_required"] is True, (
+                "one accepted observation must not clear the remaining observation's review requirement"
+            )
 
             retry = client.post(
                 "/api/v1/daily/log",
