@@ -600,7 +600,7 @@ def _lock_document_source_and_analysis(
     ).populate_existing().with_for_update().first()
     if evidence is None or evidence.evidence_status == "deleted_by_caregiver":
         raise HTTPException(status_code=404, detail="Saved document not found in this caregiver's care record")
-    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).first()
+    upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == evidence_id).populate_existing().first()
     if upload is None or upload.sha256 != expected_binary_sha256:
         raise HTTPException(status_code=409, detail="The original document changed while it was being reviewed")
     analysis = db.query(CaptureAnalysis).filter(
