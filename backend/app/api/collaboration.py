@@ -114,6 +114,42 @@ COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
 )
 
 
+def _sanitize_companion_event_context(event_context: list[str], shared_lcr_context: dict) -> list[str]:
+    """Use correction-aware LCR events; mark direct-only events currentness-unknown."""
+    sources = shared_lcr_context.get("sources") if isinstance(shared_lcr_context, dict) else {}
+    sources = sources if isinstance(sources, dict) else {}
+    event_source = sources.get("events") if isinstance(sources.get("events"), dict) else {}
+    shared_items = event_source.get("items") if isinstance(event_source.get("items"), list) else []
+    shared_event_ids = {
+        str(item.get("id")) for item in shared_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    retained: list[str] = []
+    for line in event_context:
+        prefix, separator, raw = str(line).partition(":")
+        if not separator:
+            retained.append(str(line))
+            continue
+        try:
+            record = json.loads(raw.strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            retained.append(str(line))
+            continue
+        if not isinstance(record, dict):
+            retained.append(str(line))
+            continue
+        event_id = str(record.get("event_id") or record.get("id") or "")
+        if event_id and event_id in shared_event_ids:
+            # The shared projection carries correction lineage; this un-enriched
+            # duplicate would otherwise give Qwen contradictory event versions.
+            continue
+        record["correction_lineage_status"] = "failed"
+        information_status, interpretation_limit = _information_status("events", record)
+        record["information_status"] = information_status
+        record["interpretation_limit"] = interpretation_limit
+        retained.append(prefix + ": " + json.dumps(record, ensure_ascii=False, default=str))
+    return retained
+
 def _build_unified_lcr_context_or_422(*args, **kwargs):
     try:
         return build_unified_lcr_context(*args, **kwargs)
@@ -7728,6 +7764,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "record": item,
                         }, ensure_ascii=False, default=str)
                     )
+            # Direct recent-event rows are useful for evidence linkage, but must not
+            # sit beside a correction-aware shared projection as unqualified current facts.
+            event_context = _sanitize_companion_event_context(event_context, shared_lcr_context)
             # Carry relevant caregiver turns across Companion sessions so a
             # returning caregiver does not have to repeat the same story.
             # These turns are conversational context only: never source
