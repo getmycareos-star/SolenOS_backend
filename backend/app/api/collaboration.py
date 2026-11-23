@@ -2879,6 +2879,16 @@ def _collect_full_lcr_context_pages(
             break
 
     merged["sources"] = merged_sources
+    # A failed first page can be recovered by the bounded retry above. Do not
+    # keep its initial missing-source marker after a complete retry succeeds.
+    merged["missing_required_sources"] = sorted(
+        name for name in set(merged.get("missing_required_sources", []))
+        if merged_sources.get(name, {}).get("status") not in {"available", "empty"}
+    )
+    merged["missing_optional_sources"] = sorted(
+        name for name in set(merged.get("missing_optional_sources", []))
+        if merged_sources.get(name, {}).get("status") not in {"available", "empty"}
+    )
     merged["source_status"] = {
         name: source.get("status", "unknown")
         for name, source in merged_sources.items()
