@@ -1619,3 +1619,15 @@ def test_explicit_temporal_windows_reject_ranges_beyond_supported_bounds():
         _temporal_window("Show the last 1041 weeks", now=now)
     with pytest.raises(ValueError, match="between one month and twenty years"):
         _temporal_window("Show the last 241 months", now=now)
+
+
+def test_written_day_week_and_month_ranges_are_resolved_as_calendar_windows():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    ten_days = _temporal_window("What changed in the past ten days?", now=now)
+    four_weeks = _temporal_window("What changed in the last four weeks?", now=now)
+    two_months = _temporal_window("What changed in the past two months?", now=now)
+
+    assert ten_days is not None and ten_days["start"] == "2026-11-06T00:00:00+00:00"
+    assert four_weeks is not None and four_weeks["start"] == "2026-10-19T00:00:00+00:00"
+    assert two_months is not None and two_months["start"] == "2026-09-15T00:00:00+00:00"
