@@ -1752,6 +1752,26 @@ def main():
         )
         require(status == 409,
                 f"Reusing a create idempotency key with a different core payload must return 409: {status}: {changed_retry}")
+        changed_deadline_retry = {
+            **open_loop_payload,
+            "deadline_at": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+            "deadline_source": "explicit_user",
+            "deadline_timezone": "UTC",
+        }
+        status, changed_deadline_response = request(
+            "POST", "/api/v1/open-loops", token=token_a, body=changed_deadline_retry,
+        )
+        require(status == 409,
+                f"Reusing a create key with a changed deadline must return 409: {status}: {changed_deadline_response}")
+        changed_evidence_retry = {
+            **open_loop_payload,
+            "evidence": [{"kind": "ci_fixture", "text": "Different evidence for the same create key."}],
+        }
+        status, changed_evidence_response = request(
+            "POST", "/api/v1/open-loops", token=token_a, body=changed_evidence_retry,
+        )
+        require(status == 409,
+                f"Reusing a create key with changed evidence must return 409: {status}: {changed_evidence_response}")
         # Race two identical create requests. A unique database constraint plus
         # retry recovery must converge on one durable loop instead of returning 500.
         concurrent_create_payload = {
