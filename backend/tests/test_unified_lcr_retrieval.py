@@ -927,6 +927,32 @@ def test_past_year_uses_rolling_twelve_month_window_in_caregiver_timezone():
     assert window["end"] == "2026-11-16T07:59:59.999999+00:00"
 
 
+def test_numbered_multi_year_window_is_rolling_and_timezone_aware():
+    window = _temporal_window(
+        "What changed in the last 2 years?",
+        now=datetime(2026, 11, 15, 12, tzinfo=UTC),
+        timezone_name="America/Los_Angeles",
+    )
+    assert window is not None
+    assert window["basis"] == "explicit_rolling_past_2_years"
+    assert window["timezone"] == "America/Los_Angeles"
+    assert window["start"] == "2024-11-15T08:00:00+00:00"
+    assert window["end"] == "2026-11-16T07:59:59.999999+00:00"
+
+
+def test_numbered_multi_year_window_clamps_leap_day_and_rejects_unbounded_ranges():
+    leap_window = _temporal_window(
+        "Show me the past 2 years",
+        now=datetime(2024, 2, 29, 12, tzinfo=UTC),
+    )
+    assert leap_window is not None
+    assert leap_window["start"] == "2022-02-28T00:00:00+00:00"
+    with pytest.raises(ValueError, match="between one and twenty years"):
+        _temporal_window("Show me the last 0 years", now=datetime(2026, 11, 6, 12, tzinfo=UTC))
+    with pytest.raises(ValueError, match="between one and twenty years"):
+        _temporal_window("Show me the past 21 years", now=datetime(2026, 11, 6, 12, tzinfo=UTC))
+
+
 def test_past_year_clamps_leap_day_when_prior_year_is_not_leap():
     window = _temporal_window(
         "Show me the past year",
