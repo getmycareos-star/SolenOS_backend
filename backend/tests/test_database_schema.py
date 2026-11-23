@@ -102,6 +102,38 @@ def test_schema_verifier_reports_foreign_key_action_drift():
         engine.dispose()
 
 
+def test_schema_verifier_reports_missing_partial_index_predicate():
+    from sqlalchemy import inspect
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(bind=engine)
+        index_name = "uq_patterns_one_active_per_subject"
+        assert index_name in {
+            item["name"] for item in inspect(engine).get_indexes("patterns")
+        }
+        with engine.begin() as connection:
+            connection.execute(text(f'DROP INDEX "{index_name}"'))
+            # Same columns and uniqueness, but without the required active-row
+            # predicate. This changes the model's uniqueness semantics.
+            connection.execute(text(
+                f"CREATE UNIQUE INDEX \"{index_name}\" "
+                "ON patterns (person_id, subject_type, subject_id, pattern_type)"
+            ))
+        differences = database_schema_differences(engine)
+        mismatch = next(
+            (
+                item for item in differences
+                if item.startswith("patterns: missing indexes or index predicates")
+            ),
+            None,
+        )
+        assert mismatch is not None
+        assert "is_active is true" in mismatch
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_tables():
     engine = create_engine("sqlite:///:memory:")
     try:
