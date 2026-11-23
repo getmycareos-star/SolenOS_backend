@@ -3484,6 +3484,8 @@ def test_caregiver_interaction_guidance_recognizes_standalone_emotion_and_tiredn
         ("Tired", "LOW-CAPACITY RESPONSE"),
         ("Overwhelmed", "LOW-CAPACITY RESPONSE"),
         ("I am really tired.", "LOW-CAPACITY RESPONSE"),
+        ("I feel worn out.", "LOW-CAPACITY RESPONSE"),
+        ("I feel drained.", "LOW-CAPACITY RESPONSE"),
     ):
         guidance = collaboration._caregiver_interaction_guidance(message)
         assert expected in guidance, message
