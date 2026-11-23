@@ -631,7 +631,7 @@ def _append_assertion_revision(
 
 
 def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None, review_after_days: Optional[int] = None) -> CareAssertion:
-    allowed = {"reported", "review_required", "accepted", "rejected", "superseded"}
+    allowed = {"reported", "review_required", "accepted", "rejected", "superseded", "withdrawn"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported assertion status")
     assertion = db.query(CareAssertion).filter(
@@ -716,12 +716,12 @@ def get_freshness(
     review_reference = reviewed_at if assertion.assertion_status in {"accepted", "caregiver_reviewed"} else None
     reference = _utc(review_reference) or _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
-    if assertion.assertion_kind == "time_bound_observation":
+    if assertion.assertion_status in {"rejected", "superseded", "withdrawn"}:
+        status = "historical"
+        explanation = "This assertion was rejected, superseded, or withdrawn; it must not be presented as current."
+    elif assertion.assertion_kind == "time_bound_observation":
         status = "time_bound_observation"
         explanation = "This is a time-bound observation, not a claim about the current state."
-    elif assertion.assertion_status in {"rejected", "superseded"}:
-        status = "historical"
-        explanation = "This assertion was explicitly rejected or superseded; it must not be presented as current."
     elif unresolved_conflict:
         status = "needs_confirmation"
         explanation = "A competing report for this same field remains unresolved. This report must not be presented as the established current state, even if a caregiver reviewed it."
