@@ -2212,7 +2212,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         accepted = client.post(
             f"/api/v1/capture/analyses/{analysis.id}/review",
             headers=headers,
-            json={"candidate_index": 0, "decision": "accept"},
+            json={"candidate_index": 0, "decision": "accept", "expected_source_quote": original_report, "expected_subject": "Mum", "expected_observation": "slept poorly last night"},
         )
         assert accepted.status_code == 200, accepted.text
         accepted_body = accepted.json()
