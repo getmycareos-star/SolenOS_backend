@@ -376,7 +376,7 @@ SEARCH_FIELDS = {
     "evidence_observations": ["observation_kind", "epistemic_status", "subject_label", "attribute", "value_text", "context", "source_passage", "ambiguity_note"],
     "facts": ["subject_type", "fact_type", "fact_value", "review_notes"],
     "assertions": ["subject_type", "field", "asserted_value", "source_label", "source_text", "event_time_text", "assertion_status"],
-    "document_extractions": ["source_text"],
+    "document_extractions": ["source_text", "extraction_status"],
     "decisions": ["title", "decision_text", "context", "decision_status"],
     "decision_outcomes": ["outcome_status", "description"],
     "action_outcomes": ["action_type", "outcome_status", "notes", "correction_text"],
@@ -481,6 +481,9 @@ def _safe_value(value: Any, key: str | None = None) -> Any:
 
 
 _SEMANTIC_EXPANSIONS: dict[str, tuple[str, ...]] = {
+    "uncertain": ("uncertainty", "unknown", "partial", "unreadable", "missing"),
+    "unreadable": ("partial", "ocr", "not_readable"),
+    "incomplete": ("partial", "unreadable", "not_processed"),
     "sleep": ("slept", "sleeping", "waking", "awake", "night", "rest"),
     "waking": ("awake", "sleep", "night"),
     "wandering": ("pacing", "walking", "roaming", "leaving"),
