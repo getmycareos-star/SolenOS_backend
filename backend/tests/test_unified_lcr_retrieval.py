@@ -1484,6 +1484,13 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
         assert "appointment_workspace_revision_history" in prompt_context
         assert "not independently verified" in prompt_context
         assert "lcr_reconciliation" in prompt_context
+        from app.api.collaboration import _context_record_refs
+        typed_refs = _context_record_refs([
+            json.dumps({"source_type": "appointment_workspaces", "source_id": item["id"], "record": item}),
+            json.dumps({"source_type": "appointment_workspace_revisions", "source_id": prior["id"], "record": prior}),
+        ])
+        assert {"record_type": "appointment_workspace", "record_id": "appointment-workspace-record"} in typed_refs
+        assert {"record_type": "appointment_workspace_revision", "record_id": "appointment-workspace-revision-2"} in typed_refs
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
