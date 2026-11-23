@@ -55,7 +55,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: solenos_document
           POSTGRES_PASSWORD: solenos_document_ci

@@ -237,7 +237,7 @@ def _restart_postgres_service_container(engine):
     if os.getenv("SOLENOS_TEST_POSTGRES_RESTART") != "1":
         return
     containers = subprocess.run(
-        ["docker", "ps", "--filter", "ancestor=postgres:17", "--format", "{{.ID}}"],
+        ["docker", "ps", "--filter", "ancestor=postgres:18", "--format", "{{.ID}}"],
         check=True,
         capture_output=True,
         text=True,

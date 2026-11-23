@@ -36,7 +36,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:17
+        image: postgres:18
         env:
           POSTGRES_USER: solenos_test
           POSTGRES_PASSWORD: solenos_ci_only
@@ -89,11 +89,11 @@ jobs:
         run: |
           cat > /usr/local/bin/pg_dump <<'SH'
           #!/bin/sh
-          exec docker run --rm --network host -v /tmp:/tmp postgres:17 pg_dump "$@"
+          exec docker run --rm --network host -v /tmp:/tmp postgres:18 pg_dump "$@"
           SH
           cat > /usr/local/bin/pg_restore <<'SH'
           #!/bin/sh
-          exec docker run --rm --network host -v /tmp:/tmp postgres:17 pg_restore "$@"
+          exec docker run --rm --network host -v /tmp:/tmp postgres:18 pg_restore "$@"
           SH
           chmod +x /usr/local/bin/pg_dump /usr/local/bin/pg_restore
           pg_dump --version
