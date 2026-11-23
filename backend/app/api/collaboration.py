@@ -5561,7 +5561,7 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
         return None
 
     query_tokens = [
-        token for token in re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)
+        token for token in re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)
         if token not in _DOCUMENT_ANSWER_STOPWORDS
     ]
     query_terms = {
@@ -5636,8 +5636,8 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
 
 def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -> bool:
     """Require a document answer to reuse at least two meaningful source terms."""
-    source_terms = set(re.findall(r"[\\w']{3,}", (extractive_answer or "").casefold(), flags=re.UNICODE))
-    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
+    source_terms = set(re.findall(r"[\w']{3,}", (extractive_answer or "").casefold(), flags=re.UNICODE))
+    reply_terms = set(re.findall(r"[\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     meaningful = source_terms - _DOCUMENT_ANSWER_STOPWORDS
     return len(meaningful & reply_terms) >= 3
 
@@ -5733,7 +5733,7 @@ _CARE_HISTORY_STOPWORDS = {
 
 
 def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]:
-    tokens = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE))
+    tokens = set(re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE))
     requested = [
         (label, variants)
         for label, variants in _CARE_HISTORY_TOPIC_GROUPS.items()
@@ -5836,7 +5836,7 @@ def _care_history_recall_context_lines(
         caregiver_report = _care_history_event_text({"description": row.description})
         if not caregiver_report:
             continue
-        report_terms = set(re.findall(r"[\\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
+        report_terms = set(re.findall(r"[\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
         if not any(report_terms.intersection(variants) for _, variants in topics):
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
@@ -5996,7 +5996,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         return None
 
     topics = _care_history_requested_topics(user_text)
-    query_terms = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - _CARE_HISTORY_STOPWORDS
+    query_terms = set(re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - _CARE_HISTORY_STOPWORDS
     candidates: list[tuple[int, int, int, str, set[str]]] = []
     order = 0
 
@@ -6044,7 +6044,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             continue
         if not description:
             continue
-        terms = set(re.findall(r"[\\w']{3,}", description.casefold(), flags=re.UNICODE))
+        terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
         if source_type == "care_assertions":
             terms.update(re.findall(r"[a-z0-9']{3,}", source_text.casefold()))
         matched_topics = {
@@ -6149,7 +6149,7 @@ def _caregiver_question_extractive_answer(user_text: str, context_lines: list[st
         "professional", "doctor", "clinician", "care", "team", "about", "for",
         "mum", "mom", "her", "his", "their", "person", "person's",
     }
-    query_terms = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - stop_words
+    query_terms = set(re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - stop_words
     candidates: list[tuple[int, int, str]] = []
     for order, line in enumerate(context_lines):
         brace = (line or "").find("{")
@@ -6194,7 +6194,7 @@ def _care_history_reply_covers_requested_topics(
     context_lines: list[str],
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
-    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
+    reply_terms = set(re.findall(r"[\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
@@ -6220,7 +6220,7 @@ def _care_history_reply_covers_requested_topics(
         description = _care_history_event_text(record)
         if not description:
             continue
-        terms = set(re.findall(r"[\\w']{3,}", description.casefold(), flags=re.UNICODE))
+        terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
         if not topics:
             generic_source_details.update(terms - detail_stopwords)
         for label, variants in topics:
