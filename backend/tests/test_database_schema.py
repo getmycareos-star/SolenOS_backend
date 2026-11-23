@@ -188,7 +188,7 @@ def test_schema_verifier_reports_missing_partial_index_predicate():
             None,
         )
         assert mismatch is not None
-        assert "is_active is true" in mismatch
+        assert "is_active IS TRUE" in mismatch
     finally:
         engine.dispose()
 
