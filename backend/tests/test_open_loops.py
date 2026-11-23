@@ -747,11 +747,34 @@ def test_deferred_follow_up_reopens_from_persisted_review_time_after_restart():
         deadline_source="explicit_user",
     )
     review_at = datetime.now(timezone.utc) + timedelta(days=4)
+    missing_version = client.patch(
+        f"/api/v1/open-loops/{loop['id']}",
+        headers=headers,
+        json={
+            "status": "deferred",
+            "deferred_reason": "Waiting for the clinic to return the call.",
+            "review_at": review_at.isoformat(),
+        },
+    )
+    assert missing_version.status_code == 409, missing_version.text
+    stale_version = client.patch(
+        f"/api/v1/open-loops/{loop['id']}",
+        headers=headers,
+        json={
+            "status": "deferred",
+            "expected_version": loop["version"] + 1,
+            "deferred_reason": "Waiting for the clinic to return the call.",
+            "review_at": review_at.isoformat(),
+        },
+    )
+    assert stale_version.status_code == 409, stale_version.text
+
     deferred = client.patch(
         f"/api/v1/open-loops/{loop['id']}",
         headers=headers,
         json={
             "status": "deferred",
+            "expected_version": loop["version"],
             "deferred_reason": "Waiting for the clinic to return the call.",
             "review_at": review_at.isoformat(),
         },
