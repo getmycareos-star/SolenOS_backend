@@ -59,6 +59,21 @@ def _temporal_window(
     # "Past year" is a rolling twelve-month window, not the previous
     # calendar year. Treating it as a calendar year drops recent months and
     # includes months older than the caregiver requested.
+    numbered_years = re.search(r"\b(?:last|past)\s+(\d{1,2})\s+years?\b", text)
+    if numbered_years:
+        years = int(numbered_years.group(1))
+        if years < 1 or years > 20:
+            raise ValueError("A numbered care-history year range must be between one and twenty years.")
+        start_year = today.year - years
+        start_day = min(today.day, calendar.monthrange(start_year, today.month)[1])
+        rolling_start = date(start_year, today.month, start_day)
+        return {
+            "start": datetime.combine(rolling_start, datetime.min.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "end": datetime.combine(today, datetime.max.time(), tzinfo=local_timezone).astimezone(UTC).isoformat(),
+            "timezone": str(local_timezone),
+            "basis": f"explicit_rolling_past_{years}_years",
+        }
+
     if re.search(r"\bpast\s+year\b", text):
         start_year = today.year - 1
         start_day = min(today.day, calendar.monthrange(start_year, today.month)[1])
