@@ -101,6 +101,7 @@ def test_document_interpretation_is_blocked_when_persisted_page_metadata_has_a_g
 
 def test_standalone_scan_preserves_original_page_label_without_inventing_missing_pages():
     upload = _upload()
+    upload.filename = "scan.jpg"
     upload.mime_type = "image/jpeg"
     status, metadata = _extraction_metadata(
         upload,
