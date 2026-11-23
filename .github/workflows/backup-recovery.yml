@@ -85,7 +85,7 @@ jobs:
           connection.close()
           PY
 
-      - name: Use PostgreSQL 17 client matching the CI database service
+      - name: Use PostgreSQL 18 client matching the CI database service
         run: |
           cat > /usr/local/bin/pg_dump <<'SH'
           #!/bin/sh
