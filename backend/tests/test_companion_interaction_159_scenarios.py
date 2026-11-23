@@ -67,7 +67,7 @@ def _cases():
         "I've had enough for now.", "I have had enough and need to stop.",
         "I just want a break from caregiving.",
         "I'm too tired to keep talking.",
-        "I need a pause from this conversation.",
+        "I need to pause this conversation.",
         "Please stop for now.",
     ], "low_capacity")
 
