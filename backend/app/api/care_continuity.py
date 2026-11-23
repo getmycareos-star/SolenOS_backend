@@ -3108,6 +3108,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
             "evidence_ids": (
                 item.get("evidence_ids") if isinstance(item.get("evidence_ids"), list)
+                else [
+                    str(reference.get("evidence_id"))
+                    for reference in (item.get("evidence") or [])
+                    if source == "open_loop_records"
+                    and isinstance(reference, dict)
+                    and isinstance(reference.get("evidence_id"), str)
+                    and reference.get("evidence_id").strip()
+                ] if source == "open_loop_records" and isinstance(item.get("evidence"), list)
                 else [str(item["evidence_id"])] if source == "evidence_observations" and item.get("evidence_id")
                 else []
             ),
