@@ -1345,9 +1345,10 @@ def build_lcr_context(
         latest_care_change = None
         freshness_available = True
         try:
-            latest_care_change = db.query(func.max(CareStateRevision.changed_at)).filter(
-                CareStateRevision.person_id == str(person_id)
-            ).scalar()
+            with db.begin_nested():
+                latest_care_change = db.query(func.max(CareStateRevision.changed_at)).filter(
+                    CareStateRevision.person_id == str(person_id)
+                ).scalar()
         except Exception:
             freshness_available = False
         for workspace in workspace_source["items"]:
