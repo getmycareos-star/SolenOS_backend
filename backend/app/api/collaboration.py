@@ -80,7 +80,7 @@ from app.services.document_binary_storage import (
 )
 
 
-from app.services.lcr_context import _expanded_search_terms, _information_status
+from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
@@ -5070,7 +5070,63 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if anchored_event is not None:
             events = [anchored_event] + [event for event in events if str(event.id) != str(anchored_event.id)]
             events = events[:event_limit]
+
+        event_lineage_by_id = {}
+        if events:
+            try:
+                event_projection = build_lcr_context(
+                    db, person_id, caregiver_id=caregiver_id,
+                    limit_per_source=40, include_all_history=True,
+                )
+                event_source = (
+                    event_projection.get("sources", {}).get("events", {})
+                    if isinstance(event_projection, dict) else {}
+                )
+                event_lineage_by_id = {
+                    str(item.get("id")): item
+                    for item in (event_source.get("items") or [])
+                    if isinstance(item, dict) and item.get("id")
+                }
+            except Exception:
+                logger.exception("Workflow Companion correction-aware event retrieval failed")
+                event_lineage_by_id = {}
+
+        evidence_event_lineage = {}
+        for canonical in event_lineage_by_id.values():
+            lineage = {
+                "information_status": canonical.get("information_status") or "event_currentness_unknown",
+                "correction_lineage_status": canonical.get("correction_lineage_status") or "failed",
+                "interpretation_limit": canonical.get("interpretation_limit") or (
+                    "The event's currentness could not be established from the Living Care Record."
+                ),
+                "corrections": canonical.get("superseded_by_corrections") or [],
+                "pending_corrections": canonical.get("pending_corrections") or [],
+            }
+            for evidence_id in canonical.get("evidence_ids") or []:
+                evidence_id = str(evidence_id)
+                previous = evidence_event_lineage.get(evidence_id)
+                if previous is None or lineage["correction_lineage_status"] != "checked":
+                    evidence_event_lineage[evidence_id] = lineage
+
         for event in events:
+            canonical = event_lineage_by_id.get(str(event.id))
+            information_status = (
+                canonical.get("information_status") if isinstance(canonical, dict) else None
+            ) or "event_currentness_unknown"
+            correction_lineage_status = (
+                canonical.get("correction_lineage_status") if isinstance(canonical, dict) else None
+            ) or "failed"
+            interpretation_limit = (
+                canonical.get("interpretation_limit") if isinstance(canonical, dict) else None
+            ) or "Correction history could not be checked. Do not present this report as the latest account."
+            correction_details = {
+                "superseded_by_corrections": (
+                    canonical.get("superseded_by_corrections", []) if isinstance(canonical, dict) else []
+                ),
+                "pending_corrections": (
+                    canonical.get("pending_corrections", []) if isinstance(canonical, dict) else []
+                ),
+            }
             if payload.workflow == "medication_day":
                 occurred = event.occurred_at.isoformat() if event.occurred_at else "unknown"
                 recorded = event.recorded_at.isoformat() if event.recorded_at else "unknown"
@@ -5079,6 +5135,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     f"event_type={event.event_type}; status={event.status}; "
                     f"event_time={occurred}; recorded_time={recorded}; "
                     f"reporter_caregiver_id={event.created_by_caregiver_id}; "
+                    f"information_status={information_status}; "
+                    f"correction_lineage_status={correction_lineage_status}; "
+                    f"correction_details={json.dumps(correction_details, ensure_ascii=False, default=str)}; "
+                    f"interpretation_limit={interpretation_limit}; "
                     f"title={event.title}; description={event.description or 'No additional detail'}. "
                     "This is a caregiver-reported record, not independent clinical verification."
                 )
@@ -5088,7 +5148,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 context_lines.append(
                     f"Recorded care event [{event.id}]: title={event.title}; status={event.status}; "
                     f"event_time={occurred_at}; recorded_time={recorded_at}; "
-                    f"caregiver_reported_detail={event.description or 'No additional detail'}"
+                    f"caregiver_reported_detail={event.description or 'No additional detail'}; "
+                    f"information_status={information_status}; "
+                    f"correction_lineage_status={correction_lineage_status}; "
+                    f"correction_details={json.dumps(correction_details, ensure_ascii=False, default=str)}; "
+                    f"interpretation_limit={interpretation_limit}"
                 )
             source_event_ids.append(str(event.id))
 
@@ -5119,10 +5183,32 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
             for evidence in medication_evidence:
                 source_evidence_ids.append(str(evidence.id))
+                linked_event_lineage = evidence_event_lineage.get(str(evidence.id))
+                if linked_event_lineage:
+                    lineage_note = (
+                        " Linked care-event correction status="
+                        + str(linked_event_lineage["information_status"])
+                        + "; correction_lineage_status="
+                        + str(linked_event_lineage["correction_lineage_status"])
+                        + "; correction_details="
+                        + json.dumps({
+                            "superseded_by_corrections": linked_event_lineage["corrections"],
+                            "pending_corrections": linked_event_lineage["pending_corrections"],
+                        }, ensure_ascii=False, default=str)
+                        + "; interpretation_limit="
+                        + str(linked_event_lineage["interpretation_limit"])
+                        + "."
+                    )
+                else:
+                    lineage_note = (
+                        " No linked correction-aware event was confirmed for this source evidence; "
+                        "it remains an original caregiver report and does not establish current medication state."
+                    )
                 context_lines.append(
                     f"Caregiver-reported medication source evidence [{evidence.id}]: "
                     f"{evidence.source_text[:2400]}. "
                     "This is the original caregiver report, not independent clinical verification."
+                    + lineage_note
                 )
 
     appointment_workflows = {
