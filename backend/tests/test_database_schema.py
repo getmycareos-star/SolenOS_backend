@@ -161,6 +161,42 @@ def test_schema_verifier_reports_foreign_key_action_drift():
         engine.dispose()
 
 
+def test_schema_verifier_handles_clause_element_index_predicates(monkeypatch):
+    import sqlalchemy
+    from sqlalchemy import inspect as original_inspect, text
+
+    engine = create_engine("sqlite:///:memory:")
+    try:
+        Base.metadata.create_all(bind=engine)
+
+        class InspectorProxy:
+            def __init__(self, inspector):
+                self._inspector = inspector
+
+            def __getattr__(self, name):
+                return getattr(self._inspector, name)
+
+            def get_indexes(self, table_name):
+                indexes = self._inspector.get_indexes(table_name)
+                if table_name == "patterns":
+                    for index in indexes:
+                        if index.get("name") == "uq_patterns_one_active_per_subject":
+                            index["dialect_options"] = {
+                                "sqlite_where": text("is_active IS TRUE")
+                            }
+                return indexes
+
+        monkeypatch.setattr(
+            sqlalchemy,
+            "inspect",
+            lambda bind: InspectorProxy(original_inspect(bind)),
+        )
+        differences = database_schema_differences(engine)
+        assert isinstance(differences, list)
+    finally:
+        engine.dispose()
+
+
 def test_schema_verifier_reports_missing_partial_index_predicate():
     from sqlalchemy import inspect
 
