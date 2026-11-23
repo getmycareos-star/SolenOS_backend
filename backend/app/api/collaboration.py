@@ -80,6 +80,7 @@ from app.services.document_binary_storage import (
 
 
 from app.services.lcr_context import _expanded_search_terms
+from app.services.response_length_policy import resolve_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -95,7 +96,7 @@ router = APIRouter(tags=["community and companion"])
 
 # Railway's observed 4,096-token model window must leave room for system rules and output.
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 7000
-COMPANION_MAX_OUTPUT_TOKENS = 384
+COMPANION_MAX_OUTPUT_TOKENS = 640
 
 
 def _build_unified_lcr_context_or_422(*args, **kwargs):
@@ -3196,7 +3197,7 @@ def _greeting_reply_needs_revision(reply: str) -> bool:
     normalized = (reply or "").casefold()
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     asks_a_question = "?" in (reply or "")
-    return not words or len(words) > 12 or repeats_automatic_question or asks_a_question
+    return not words or len(words) > 15 or repeats_automatic_question or asks_a_question
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -3341,10 +3342,10 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     return False
 
 
-def _companion_message_needs_revision(text: str) -> bool:
-    """Allow detail when warranted while rejecting empty, runaway, or internal output."""
+def _companion_message_needs_revision(text: str, max_words: int | None = 250) -> bool:
+    """Enforce the selected interaction maximum; critical safety has no generic word ceiling."""
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
-    if not words or len(words) > 220:
+    if not words or (max_words is not None and len(words) > max_words):
         return True
     if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
         return True
@@ -8030,6 +8031,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ),
         })
         greeting_only = _is_casual_greeting(user_text)
+        response_length_policy = resolve_response_length_policy(user_text)
+        model_messages[0]["content"] += (
+            f"\nRESPONSE LENGTH CONTRACT: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; "
+            f"hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. "
+            "Preserve supported facts, dates, uncertainty, conflicts, and missing-source limitations. Do not pad or speculate."
+        )
         if greeting_only:
             model_messages[0]["content"] += (
                 "\nThe current message is only a greeting or brief pleasantry. "
@@ -8126,7 +8133,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     companion_request_id,
                     model,
                     model_messages,
-                    {"temperature": 0.25, "num_predict": 32 if greeting_only else COMPANION_MAX_OUTPUT_TOKENS},
+                    {"temperature": 0.25, "num_predict": response_length_policy.token_budget},
                     retrieval_duration_ms,
                 )
                 logger.info(
@@ -8462,7 +8469,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             and (
                 not isinstance(reply, str)
                 or not reply.strip()
-                or _companion_message_needs_revision(reply)
+                or _companion_message_needs_revision(reply, response_length_policy.max_words)
                 or not _care_history_reply_covers_requested_topics(user_text, reply, included_model_context_lines)
                 or _contains_unrequested_saba(reply, validation_source)
                 or _contains_unsupported_care_claim(reply, validation_source)
