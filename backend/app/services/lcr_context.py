@@ -1123,11 +1123,6 @@ def build_lcr_context(
                     if not query_scan and candidate_count > limit:
                         continue
                     item = {key: _safe_value(value, key) for key, value in row_values.items()}
-                if exact_ordered_history and source_offset > 0 and rows_seen == 0:
-                    # An offset beyond the final row returns no window-count
-                    # value. Resolve that uncommon page with a count fallback.
-                    fallback_count = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
-                    candidate_count = int(db.execute(fallback_count).scalar_one() or 0)
                     if source_name == "document_extractions":
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
@@ -1145,6 +1140,11 @@ def build_lcr_context(
                     if len(ranked_items) > ranked_limit:
                         ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
                         del ranked_items[ranked_limit:]
+                if exact_ordered_history and source_offset > 0 and rows_seen == 0:
+                    # An offset beyond the final row returns no window-count
+                    # value. Resolve that uncommon page with a count fallback.
+                    fallback_count = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
+                    candidate_count = int(db.execute(fallback_count).scalar_one() or 0)
         except SQLAlchemyError:
             source_query_failed = True
 
