@@ -2502,6 +2502,13 @@ def test_caregiver_pause_request_is_respected_without_follow_up_questions():
     assert "PAUSE REQUEST" in pause_only
     assert "Do not ask another question" in pause_only
 
+    combined = collaboration._caregiver_interaction_guidance(
+        "You keep asking me to repeat myself. I don't want to talk about this anymore."
+    )
+    assert "CONTINUITY REPAIR" in combined
+    assert "PAUSE REQUEST" in combined
+    assert "pause request takes precedence" in combined
+
 
 def test_caregiver_interaction_guidance_handles_distress_without_forcing_workflow():
     guidance = collaboration._caregiver_interaction_guidance(
