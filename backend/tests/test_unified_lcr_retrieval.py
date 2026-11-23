@@ -1170,6 +1170,76 @@ def test_calendar_year_filter_does_not_require_year_in_care_note_or_message_text
         engine.dispose()
 
 
+def test_postgres_lcr_marks_superseded_observation_versions_as_historical():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        with Session(bind=connection) as db:
+            person = Person(id="observation-correction-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="observation-correction-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.execute(text("""
+                INSERT INTO evidence (id, person_id)
+                VALUES ('observation-correction-evidence', :person_id)
+            """), {"person_id": person.id})
+            original = EvidenceObservation(
+                id="observation-original",
+                person_id=person.id,
+                evidence_id="observation-correction-evidence",
+                observation_kind="caregiver_report",
+                epistemic_status="reported",
+                subject_label="Care recipient",
+                attribute="falls",
+                value_text="One fall was reported.",
+                source_passage="I saw one fall yesterday.",
+                source_span_start=0,
+                source_span_end=23,
+                extraction_method="caregiver_report",
+                extraction_version="1",
+                created_by_caregiver_id=caregiver.id,
+            )
+            corrected = EvidenceObservation(
+                id="observation-corrected",
+                person_id=person.id,
+                evidence_id="observation-correction-evidence",
+                supersedes_observation_id=original.id,
+                correction_rationale="The caregiver corrected the count after checking the original note.",
+                observation_kind="caregiver_report",
+                epistemic_status="reported",
+                subject_label="Care recipient",
+                attribute="falls",
+                value_text="Two falls were reported.",
+                source_passage="I saw two falls yesterday.",
+                source_span_start=0,
+                source_span_end=24,
+                extraction_method="caregiver_correction",
+                extraction_version="1",
+                created_by_caregiver_id=caregiver.id,
+            )
+            db.add_all([original, corrected])
+            db.flush()
+            context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id, include_all_history=True,
+            )
+
+        observations = {
+            item["id"]: item
+            for item in context["sources"]["evidence_observations"]["items"]
+        }
+        assert observations["observation-original"]["information_status"] == "historical_observation"
+        assert observations["observation-original"]["superseded_by_observation_ids"] == ["observation-corrected"]
+        assert observations["observation-corrected"]["information_status"] != "historical_observation"
+        assert observations["observation-corrected"]["supersedes_observation_id"] == "observation-original"
+    finally:
+        connection.close()
+        engine.dispose()
+
+
 def test_postgres_historical_scan_includes_delayed_report_and_recording_timestamps():
     engine, connection, schema = _postgres_conversation_db()
     try:
