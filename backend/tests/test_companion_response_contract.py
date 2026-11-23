@@ -2386,9 +2386,14 @@ def test_caregiver_interaction_guidance_recognizes_sadness_fear_and_loneliness()
         assert "Do not force a care workflow" in guidance
 
 
-def test_caregiver_interaction_guidance_repairs_direct_frustration_and_anger():
+def test_caregiver_interaction_guidance_separates_general_anger_from_system_frustration():
+    general_anger = collaboration._caregiver_interaction_guidance(
+        "I'm furious that this keeps happening."
+    )
+    assert "DISTRESS RESPONSE" in general_anger
+    assert "CONTINUITY REPAIR" not in general_anger
+
     for message in (
-        "I'm furious that this keeps happening.",
         "You are useless. You keep getting this wrong.",
         "This is useless.",
     ):
