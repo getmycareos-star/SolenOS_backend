@@ -145,7 +145,10 @@ def resolve_response_length_policy(
 
 
 def count_response_words(text: str) -> int:
-    return len(re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text or "", flags=re.UNICODE))
+    # Match the frontend contract: whitespace-delimited words. Splitting on
+    # punctuation made contractions and hyphenated words count differently
+    # between server validation and caregiver-facing rendering.
+    return len((text or "").split())
 
 
 def response_exceeds_hard_maximum(text: str, policy: ResponseLengthPolicy) -> bool:
