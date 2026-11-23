@@ -1071,13 +1071,24 @@ def build_lcr_context(
         # This removes the former 250-row candidate ceiling that could hide an
         # older, more relevant event behind newer lexical matches. Non-query
         # current-care reads intentionally remain bounded recent projections.
+        # With no search or temporal filter, every candidate has the same
+        # retrieval score and SQL ordering is already the exact selection order.
+        # Use an exact database count plus an ordered page instead of transferring
+        # and materializing the entire history in Python.
+        exact_ordered_history = include_all_history and not terms and not temporal_window
         query_scan = bool(terms or temporal_window or include_all_history or source_offset > 0)
         candidate_count = 0
         ranked_items: list[tuple[int, int, dict[str, Any]]] = []
-        ranked_limit = source_offset + limit
-        scan_statement = statement if query_scan else statement.limit(limit + 1)
+        ranked_limit = limit if exact_ordered_history else source_offset + limit
+        if exact_ordered_history:
+            count_statement = statement.with_only_columns(func.count()).order_by(None).limit(None).offset(None)
+            candidate_count = int(db.execute(count_statement).scalar_one() or 0)
+            scan_statement = statement.offset(source_offset).limit(limit + 1)
+        else:
+            scan_statement = statement if query_scan else statement.limit(limit + 1)
         source_query_failed = False
         expanded_only = [term for term in terms if term not in direct_terms]
+        rows_seen = 0
         try:
             # Isolate each source query in a savepoint. A missing table, bad
             # source-specific column, or transient query failure must not turn
@@ -1087,7 +1098,9 @@ def build_lcr_context(
                     scan_statement.execution_options(stream_results=True)
                 ).mappings().yield_per(500)
                 for row in result:
-                    candidate_count += 1
+                    rows_seen += 1
+                    if not exact_ordered_history:
+                        candidate_count += 1
                     if not query_scan and candidate_count > limit:
                         continue
                     item = {key: _safe_value(value, key) for key, value in dict(row).items()}
@@ -1112,9 +1125,11 @@ def build_lcr_context(
             source_query_failed = True
 
         ranked_items.sort(key=lambda entry: (entry[0], -entry[1]), reverse=True)
-        items = [
-            entry[2] for entry in ranked_items[source_offset:source_offset + limit]
-        ]
+        items = (
+            [entry[2] for entry in ranked_items[:limit]]
+            if exact_ordered_history
+            else [entry[2] for entry in ranked_items[source_offset:source_offset + limit]]
+        )
         if source_query_failed:
             sources[source_name] = {
                 "status": "partial" if items else "failed",
@@ -1151,6 +1166,7 @@ def build_lcr_context(
             "next_offset": next_offset,
             "selection": (
                 "full_history_ranked_page" if include_all_history and direct_terms else
+                "full_history_exact_count_ordered_page" if exact_ordered_history else
                 "ranked_query_matches_page" if query_scan and direct_terms else
                 "complete_temporal_window_page" if temporal_window else
                 "recent_records_page"
