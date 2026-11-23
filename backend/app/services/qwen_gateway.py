@@ -193,10 +193,10 @@ def qwen_chat(
     failure_category = None
     failure_reason = None
     # Ollama can expose /api/tags before its lazily-started llama-server has
-    # finished loading the model. During that narrow cold-start window, the
-    # local API may reset or refuse the first connection. Retry only those
-    # connection-establishment failures; do not retry model HTTP errors or
-    # inference timeouts, and never mark a failed attempt as a saved care fact.
+    # finished loading the model. Retry bounded connection-establishment
+    # failures during that cold-start window, plus one short retry for transient
+    # overload/server HTTP responses. Do not retry missing-model/request errors
+    # or inference timeouts, and never treat a failed attempt as a saved care fact.
     try:
         retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", str(timeout or configured_timeout))), 180.0))
     except (TypeError, ValueError):
