@@ -369,3 +369,18 @@ def test_legacy_saved_event_time_remains_available_when_provenance_is_not_server
     )
 
     assert delta_engine._event_time_for_reconciliation(None, source_event) == persisted_event_time
+
+
+def test_unknown_event_time_uses_persisted_recording_time_only_for_processing():
+    recorded_at = datetime(2026, 11, 23, 12, 5, tzinfo=timezone.utc)
+    source_event = SimpleNamespace(recorded_at=recorded_at, time_provenance="server_recorded_at")
+
+    assert delta_engine._reconciliation_reference_time(None, source_event) == recorded_at
+
+
+def test_explicit_event_time_precedes_recording_time_for_reconciliation():
+    event_time = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc)
+    recorded_at = datetime(2026, 11, 23, 12, 5, tzinfo=timezone.utc)
+    source_event = SimpleNamespace(recorded_at=recorded_at)
+
+    assert delta_engine._reconciliation_reference_time(event_time, source_event) == event_time
