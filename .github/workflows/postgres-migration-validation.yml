@@ -231,7 +231,8 @@ jobs:
           # Exercise the new index-reconciliation downgrade only after proving
           # it creates migration-owned indexes when legacy single-column
           # indexes are absent. Keep unrelated composite indexes untouched.
-          psql "$PSQL_URL" -v ON_ERROR_STOP=1 -d solenos_review_migration_roundtrip -c \
+          ROUNDTRIP_PSQL_URL="${PSQL_URL%/solenos_test}/solenos_review_migration_roundtrip"
+          psql "$ROUNDTRIP_PSQL_URL" -v ON_ERROR_STOP=1 -c \
             "DROP INDEX IF EXISTS ix_evidence_observations_evidence_id; DROP INDEX IF EXISTS ix_evidence_observations_person_id"
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic stamp 20261122_01_qwen_job_event_update_guard
           DATABASE_URL="$ROUNDTRIP_DATABASE_URL" python -m alembic upgrade head
