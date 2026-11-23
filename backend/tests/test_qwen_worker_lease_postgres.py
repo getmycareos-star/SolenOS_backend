@@ -19,6 +19,7 @@ from app.core.database import SessionLocal
 from app.main import app
 from app.models.care import Caregiver, Person
 from app.models.capture_analysis import CaptureAnalysis
+from app.models.care_continuity import CareStateRevision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput
 from app.services import qwen_background_worker as worker
 
@@ -156,6 +157,7 @@ def test_postgres_lease_compare_and_swap_rejects_a_reclaimed_job(monkeypatch):
             db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
             db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
 
@@ -221,6 +223,7 @@ def test_postgres_document_worker_does_not_block_cancellation_during_ocr(monkeyp
             db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
             db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
 
@@ -293,6 +296,7 @@ def test_postgres_worker_discards_assistant_result_after_lease_reclaim(monkeypat
             db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
             db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
 
@@ -364,6 +368,7 @@ def test_postgres_worker_does_not_requeue_after_lease_reclaim_and_inference_erro
             db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
             db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(CareStateRevision).filter_by(person_id=person_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
 
@@ -416,7 +421,7 @@ def test_postgres_document_deletion_completes_while_extraction_is_running(monkey
             assert entered_ocr.wait(timeout=10), "extraction never reached OCR"
             deletion_future = pool.submit(
                 client.delete,
-                f"/api/v1/documents/{evidence_id}",
+                f"/api/v1/upload/{evidence_id}",
                 headers=headers,
             )
             deletion_finished_before_ocr_release = False
@@ -470,7 +475,7 @@ def test_postgres_delete_is_not_blocked_by_document_interpretation(monkeypatch):
                 client.post, f"/api/v1/documents/{evidence_id}/intelligence", headers=headers, json={}
             )
             assert entered.wait(10)
-            deletion = pool.submit(client.delete, f"/api/v1/documents/{evidence_id}", headers=headers)
+            deletion = pool.submit(client.delete, f"/api/v1/upload/{evidence_id}", headers=headers)
             completed_before_release = False
             try:
                 deleted = deletion.result(timeout=5)
