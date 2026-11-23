@@ -217,7 +217,7 @@ def test_legacy_pdf_without_page_manifest_detects_missing_source_page():
     from app.api.document_intelligence import _persisted_unprocessed_pages
 
     analysis = SimpleNamespace(
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         candidates={
             "kind": "document_extraction_v1",
             "filename": "legacy-care-plan.pdf",
@@ -237,7 +237,7 @@ def test_legacy_pdf_page_gap_blocks_interpretation_without_saved_gap_metadata():
     from app.api.document_intelligence import _require_complete_extraction
 
     analysis = SimpleNamespace(
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         extraction_status="available",
         candidates={
             "kind": "document_extraction_v1",
@@ -264,7 +264,7 @@ def test_legacy_pdf_page_gap_blocks_old_candidates_in_review_response():
     analysis = SimpleNamespace(
         id="legacy-gap-analysis",
         source_evidence_id="legacy-gap-evidence",
-        source_text="[Page 1 OCR]\\nFirst page text.\\n[Page 3 OCR]\\nThird page text.",
+        source_text="[Page 1 OCR]\nFirst page text.\n[Page 3 OCR]\nThird page text.",
         extraction_status="available",
         candidates={
             "kind": "document_extraction_v1",
