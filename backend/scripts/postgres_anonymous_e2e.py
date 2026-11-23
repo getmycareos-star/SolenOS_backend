@@ -2375,13 +2375,23 @@ def main():
         require(status == 200 and any(
             event.get("event_type") == "response_recorded" for event in open_loop_history_after_restart
         ), f"Open Loop audit history did not persist across restart: {status}: {open_loop_history_after_restart}")
-        # Race two mutually exclusive terminal transitions. Exactly one may
-        # win; the second must observe terminal state and conflict, not overwrite it.
+        # Race two mutually exclusive terminal transitions against the same
+        # displayed version. Exactly one may win; the second must reject stale state.
+        status, pre_lifecycle_loop = request(
+            "GET", f"/api/v1/open-loops/{open_loop_id}", token=token_a,
+        )
+        require(
+            status == 200 and pre_lifecycle_loop.get("loop", {}).get("version") is not None,
+            f"Open Loop version could not be refreshed before lifecycle race: {status}: {pre_lifecycle_loop}",
+        )
+        displayed_version = pre_lifecycle_loop["loop"]["version"]
         lifecycle_payloads = [
             ("POST", f"/api/v1/open-loops/{open_loop_id}/close",
-             {"text": "CI-only closure", "evidence": [{"kind": "ci_fixture", "text": "closure race"}]}),
+             {"expected_version": displayed_version, "text": "CI-only closure",
+              "evidence": [{"kind": "ci_fixture", "text": "closure race"}]}),
             ("POST", f"/api/v1/open-loops/{open_loop_id}/cancel",
-             {"text": "CI-only cancellation", "evidence": [{"kind": "ci_fixture", "text": "cancellation race"}]}),
+             {"expected_version": displayed_version, "text": "CI-only cancellation",
+              "evidence": [{"kind": "ci_fixture", "text": "cancellation race"}]}),
         ]
         def apply_lifecycle(item):
             method, path, body = item
@@ -2395,7 +2405,9 @@ def main():
                 f"Open Loop did not persist a valid terminal state after lifecycle race: {status}: {terminal_loop}")
         status, reopened_loop = request(
             "POST", f"/api/v1/open-loops/{open_loop_id}/reopen", token=token_a,
-            body={"text": "CI-only reopening after conflict test", "evidence": [{"kind": "ci_fixture", "text": "reopen"}]},
+            body={"expected_version": terminal_loop["loop"]["version"],
+                  "text": "CI-only reopening after conflict test",
+                  "evidence": [{"kind": "ci_fixture", "text": "reopen"}]},
         )
         require(status == 200 and reopened_loop.get("status") == "open",
                 f"Open Loop could not be reopened after terminal race: {status}: {reopened_loop}")
