@@ -920,6 +920,24 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
+        # A review rendered before the caregiver correction must not be
+        # accepted after the candidate enters corrected_pending_approval.
+        stale_review_state = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": caregiver_label,
+                "expected_observation": quote_correct,
+                "expected_review_status": "pending_review",
+            },
+        )
+        assert stale_review_state.status_code == 409, stale_review_state.text
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # Matching source quote and subject are insufficient if the generated
         # interpretation changed after the caregiver rendered the candidate.
         stale_observation = client.post(
