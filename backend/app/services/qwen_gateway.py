@@ -46,6 +46,15 @@ def get_ollama_config() -> tuple[str, str, float]:
             status_code=503,
             detail="SolenOS local Qwen is unavailable; no model response was generated.",
         )
+    if not model.casefold().startswith("qwen"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "unsupported_model",
+                "reason": "qwen_model_required",
+                "message": "SolenOS requires a Qwen model; no inference was attempted.",
+            },
+        )
     parsed = urlparse(base)
     host = (parsed.hostname or "").casefold()
     if parsed.scheme != "http" or not host:
