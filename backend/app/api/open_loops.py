@@ -98,6 +98,9 @@ class LoopUpdate(BaseModel):
     deferred_reason: Optional[str] = Field(default=None, max_length=4000)
     review_at: Optional[datetime] = None
     status: Optional[str] = None
+    # Required for caregiver decisions that change a saved follow-up's lifecycle.
+    # This is an optimistic-concurrency check against the version the caregiver saw.
+    expected_version: Optional[int] = Field(default=None, ge=1)
     reason: Optional[str] = Field(default=None, max_length=4000)
     evidence: list[dict[str, Any]] = Field(default_factory=list, max_length=100)
     idempotency_key: Optional[str] = Field(default=None, max_length=160)
@@ -748,6 +751,17 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.status == "deferred":
+        if payload.expected_version is None:
+            raise HTTPException(
+                status_code=409,
+                detail="A saved version is required before deferring this follow-up. Refresh and review it first.",
+            )
+        if payload.expected_version != loop.version:
+            raise HTTPException(
+                status_code=409,
+                detail="This follow-up changed after it was shown. Refresh and review the latest details.",
+            )
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
     evidence = changes.pop("evidence", [])
