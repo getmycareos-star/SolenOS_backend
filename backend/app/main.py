@@ -1628,7 +1628,7 @@ async def generate_lcr_orientation(
         + orientation_positioning
         + f"RESPONSE LENGTH CONTRACT: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. Preserve evidence, uncertainty, conflicts, and missing-source limits. "
         + ("For a greeting, use no feature list, no generic 'How can I help?', no repeated welcome, and no follow-up question unless it invites a useful care update. " if is_greeting else "Answer the actual question first. ")
-        "Use accessible, natural American English unless the caregiver writes in another language. Be attentive and specific, not sentimental or robotic. "
+        + "Use accessible, natural American English unless the caregiver writes in another language. Be attentive and specific, not sentimental or robotic. "
         "Do not argue, shame, demand an apology, or claim human feelings when responding to frustration. If the caregiver identifies an error, acknowledge it plainly and focus on correction. "
         "Do not diagnose, prescribe, or advise medication changes. Distinguish recorded facts from uncertainty. "
         "This response is read-only and must not write to the care record or conversation history.\n\n"
