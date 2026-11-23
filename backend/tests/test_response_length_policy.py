@@ -136,3 +136,9 @@ def test_explicit_appointment_preparation_phrase_uses_longer_briefing_contract()
     policy = resolve_response_length_policy("Please create an appointment preparation summary.")
     assert policy.intent == "appointment_preparation"
     assert (policy.target_words, policy.max_words) == (150, 250)
+
+
+def test_questions_for_the_doctor_use_appointment_preparation_contract():
+    policy = resolve_response_length_policy("What questions should I bring for the doctor?")
+    assert policy.intent == "appointment_preparation"
+    assert (policy.target_words, policy.max_words) == (150, 250)
