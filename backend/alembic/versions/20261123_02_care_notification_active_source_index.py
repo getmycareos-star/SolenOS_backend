@@ -9,6 +9,8 @@ ordinary lookup indexes but omitted this write-integrity constraint.
 Existing duplicate rows are reported and preserved; the migration never
 chooses a notification to delete or merge.
 """
+import re
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
@@ -24,25 +26,82 @@ COLUMNS = ("person_id", "caregiver_id", "category", "source_event_id")
 PREDICATE = "status = 'active' AND category IN ('care_change', 'care_attention') AND source_event_id IS NOT NULL"
 
 
+def _strip_outer_parentheses(value: str) -> str:
+    value = value.strip()
+    while value.startswith("(") and value.endswith(")"):
+        depth = 0
+        in_string = False
+        encloses_all = True
+        position = 0
+        while position < len(value):
+            character = value[position]
+            if character == "'":
+                if in_string and position + 1 < len(value) and value[position + 1] == "'":
+                    position += 2
+                    continue
+                in_string = not in_string
+            elif not in_string and character == "(":
+                depth += 1
+            elif not in_string and character == ")":
+                depth -= 1
+                if depth == 0 and position != len(value) - 1:
+                    encloses_all = False
+                    break
+            position += 1
+        if not encloses_all or depth != 0 or in_string:
+            break
+        value = value[1:-1].strip()
+    return value
+
+
+def _split_top_level_and(value: str) -> list[str]:
+    clauses: list[str] = []
+    depth = 0
+    in_string = False
+    start = 0
+    position = 0
+    while position < len(value):
+        character = value[position]
+        if character == "'":
+            if in_string and position + 1 < len(value) and value[position + 1] == "'":
+                position += 2
+                continue
+            in_string = not in_string
+        elif not in_string and character == "(":
+            depth += 1
+        elif not in_string and character == ")":
+            depth -= 1
+        elif not in_string and depth == 0 and value[position:position + 5] == " and ":
+            clauses.append(value[start:position].strip())
+            position += 5
+            start = position
+            continue
+        position += 1
+    clauses.append(value[start:].strip())
+    return [clause for clause in clauses if clause]
+
+
 def _normalize_predicate(value):
     if value is None:
         return None
-    normalized = " ".join(str(value).strip().split())
-    while normalized.startswith("(") and normalized.endswith(")"):
-        depth = 0
-        encloses_all = True
-        for position, character in enumerate(normalized):
-            if character == "(":
-                depth += 1
-            elif character == ")":
-                depth -= 1
-                if depth == 0 and position != len(normalized) - 1:
-                    encloses_all = False
-                    break
-        if not encloses_all or depth != 0:
-            break
-        normalized = normalized[1:-1].strip()
-    return normalized or None
+    expression = " ".join(str(value).strip().split()).casefold().replace('"', "")
+    # PostgreSQL adds explicit casts when rendering text and enum predicates.
+    expression = re.sub(r"::(?:[a-z_][a-z0-9_]*)(?:\[\])?", "", expression)
+    expression = _strip_outer_parentheses(expression)
+    clauses = []
+    for clause in _split_top_level_and(expression):
+        clause = _strip_outer_parentheses(clause)
+        # PostgreSQL can render IN (...) as = ANY (ARRAY[...]).
+        clause = re.sub(
+            r"=\s*any\s*\(\s*array\s*\[(.*?)\]\s*\)",
+            lambda match: "IN (" + match.group(1) + ")",
+            clause,
+        )
+        clause = re.sub(r"\(\s*([a-z_][a-z0-9_]*)\s*\)", r"\1", clause)
+        clause = re.sub(r"\s*=\s*", " = ", clause)
+        clause = re.sub(r"\s*,\s*", ", ", clause)
+        clauses.append(" ".join(clause.split()))
+    return " AND ".join(sorted(clauses)) or None
 
 
 def _postgres_index_is_valid(bind, index_name: str) -> bool:
