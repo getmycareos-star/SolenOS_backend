@@ -6444,7 +6444,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"why do i have to repeat|i said this already|you forgot|"
         r"this is ridiculous|you are not listening|this is useless|"
         r"you(?:'re| are) (?:useless|stupid)|you keep getting this wrong|"
-        r"this keeps failing|i(?:'m| am) (?:furious|frustrated|fed up))\\b",
+        r"this keeps failing|i(?:'m| am) (?:furious|frustrated|fed up))\b",
         text,
     )
     overload = re.search(
@@ -6463,7 +6463,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"i can't take this|i cannot take this|i feel hopeless|"
         r"i(?:'m| am) (?:sad|lonely|scared|frightened|afraid|anxious|grieving)|"
         r"i feel (?:sad|alone|lonely|scared|frightened|afraid|anxious|helpless)|"
-        r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying)\\b",
+        r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying)\b",
         text,
     )
     correction = re.search(
