@@ -635,6 +635,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "historical_event",
                 "A caregiver correction is linked to this original event. Keep the original report and correction together as history; do not present the original wording as the current account.",
             )
+        if item.get("pending_corrections"):
+            return (
+                "event_correction_pending",
+                "A caregiver correction has been saved but has not finished processing. The original report remains in history; do not present it as the final current account until the correction is applied.",
+            )
         if item.get("correction_lineage_status") in {"unavailable_schema", "failed"}:
             return (
                 "event_currentness_unknown",
@@ -1594,16 +1599,17 @@ def build_lcr_context(
                         correction_columns = [
                             corrections_table.c[name]
                             for name in (
-                                "id", "original_text", "corrected_text", "reason",
-                                "created_at", "processing_status",
+                                "id", "target_type", "target_id", "original_text",
+                                "corrected_text", "reason", "created_at", "processing_status",
                             )
                             if name in corrections_table.c
                         ]
-                        if {"id", "person_id"}.issubset(corrections_table.c.keys()):
+                        if {"id", "person_id", "target_type", "target_id"}.issubset(corrections_table.c.keys()):
                             correction_rows = db.execute(
                                 select(*correction_columns).where(
                                     corrections_table.c.person_id == str(person_id),
-                                    corrections_table.c.id.in_(correction_ids),
+                                    corrections_table.c.target_type == "care_event",
+                                    corrections_table.c.target_id.in_(event_ids),
                                 )
                             ).mappings().all()
                             correction_rows_by_id = {
@@ -1626,12 +1632,36 @@ def build_lcr_context(
                         "linked_at": _safe_value(relationship.get("created_at"), "created_at"),
                     })
                 for item in event_items:
+                    event_id = str(item.get("id") or "")
                     item["correction_lineage_status"] = "checked"
-                    linked_corrections = corrections_by_event.get(str(item.get("id") or ""), [])
+                    linked_corrections = corrections_by_event.get(event_id, [])
                     if linked_corrections:
                         item["superseded_by_corrections"] = linked_corrections
+                    all_corrections = [
+                        correction for correction in correction_rows_by_id.values()
+                        if correction.get("target_id") == event_id
+                    ]
+                    linked_ids = {
+                        str(correction.get("id")) for correction in linked_corrections
+                    }
+                    pending_corrections = [
+                        correction for correction in all_corrections
+                        if str(correction.get("processing_status") or "").casefold() != "completed"
+                    ]
+                    if pending_corrections:
+                        item["pending_corrections"] = pending_corrections
+                    completed_without_relationship = [
+                        correction for correction in all_corrections
+                        if str(correction.get("processing_status") or "").casefold() == "completed"
+                        and str(correction.get("id")) not in linked_ids
+                    ]
+                    if completed_without_relationship:
+                        item["correction_lineage_status"] = "failed"
                     item["information_status"], item["interpretation_limit"] = _information_status("events", item)
-                sources["events"]["correction_lineage_status"] = "checked"
+                sources["events"]["correction_lineage_status"] = (
+                    "partial" if any(item.get("correction_lineage_status") == "failed" for item in event_items)
+                    else "checked"
+                )
             except SQLAlchemyError:
                 for item in event_items:
                     item["correction_lineage_status"] = "failed"
