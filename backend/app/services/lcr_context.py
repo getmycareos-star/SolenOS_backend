@@ -1060,9 +1060,11 @@ def build_lcr_context(
         })
     elif selected_ids:
         evidence_lineage["status"] = "unavailable_schema"
+    # A source that cannot be searched is not an empty source. It must
+    # reduce retrieval completeness just like a failed or partial source read.
     failed_sources = sorted(
         name for name, source in sources.items()
-        if source.get("status") in {"failed", "partial"}
+        if source.get("status") in {"failed", "partial", "unsearchable"}
     )
     failed_required_sources = sorted(
         name for name in failed_sources if SOURCE_SPECS.get(name, {}).get("required")
