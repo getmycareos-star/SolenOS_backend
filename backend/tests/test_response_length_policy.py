@@ -183,7 +183,7 @@ def test_every_response_intent_has_a_bounded_generation_budget():
         ("Hello", "returning", None, 160),
         ("Thanks", None, None, 48),
         ("When was the last visit?", None, None, 192),
-        ("Please explain what changed.", None, None, 448),
+        ("Explain what this means.", None, None, 448),
         ("Please show the full care history and timeline.", None, None, 768),
         ("Has her sleep worsened over time?", None, None, 640),
         ("What does this document mean?", None, None, 512),
