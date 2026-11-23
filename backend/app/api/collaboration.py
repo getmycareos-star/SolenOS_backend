@@ -8033,6 +8033,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             caregiver_stage="returning" if has_returning_care_history else None,
             critical_safety=emergency,
         )
+        response_token_budget = min(COMPANION_MAX_OUTPUT_TOKENS, response_length_policy.token_budget)
         model_messages[0]["content"] += (
             f"\nRESPONSE LENGTH CONTRACT: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; "
             f"hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. "
@@ -8134,7 +8135,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     companion_request_id,
                     model,
                     model_messages,
-                    {"temperature": 0.25, "num_predict": response_length_policy.token_budget},
+                    {"temperature": 0.25, "num_predict": response_token_budget},
                     retrieval_duration_ms,
                 )
                 logger.info(
@@ -8536,7 +8537,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
+                        {"temperature": 0.1, "num_predict": response_token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -8585,7 +8586,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
+                        {"temperature": 0.1, "num_predict": response_token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -8633,7 +8634,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         base,
                         model,
                         retry_messages,
-                        {"temperature": 0.1, "num_predict": response_length_policy.token_budget},
+                        {"temperature": 0.1, "num_predict": response_token_budget},
                     )
                 except Exception as exc:
                     raise HTTPException(
