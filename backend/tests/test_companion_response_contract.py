@@ -3474,3 +3474,27 @@ def test_companion_does_not_treat_acknowledgements_as_greetings():
     assert not collaboration._is_casual_greeting("Thanks")
     assert not collaboration._is_casual_greeting("Goodbye")
     assert collaboration._is_casual_greeting("Good morning")
+
+
+def test_caregiver_interaction_guidance_recognizes_standalone_emotion_and_tiredness():
+    for message, expected in (
+        ("Sad", "DISTRESS RESPONSE"),
+        ("Angry.", "DISTRESS RESPONSE"),
+        ("Frustrated", "DISTRESS RESPONSE"),
+        ("Tired", "LOW-CAPACITY RESPONSE"),
+        ("Overwhelmed", "LOW-CAPACITY RESPONSE"),
+        ("I am really tired.", "LOW-CAPACITY RESPONSE"),
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert expected in guidance, message
+
+
+def test_patient_emotional_state_does_not_trigger_caregiver_capacity_guidance():
+    for message in (
+        "Mum is overwhelmed.",
+        "Dad is exhausted.",
+        "She is frightened.",
+    ):
+        guidance = collaboration._caregiver_interaction_guidance(message)
+        assert "LOW-CAPACITY RESPONSE" not in guidance, message
+        assert "DISTRESS RESPONSE" not in guidance, message
