@@ -169,6 +169,47 @@ def test_worker_discards_result_when_caregiver_access_is_revoked_during_inferenc
     db.close()
 
 
+def test_worker_does_not_persist_assistant_output_after_lease_is_reclaimed(tmp_path, monkeypatch):
+    sessions = _isolated_job_store(tmp_path, monkeypatch)
+    job_id = _seed_job(sessions)
+
+    async def classify(*args, **kwargs):
+        return "appointment"
+
+    async def reclaim_during_inference(payload, request, inference_db):
+        # Simulate a second worker claiming the same job while this worker is
+        # waiting on the model. The status and caregiver identity remain valid;
+        # only the lease timestamp distinguishes the new owner.
+        newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
+        other_worker_db = sessions()
+        current = other_worker_db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+        current.status = "processing"
+        current.locked_at = newer_lock
+        other_worker_db.commit()
+        other_worker_db.close()
+        return {
+            "workflow": "appointment",
+            "reply": "This answer belongs to the stale worker.",
+            "ai_generated": True,
+            "provider_status": "available",
+            "model": "qwen3.5:4b",
+        }
+
+    monkeypatch.setattr(worker, "_classify_task", classify)
+    from app.api import collaboration
+    monkeypatch.setattr(collaboration, "qwen_support_assist", reclaim_during_inference)
+
+    assert asyncio.run(worker.process_one_qwen_job()) is True
+
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    assert job.status == "processing"
+    assert job.locked_at is not None
+    assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    assert db.query(QwenJobEvent).filter_by(job_id=job_id, event_type="job_completed").count() == 0
+    db.close()
+
+
 @pytest.mark.parametrize(("expected", "task"), [
     ("daily_capture", "I want to record today's observation."),
     ("add_record", "Help draft a care record correction; the date is missing."),
