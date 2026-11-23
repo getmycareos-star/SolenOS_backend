@@ -6599,10 +6599,11 @@ def _emergency_response_for_message(user_text: str) -> tuple[str, str]:
     """Return immediate, plain-language guidance for deterministic safety routing."""
     if is_self_harm_safety_message(user_text):
         return (
-            "I'm concerned about immediate safety. If you or someone else may act on these thoughts, call 911 now "
-            "or go to the nearest emergency department. In the U.S., call or text 988 for immediate suicide and "
-            "crisis support. If you are outside the U.S., contact your local emergency or crisis service. If possible, "
-            "stay with a trusted person while getting help. I can't provide emergency help through chat.",
+            "I'm concerned about immediate safety. If you or someone else may act on these thoughts, get human "
+            "help now. If anyone is in immediate danger, call your local emergency number or go to the nearest "
+            "emergency department. In the U.S., call 911 for immediate danger and call or text 988 for suicide and "
+            "crisis support. Outside the U.S., contact your local crisis service. If possible, stay with a trusted "
+            "person while getting help. I can't provide emergency help through chat.",
             "Possible self-harm, suicide, or immediate harm risk was detected; human support is needed now.",
         )
     return (
