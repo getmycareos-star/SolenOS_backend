@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, func, inspect, or_, text
+from sqlalchemy import and_, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -9267,7 +9267,7 @@ def update_care_notification_preferences(
         payload.quiet_hours_enabled, payload.quiet_hours_start,
         payload.quiet_hours_end, payload.timezone_name,
     )):
-        pending_notification_ids = db.query(CareNotification.id).filter(
+        pending_notification_ids = select(CareNotification.id).where(
             CareNotification.person_id == person_id,
             CareNotification.caregiver_id == caregiver_id,
             *(
@@ -9275,7 +9275,7 @@ def update_care_notification_preferences(
                 if payload.reminders_enabled is False
                 else []
             ),
-        ).subquery()
+        )
         pending_pushes = db.query(CarePushDelivery).filter(
             CarePushDelivery.notification_id.in_(pending_notification_ids),
             CarePushDelivery.status == "pending",
