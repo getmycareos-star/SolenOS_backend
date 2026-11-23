@@ -1096,6 +1096,7 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
             captured["base"] = base
             captured["model"] = model
             captured["messages"] = messages
+            captured["options"] = options
             return "Welcome back to SolenOS. Your care record notes poor sleep last night; what has changed today?"
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
 
@@ -1117,6 +1118,8 @@ def test_lcr_orientation_is_qwen_generated_read_only_and_record_grounded(monkeyp
         assert "Caregiver orientation stage (derived from returned care-domain rows): returning." in prompt
         assert "RESPONSE LENGTH CONTRACT" in prompt
         assert "target 30 words; hard maximum 55" in prompt
+        assert captured["options"]["num_predict"] == 160
+        assert len(body["reply"].split()) <= 55
         assert "RETURNING CARE RECORD" in prompt
         after_count = TestingSessionLocal().query(CareEvent).filter_by(person_id=person_id).count()
         assert after_count == before_count
@@ -1209,6 +1212,7 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
 
         def fake_qwen(base, model, messages, options=None):
             captured["messages"] = messages
+            captured["options"] = options
             return "Welcome. SolenOS helps keep your loved one's care story together; start with whatever is happening today."
 
         monkeypatch.setattr(main_module, "_ollama_chat", fake_qwen)
@@ -1218,6 +1222,9 @@ def test_lcr_orientation_identifies_new_caregiver_without_fabricating_continuity
         assert "Caregiver orientation stage (derived from returned care-domain rows): new." in prompt
         assert "NEW CARE RECORD" in prompt
         assert "rough fragments are acceptable" in prompt
+        assert "target 25 words; hard maximum 40" in prompt
+        assert captured["options"]["num_predict"] == 112
+        assert len(response.json()["reply"].split()) <= 40
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown_db()
