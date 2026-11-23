@@ -1335,12 +1335,18 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
             if not isinstance(evidence_ids, list) or not evidence_ids or len(evidence_ids) > 10:
                 raise ValueError("document_intake_evidence_scope_invalid")
             completed = []
+            job_id = str(job.id)
+            person_id = str(job.person_id)
+            caregiver_id = str(job.caregiver_id)
             for evidence_id in evidence_ids:
                 if not isinstance(evidence_id, str) or not evidence_id.strip():
                     raise ValueError("document_intake_evidence_id_invalid")
+                # Check ownership without holding a row lock across OCR/model
+                # work. The lease heartbeat keeps the job alive; a caregiver
+                # cancellation or a new lease holder must remain able to update it.
                 current_job = db.query(QwenBackgroundJob).filter(
-                    QwenBackgroundJob.id == job.id
-                ).populate_existing().with_for_update().first()
+                    QwenBackgroundJob.id == job_id
+                ).populate_existing().first()
                 if (
                     current_job is None
                     or current_job.status == "cancelled"
@@ -1348,20 +1354,20 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 ):
                     db.rollback()
                     return True
+                db.rollback()
                 extraction, intelligence = await asyncio.to_thread(
                     _process_document_evidence,
                     evidence_id,
-                    job.person_id,
-                    job.caregiver_id,
+                    person_id,
+                    caregiver_id,
                 )
-                if lease_state and _qwen_job_lease_lost(lease_state):
+                if _qwen_job_lease_lost(lease_state):
                     db.rollback()
                     return True
-                # A caregiver may delete the source while OCR/model work is in
-                # flight. Never let this stale worker overwrite cancellation or
-                # requeue the deleted document after the processing call returns.
+                # Reacquire the job row only after OCR/model work. A caregiver
+                # may have deleted the source or cancelled the job in flight.
                 current_job = db.query(QwenBackgroundJob).filter(
-                    QwenBackgroundJob.id == job.id
+                    QwenBackgroundJob.id == job_id
                 ).populate_existing().with_for_update().first()
                 if (
                     current_job is None
@@ -1477,6 +1483,20 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                     ))
                     db.commit()
                     return True
+                # Release the post-OCR row lock before beginning the next
+                # document's potentially long-running extraction.
+                db.rollback()
+            current_job = db.query(QwenBackgroundJob).filter(
+                QwenBackgroundJob.id == job_id
+            ).populate_existing().with_for_update().first()
+            if (
+                current_job is None
+                or current_job.status == "cancelled"
+                or not _qwen_job_lease_matches(current_job, lease_state)
+            ):
+                db.rollback()
+                return True
+            job = current_job
             job.status = "completed"
             job.workflow = "document_intake"
             job.result_text = json.dumps(completed)
