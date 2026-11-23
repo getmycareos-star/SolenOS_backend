@@ -1234,6 +1234,16 @@ def build_lcr_context(
                     if not query_scan and candidate_count > limit:
                         continue
                     item = {key: _safe_value(value, key) for key, value in row_values.items()}
+                    if source_name == "assertions" and isinstance(row_values.get("source_text"), str):
+                        # A caregiver-reviewed document assertion stores the
+                        # exact accepted quotation. Do not apply the smaller
+                        # generic source-text preview cap to that provenance.
+                        original_quote = row_values["source_text"]
+                        item["source_text"] = (
+                            original_quote
+                            if len(original_quote) <= 20000
+                            else original_quote[:20000] + "… [truncated]"
+                        )
                     if source_name == "document_extractions":
                         item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
