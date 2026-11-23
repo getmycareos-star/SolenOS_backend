@@ -6627,7 +6627,9 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "Treat this as a repair request: retrieve the relevant authorized care record and prior user-provided "
             "context before responding. If the information is present, use it directly. If retrieval failed, say "
             "that access failed; if the information is absent, say only that it is not present in the available "
-            "record. Never claim the problem is fixed unless the relevant retrieval or action actually succeeded."
+            "record. Never claim the problem is fixed unless the relevant retrieval or action actually succeeded. "
+            "If the caregiver also asked to stop or pause, the pause request takes precedence: do not continue the "
+            "retrieval workflow or ask for more details."
         )
     if overload or standalone_overload or unable_to_continue:
         guidance.append(
