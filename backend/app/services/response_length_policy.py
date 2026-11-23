@@ -67,6 +67,10 @@ _CAREGIVER_FIRST_PERSON_DISTRESS = re.compile(
     r"been crying|can't stop crying|feel like crying)\b",
     re.I,
 )
+_CAREGIVER_SHARED_DISTRESS = re.compile(
+    r"\b(?:i(?:'m| am) (?:too|also|as well)|i feel the same|me too|same here)\b",
+    re.I,
+)
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
@@ -143,7 +147,10 @@ def resolve_response_length_policy(
         return _POLICIES["critical_safety"]
     emotional_report = bool(_EMOTIONAL.search(value))
     patient_emotional_report = bool(_PATIENT_EMOTIONAL_REPORT.search(value))
-    caregiver_first_person_distress = bool(_CAREGIVER_FIRST_PERSON_DISTRESS.search(value))
+    caregiver_first_person_distress = bool(
+        _CAREGIVER_FIRST_PERSON_DISTRESS.search(value)
+        or (patient_emotional_report and _CAREGIVER_SHARED_DISTRESS.search(value))
+    )
     if emotional_report and (not patient_emotional_report or caregiver_first_person_distress):
         return _POLICIES["low_capacity_support"]
 
