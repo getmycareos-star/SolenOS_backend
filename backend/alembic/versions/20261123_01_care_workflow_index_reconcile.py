@@ -82,7 +82,13 @@ def _create_missing_index(bind, table_name: str, column_name: str) -> str | None
         index_name = f"{base_name}_{suffix}"
         suffix += 1
 
-    op.create_index(index_name, table_name, [column_name], unique=False)
+    if bind.dialect.name == "postgresql":
+        op.create_index(
+            index_name, table_name, [column_name], unique=False,
+            postgresql_concurrently=True,
+        )
+    else:
+        op.create_index(index_name, table_name, [column_name], unique=False)
     if not _has_required_index(bind, table_name, column_name):
         raise RuntimeError(f"Index verification failed for {table_name}.{column_name}")
     return index_name
@@ -90,9 +96,20 @@ def _create_missing_index(bind, table_name: str, column_name: str) -> str | None
 
 def upgrade() -> None:
     bind = op.get_bind()
-    for table_name, columns in INDEXES.items():
-        for column_name in columns:
-            _create_missing_index(bind, table_name, column_name)
+
+    def apply_indexes() -> None:
+        for table_name, columns in INDEXES.items():
+            for column_name in columns:
+                _create_missing_index(bind, table_name, column_name)
+
+    if bind.dialect.name == "postgresql":
+        # CREATE INDEX CONCURRENTLY avoids holding write-blocking table locks.
+        # Alembic commits before entering this block; if a retry is needed,
+        # existing indexes are detected and skipped before the revision is stamped.
+        with op.get_context().autocommit_block():
+            apply_indexes()
+    else:
+        apply_indexes()
 
 
 def downgrade() -> None:
