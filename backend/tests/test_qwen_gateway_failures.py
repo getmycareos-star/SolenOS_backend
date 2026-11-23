@@ -121,6 +121,31 @@ def test_qwen_gateway_rejects_malformed_response_json(monkeypatch):
     assert error.value.detail["code"] == "invalid_upstream_response"
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"[]",
+        b'{"message": null}',
+        b'{"message": "not-an-object"}',
+        b'{"unexpected": "response-shape"}',
+    ],
+)
+def test_qwen_gateway_rejects_valid_json_with_unexpected_response_shape(monkeypatch, payload):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(payload),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "invalid_upstream_response"
+    assert error.value.detail["reason"] == "unexpected_response_shape"
+
+
 def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
     configure_gateway(monkeypatch)
     monkeypatch.setattr(

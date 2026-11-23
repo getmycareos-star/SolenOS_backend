@@ -283,7 +283,17 @@ def qwen_chat(
         failure_category, failure_reason = "runtime_error", type(exc).__name__
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
-    content = result.get("message", {}).get("content")
+    # Treat a syntactically valid JSON response with an unexpected shape as
+    # an upstream protocol failure. Calling .get() on a list, null, or scalar
+    # here would otherwise escape as an unhandled AttributeError and surface
+    # as a generic 500 to the caregiver.
+    message = result.get("message") if isinstance(result, dict) else None
+    if not isinstance(message, dict):
+        _mark_inference_unverified(model)
+        failure_category, failure_reason = "invalid_upstream_response", "unexpected_response_shape"
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         _mark_inference_unverified(model)
         failure_category, failure_reason = "empty_model_response", "missing_message_content"
