@@ -6656,7 +6656,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"what will happen)|i(?:'m| am) scared (?:right now|something is happening)|"
         r"i don't know what to expect|i do not know what to expect|"
         r"i don't know if this is normal|i do not know if this is normal|"
-        r"i'm not sure (?:what to do|whether this is safe)|i am not sure (?:what to do|whether this is safe)|"
+        r"i'm not sure (?:what to do|whether this is safe|whether (?:this|the medication|the medicine) is safe)|i am not sure (?:what to do|whether this is safe|whether (?:this|the medication|the medicine) is safe)|"
         r"i'm worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i am worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i can't tell if (?:this is getting worse|something is wrong)|"
@@ -6664,7 +6664,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         text,
     )
     loneliness = re.search(
-        r"\b(?:i feel (?:so )?(?:alone|lonely|isolated)|i have nobody to talk to|"
+        r"\b(?:i feel (?:(?:so |very |really |completely )?)(?:alone|lonely|isolated)|i have nobody to talk to|"
         r"there is nobody i can talk to|no one understands what this is like|"
         r"i have no one helping me)\b",
         text,
