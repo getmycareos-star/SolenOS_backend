@@ -785,9 +785,17 @@ def main():
         )
         require(status == 200 and workflow_corroborated.get("outcome_status") == "outcome_verified",
                 f"Full workflow independent corroboration failed: {status}: {workflow_corroborated}")
+        status, current_workflow_loop = request(
+            "GET", f"/api/v1/open-loops/{workflow_loop_id}", token=token_a,
+        )
+        require(
+            status == 200 and current_workflow_loop.get("loop", {}).get("version") is not None,
+            f"Full workflow loop version could not be refreshed before closure: {status}: {current_workflow_loop}",
+        )
         status, workflow_closed = request(
             "POST", f"/api/v1/open-loops/{workflow_loop_id}/close", token=token_a,
-            body={"text": "Synthetic closure after recorded verification",
+            body={"expected_version": current_workflow_loop["loop"]["version"],
+                  "text": "Synthetic closure after recorded verification",
                   "evidence": workflow_source,
                   "idempotency_key": "postgres-open-loop-full-close-001"},
         )
@@ -871,9 +879,17 @@ def main():
         )
         require(status == 201, f"Contradiction loop creation failed: {status}: {contradiction_loop}")
         contradiction_id = contradiction_loop["id"]
+        status, contradiction_before_close = request(
+            "GET", f"/api/v1/open-loops/{contradiction_id}", token=token_a,
+        )
+        require(
+            status == 200 and contradiction_before_close.get("loop", {}).get("version") is not None,
+            f"Contradiction loop version could not be refreshed before premature-close check: {status}: {contradiction_before_close}",
+        )
         status, premature_close = request(
             "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
-            body={"text": "Premature close attempt", "evidence": workflow_source},
+            body={"expected_version": contradiction_before_close["loop"]["version"],
+                  "text": "Premature close attempt", "evidence": workflow_source},
         )
         require(status == 409, f"Unreconciled contradiction must not close: {status}: {premature_close}")
         status, reconciliation = request(
@@ -912,9 +928,17 @@ def main():
         )
         require(status == 200 and contradiction_corroborated.get("outcome_status") == "outcome_verified",
                 f"Contradiction independent corroboration failed: {status}: {contradiction_corroborated}")
+        status, reconciled_contradiction = request(
+            "GET", f"/api/v1/open-loops/{contradiction_id}", token=token_a,
+        )
+        require(
+            status == 200 and reconciled_contradiction.get("loop", {}).get("version") is not None,
+            f"Reconciled contradiction version could not be refreshed before closure: {status}: {reconciled_contradiction}",
+        )
         status, contradiction_closed = request(
             "POST", f"/api/v1/open-loops/{contradiction_id}/close", token=token_a,
-            body={"text": "Synthetic closure after reconciliation and verification",
+            body={"expected_version": reconciled_contradiction["loop"]["version"],
+                  "text": "Synthetic closure after reconciliation and verification",
                   "evidence": workflow_source,
                   "idempotency_key": "postgres-open-loop-reconciliation-close-001"},
         )
