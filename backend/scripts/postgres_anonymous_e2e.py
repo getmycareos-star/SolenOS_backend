@@ -1562,6 +1562,8 @@ def main():
                 "expected_source_quote": daily_capture_payload["notes"],
                 "expected_subject": "sleep",
                 "expected_observation": "Generated suggestion: interrupted sleep.",
+                "expected_corrected_subject": "sleep",
+                "expected_corrected_observation": "Caregiver corrected the report: sleep was interrupted twice overnight.",
             },
         )
         require(status == 200
@@ -1580,6 +1582,8 @@ def main():
                 "expected_source_quote": daily_capture_payload["notes"],
                 "expected_subject": "sleep",
                 "expected_observation": "Generated suggestion: interrupted sleep.",
+                "expected_corrected_subject": "sleep",
+                "expected_corrected_observation": "Caregiver corrected the report: sleep was interrupted twice overnight.",
             },
         )
         require(status == 409, f"Repeated acceptance must not create a duplicate assertion: {status}: {repeated_acceptance}")
