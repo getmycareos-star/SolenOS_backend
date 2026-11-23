@@ -1595,3 +1595,27 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_explicit_multi_year_day_week_and_month_windows_are_not_truncated():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    days = _temporal_window("What changed in the last 800 days?", now=now)
+    weeks = _temporal_window("What changed in the past 104 weeks?", now=now)
+    months = _temporal_window("What changed in the last 24 months?", now=now)
+
+    assert days is not None and days["start"] == "2024-09-07T00:00:00+00:00"
+    assert weeks is not None and weeks["start"] == "2024-11-17T00:00:00+00:00"
+    assert months is not None and months["start"] == "2024-11-15T00:00:00+00:00"
+    assert days["basis"] == weeks["basis"] == months["basis"] == "explicit_user_temporal_expression"
+
+
+def test_explicit_temporal_windows_reject_ranges_beyond_supported_bounds():
+    now = datetime(2026, 11, 15, 12, tzinfo=UTC)
+
+    with pytest.raises(ValueError, match="between one day and twenty years"):
+        _temporal_window("Show the last 7301 days", now=now)
+    with pytest.raises(ValueError, match="between one week and twenty years"):
+        _temporal_window("Show the last 1041 weeks", now=now)
+    with pytest.raises(ValueError, match="between one month and twenty years"):
+        _temporal_window("Show the last 241 months", now=now)
