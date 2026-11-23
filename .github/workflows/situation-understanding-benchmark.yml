@@ -95,7 +95,6 @@ jobs:
     env:
       SOLENOS_BENCHMARK_DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
       DATABASE_URL: postgresql+psycopg2://solenos_benchmark:solenos_benchmark_ci@localhost:5432/solenos_benchmark
-      POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -145,6 +144,8 @@ jobs:
       - name: Verify persisted care history survives PostgreSQL server restart
         id: postgres_restart
         if: steps.postgres_benchmark.outcome == 'success'
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
         run: |
           python - <<'PY'
           import os
