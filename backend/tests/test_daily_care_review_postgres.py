@@ -127,6 +127,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
                 analysis_id,
                 CaptureCandidateReview(
                     candidate_index=0, decision="correct",
+                    expected_source_quote=original_text, expected_subject="sleep",
                     corrected_observation=corrected_observation,
                 ),
                 _request(person_id, caregiver_id),
@@ -140,7 +141,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
 
             accepted = review_capture_candidate(
                 analysis_id,
-                CaptureCandidateReview(candidate_index=0, decision="accept"),
+                CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
                 _request(person_id, caregiver_id),
                 db,
             )
@@ -160,7 +161,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=0, decision="accept"),
+                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
                     _request(person_id, caregiver_id),
                     db,
                 )
@@ -170,7 +171,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
 
             rejected = review_capture_candidate(
                 analysis_id,
-                CaptureCandidateReview(candidate_index=1, decision="reject"),
+                CaptureCandidateReview(candidate_index=1, decision="reject", expected_source_quote=original_text, expected_subject="mood"),
                 _request(person_id, caregiver_id),
                 db,
             )
@@ -182,7 +183,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=1, decision="accept"),
+                    CaptureCandidateReview(candidate_index=1, decision="accept", expected_source_quote=original_text, expected_subject="mood"),
                     _request(person_id, caregiver_id),
                     db,
                 )
@@ -279,7 +280,7 @@ def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monke
             try:
                 review_capture_candidate(
                     analysis_id,
-                    CaptureCandidateReview(candidate_index=0, decision="accept"),
+                    CaptureCandidateReview(candidate_index=0, decision="accept", expected_source_quote=original_text, expected_subject="sleep"),
                     _request(other_person_id, other_caregiver_id),
                     db,
                 )
