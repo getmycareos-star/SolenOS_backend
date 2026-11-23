@@ -395,7 +395,7 @@ def test_postgres_companion_direct_event_context_marks_withdrawn_events_as_histo
             client,
             session,
             "Please help me understand the care information saved for her.",
-            "companion-withdrawn-event-context-0001",
+            "00000000-0000-4000-8000-000000000001",
         )
         assert response.status_code == 200, response.text
         prompt = "\\n".join(
