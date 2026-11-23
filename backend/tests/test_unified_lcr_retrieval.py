@@ -2462,6 +2462,25 @@ def test_corrected_care_event_remains_historical_and_links_original_wording():
                 provenance="Caregiver correction; original event retained unchanged.",
                 created_by_caregiver_id=caregiver.id,
             ))
+            pending_event = CareEvent(
+                id="event-with-pending-correction", person_id=person.id,
+                event_type="daily_observation", status="recorded",
+                occurred_at=datetime(2025, 3, 5, 9, 0, tzinfo=UTC),
+                title="A second medication report",
+                description="The caregiver reported that the medication was given.",
+                created_by_caregiver_id=caregiver.id,
+            )
+            pending_correction = Correction(
+                id="event-correction-pending", person_id=person.id,
+                target_type="care_event", target_id=pending_event.id,
+                original_text="Medication was given.",
+                corrected_text="The caregiver did not witness it.",
+                reason="The earlier report is being corrected.",
+                caregiver_id=caregiver.id,
+                processing_status="pending",
+                processing_attempts=0,
+            )
+            db.add_all([pending_event, pending_correction])
             db.commit()
 
             context = build_lcr_context(
@@ -2482,6 +2501,12 @@ def test_corrected_care_event_remains_historical_and_links_original_wording():
         prompt = format_lcr_context_for_prompt(context)
         assert "historical_event" in prompt
         assert "Caregiver did not witness the medication being given." in prompt
+        pending_projected = next(
+            row for row in context["sources"]["events"]["items"]
+            if row["id"] == "event-with-pending-correction"
+        )
+        assert pending_projected["information_status"] == "event_correction_pending"
+        assert pending_projected["pending_corrections"][0]["id"] == "event-correction-pending"
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
