@@ -507,6 +507,15 @@ def test_worker_lease_refresh_extends_only_the_matching_processing_job(tmp_path,
         expected_locked_at=newer_lock,
         lease_state=lease_state,
     ) is False
+    # Keep the row claimable so this assertion isolates caregiver scoping,
+    # rather than relying on the terminal cancelled status.
+    db = sessions()
+    job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+    job.status = "processing"
+    job.locked_at = newer_lock
+    db.commit()
+    db.close()
+
     other_worker_state = {"locked_at": newer_lock, "lost": False, "_lock": threading.Lock()}
     assert worker._refresh_qwen_job_lease_once(
         job_id,
