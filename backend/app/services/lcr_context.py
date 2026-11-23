@@ -427,19 +427,21 @@ def _text_search_predicates(table: Table, source_name: str, terms: list[str]):
     return predicates
 
 
-def _apply_text_search_filter(statement, table: Table, source_name: str, terms: list[str], *, include_all_history: bool = False):
-    """Apply lexical search without turning an unsearchable source into a match.
+def _apply_text_search_filter(statement, table: Table, source_name: str, terms: list[str], *, include_all_history: bool = False) -> tuple[Any, bool]:
+    """Apply lexical search and report whether the source can answer that search.
 
     Older or partially migrated source tables may not expose any configured
     searchable text columns. Returning every row from such a table for a
     topic-specific question creates unrelated care context and can mislead the
-    Companion. Fail closed for that source; explicit full-history requests keep
-    their separate, intentional behaviour.
+    Companion. Fail closed and disclose the source limitation; explicit
+    full-history requests keep their separate, intentional behaviour.
     """
-    if terms and not include_all_history:
-        predicates = _text_search_predicates(table, source_name, terms)
-        statement = statement.where(or_(*predicates)) if predicates else statement.where(false())
-    return statement
+    if not terms or include_all_history:
+        return statement, True
+    predicates = _text_search_predicates(table, source_name, terms)
+    if not predicates:
+        return statement.where(false()), False
+    return statement.where(or_(*predicates)), True
 
 
 TEXT_FIELDS = {
@@ -811,10 +813,29 @@ def build_lcr_context(
             else:
                 # Undated sources cannot satisfy an explicit temporal query.
                 statement = statement.where(false())
-        statement = _apply_text_search_filter(
+        statement, source_searchable = _apply_text_search_filter(
             statement, table, source_name, terms,
             include_all_history=include_all_history,
         )
+        if terms and not include_all_history and not source_searchable:
+            sources[source_name] = {
+                "status": "unsearchable",
+                "table": table_name,
+                "items": [],
+                "returned_count": 0,
+                "candidate_count": None,
+                "candidate_scan_complete": False,
+                "returned_history_complete": False,
+                "has_more": False,
+                "limit": limit,
+                "offset": source_offset,
+                "selection": "source_has_no_searchable_fields",
+                "interpretation_limit": (
+                    "This source is present, but its available fields cannot be searched for this topic. "
+                    "No conclusion can be drawn that the source contains no matching care information."
+                ),
+            }
+            continue
         order_field = next((name for name in spec["order"] if name in table.c), None)
         if order_field:
             statement = statement.order_by(desc(table.c[order_field]))
