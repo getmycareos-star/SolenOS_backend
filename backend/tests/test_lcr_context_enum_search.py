@@ -81,3 +81,45 @@ def test_postgresql_native_enum_search_predicate_executes():
     finally:
         metadata.drop_all(engine)
         engine.dispose()
+
+
+
+def test_postgres_query_does_not_return_unsearchable_source_rows():
+    """A topic query must not receive every row from a source with no searchable fields."""
+    import os
+    import uuid
+
+    import pytest
+    from sqlalchemy import create_engine
+
+    database_url = os.environ.get("DATABASE_URL", "")
+    if database_url.startswith("postgresql+psycopg://"):
+        database_url = database_url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+    if not database_url.startswith(("postgresql://", "postgresql+psycopg2://")):
+        pytest.skip("requires a real PostgreSQL DATABASE_URL")
+
+    table_name = f"lcr_unsearchable_source_{uuid.uuid4().hex[:16]}"
+    metadata = MetaData()
+    table = Table(
+        table_name,
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("private_payload", Text),
+    )
+    engine = create_engine(database_url, pool_pre_ping=True)
+    try:
+        metadata.create_all(engine)
+        with engine.begin() as connection:
+            connection.execute(table.insert(), [
+                {"id": "unrelated-1", "person_id": "person-a", "private_payload": "unrelated care detail"},
+                {"id": "unrelated-2", "person_id": "person-a", "private_payload": "another unrelated detail"},
+            ])
+            statement = select(table.c.id).where(table.c.person_id == "person-a")
+            statement = _apply_text_search_filter(
+                statement, table, "legacy_source_without_search_fields", ["medication"]
+            )
+            assert connection.execute(statement).scalars().all() == []
+    finally:
+        metadata.drop_all(engine)
+        engine.dispose()
