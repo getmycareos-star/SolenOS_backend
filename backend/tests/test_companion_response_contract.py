@@ -1698,9 +1698,17 @@ def test_companion_temporal_question_retrieves_events_without_literal_temporal_v
         token, person_id, caregiver_id = create_session(client)
         db = TestingSessionLocal()
         now = datetime.now(timezone.utc)
+        # Place the event inside the previous calendar week in every CI
+        # timezone/day-of-week; ten days ago can fall outside that window.
+        last_week_monday = now.date() - timedelta(days=now.weekday() + 7)
+        last_week_event_at = datetime.combine(
+            last_week_monday + timedelta(days=3),
+            datetime.min.time(),
+            tzinfo=timezone.utc,
+        )
         event = CareEvent(
             person_id=person_id, event_type="daily_note", status="recorded",
-            occurred_at=now - timedelta(days=10), title="Quieter night",
+            occurred_at=last_week_event_at, title="Quieter night",
             description="Caregiver reported that Mum had a quieter night last week.",
             evidence_ids=[], created_by_caregiver_id=caregiver_id,
             time_provenance="caregiver_reported",
