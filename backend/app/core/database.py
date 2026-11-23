@@ -302,28 +302,50 @@ def database_schema_differences(bind=None):
                 + "; ".join(", ".join(columns) for columns in sorted(missing_unique_constraints))
             )
 
+        def normalize_index_predicate(value):
+            if value is None:
+                return None
+            normalized = " ".join(str(value).strip().lower().split())
+            return normalized or None
+
+        def expected_index_predicate(index):
+            dialect_options = index.dialect_options.get(target.dialect.name, {})
+            return normalize_index_predicate(dialect_options.get("where"))
+
         expected_indexes = set()
         for index in table.indexes:
             columns = tuple(
                 sorted(expression.name for expression in index.expressions if hasattr(expression, "name"))
             )
             if columns and len(columns) == len(index.expressions):
-                expected_indexes.add((columns, bool(index.unique)))
-        actual_indexes = {
-            (
-                tuple(sorted(item.get("column_names") or [])),
-                bool(item.get("unique", False)),
+                expected_indexes.add(
+                    (columns, bool(index.unique), expected_index_predicate(index))
+                )
+        actual_indexes = set()
+        for item in inspector.get_indexes(table_name):
+            columns = item.get("column_names") or []
+            if not columns:
+                continue
+            dialect_options = item.get("dialect_options") or {}
+            predicate = (
+                dialect_options.get(f"{target.dialect.name}_where")
+                or item.get("filter_definition")
             )
-            for item in inspector.get_indexes(table_name)
-            if item.get("column_names")
-        }
+            actual_indexes.add((
+                tuple(sorted(columns)),
+                bool(item.get("unique", False)),
+                normalize_index_predicate(predicate),
+            ))
         missing_indexes = expected_indexes - actual_indexes
         if missing_indexes:
             differences.append(
-                f"{table_name}: missing indexes "
+                f"{table_name}: missing indexes or index predicates "
                 + "; ".join(
-                    f"{columns} (unique={unique})"
-                    for columns, unique in sorted(missing_indexes)
+                    f"{columns} (unique={unique}, predicate={predicate or 'none'})"
+                    for columns, unique, predicate in sorted(
+                        missing_indexes,
+                        key=lambda item: (item[0], item[1], item[2] or ""),
+                    )
                 )
             )
 
