@@ -214,7 +214,7 @@ def test_qwen_workflow_contracts_select_the_expected_caregiver_detail_level():
         "document": (100, 180),
         "living_care_record": (150, 250),
         "care_situation_change": (120, 200),
-        "returning_caregiver": (30, 55),
+        "returning_caregiver": (120, 200),
         "appointment": (150, 250),
         "handoff": (150, 250),
         "reminders_notifications": (35, 60),
