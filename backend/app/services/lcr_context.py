@@ -674,6 +674,17 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "historical_observation",
                 "This structured observation was withdrawn or superseded. Keep it only as part of the source history.",
             )
+    if source_name == "corrections":
+        processing_status = str(item.get("processing_status") or "legacy_unverified").casefold()
+        correction_status = (
+            "caregiver_correction_applied" if processing_status == "completed"
+            else "caregiver_correction_processing_failed" if processing_status == "failed"
+            else "caregiver_correction_pending"
+        )
+        return (
+            correction_status,
+            "This is a caregiver-submitted correction. Preserve the original wording, corrected wording, reason, and target record together. A correction records what the caregiver is correcting; it is not independent verification of the corrected statement.",
+        )
     if source_name == "evidence_reviews":
         review_type = str(item.get("review_type") or "unknown").casefold()
         outcome = str(item.get("outcome") or "undetermined").casefold()
