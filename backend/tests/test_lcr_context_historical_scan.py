@@ -970,3 +970,55 @@ def test_companion_source_caveats_are_bounded_and_visible_in_prompt_metadata():
     assert len(caveats[-1]["authority"]) == 120
     assert len(caveats[-1]["negation_status"]) == 60
     assert "source_caveats" in metadata_line
+
+
+def test_document_extraction_metadata_detects_legacy_pdf_page_gaps():
+    from app.services.lcr_context import _document_extraction_metadata, _information_status
+
+    metadata = _document_extraction_metadata(
+        {
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+            "processed_page_numbers": [1, 3],
+            "document_intelligence": {"status": "available", "observations": []},
+        }
+    )
+
+    assert metadata["unprocessed_page_numbers"] == [2]
+    status, explanation = _information_status(
+        "document_extractions",
+        {"extraction_status": "available", "extraction_metadata": metadata},
+    )
+    assert status == "document_extraction_partial"
+    assert "Pages not yet processed: 2." in explanation
+
+
+def test_document_extraction_metadata_derives_pdf_gaps_without_processed_manifest():
+    from app.services.lcr_context import _document_extraction_metadata
+
+    metadata = _document_extraction_metadata(
+        {
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 3,
+        },
+        "[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page.",
+    )
+
+    assert metadata["unprocessed_page_numbers"] == [2]
+
+
+def test_document_extraction_metadata_does_not_invent_gaps_for_standalone_scan():
+    from app.services.lcr_context import _document_extraction_metadata
+
+    metadata = _document_extraction_metadata(
+        {
+            "filename": "scan.jpg",
+            "mime_type": "image/jpeg",
+            "page_count": 1,
+            "processed_page_numbers": [3],
+        },
+    )
+
+    assert metadata.get("unprocessed_page_numbers", []) == []
