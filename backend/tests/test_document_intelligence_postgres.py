@@ -873,6 +873,9 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             json={
                 "candidate_index": 1,
                 "decision": "correct",
+                "expected_source_quote": quote_correct,
+                "expected_subject": "Person",
+                "expected_observation": quote_correct,
                 "corrected_subject": "Person",
                 "corrected_observation": unsupported_correction,
                 "rationale": "Clarified the wording for the care record.",
@@ -891,6 +894,9 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
             json={
                 "candidate_index": 1,
                 "decision": "correct",
+                "expected_source_quote": quote_correct,
+                "expected_subject": "Person",
+                "expected_observation": quote_correct,
                 "corrected_subject": caregiver_label,
                 "corrected_observation": quote_correct,
                 "rationale": "Used a clear caregiver label while keeping the document wording unchanged.",
