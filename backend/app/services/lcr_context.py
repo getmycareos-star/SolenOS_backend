@@ -1460,6 +1460,28 @@ def build_lcr_context(
     }
 
 
+def _prompt_safe_lcr_record(value: Any) -> Any:
+    """Remove unreviewed model candidate payloads from Companion prompt records.
+
+    Original source text and allow-listed processing metadata remain available.
+    Candidate objects are review proposals, not accepted LCR information, and
+    must not be passed back to inference as if they were established context.
+    """
+    if isinstance(value, dict):
+        excluded = {
+            "candidates", "canonical_candidate", "document_candidate",
+            "document_intelligence", "source_quote",
+        }
+        return {
+            str(key): _prompt_safe_lcr_record(item)
+            for key, item in value.items()
+            if str(key) not in excluded
+        }
+    if isinstance(value, (list, tuple)):
+        return [_prompt_safe_lcr_record(item) for item in value]
+    return value
+
+
 def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
     """Serialize bounded LCR context fairly across source types.
 
@@ -1539,10 +1561,8 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             # extraction_metadata (page coverage and processing status), but
             # never send candidate payloads or their source_quote values to
             # Companion inference as if they were accepted care information.
-            prompt_record = dict(item)
-            if source_name == "document_extractions":
-                prompt_record.pop("candidates", None)
-            elif source_name == "appointment_workspaces":
+            prompt_record = _prompt_safe_lcr_record(item)
+            if source_name == "appointment_workspaces":
                 # Freshness can change the item's information_status to
                 # stale/unknown. Preserve its underlying source kind separately
                 # so the model can distinguish caregiver-authored visit notes
