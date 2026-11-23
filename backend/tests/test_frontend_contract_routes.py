@@ -2078,5 +2078,17 @@ def test_lcr_assist_anchors_the_newly_saved_event_beyond_recent_limit(monkeypatc
         assert captured
         prompt = captured[0][0]["content"]
         assert "ANCHOR_EVENT_SOURCE_TEXT: breakfast intake was lower today." in prompt
+
+        wrong_workflow = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "medication_day",
+                "source_event_id": anchor_id,
+                "text": "Check medication information.",
+            },
+        )
+        assert wrong_workflow.status_code == 422, wrong_workflow.text
+        assert len(captured) == 1, "a rejected cross-workflow event anchor must not invoke the model"
     finally:
         teardown()
