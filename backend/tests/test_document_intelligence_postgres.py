@@ -243,7 +243,7 @@ def _restart_postgres_service_container(engine):
         text=True,
     ).stdout.splitlines()
     containers = [value.strip() for value in containers if value.strip()]
-    assert len(containers) == 1, f"Expected one PostgreSQL 17 service container, found {len(containers)}"
+    assert len(containers) == 1, f"Expected one PostgreSQL 18 service container, found {len(containers)}"
     engine.dispose()
     subprocess.run(
         ["docker", "restart", containers[0]],
