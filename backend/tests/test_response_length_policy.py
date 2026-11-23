@@ -182,7 +182,7 @@ def test_every_response_intent_has_a_bounded_generation_budget():
     cases = (
         ("Hello", "new", None, 112),
         ("Hello", "returning", None, 160),
-        ("Thanks", None, None, 48),
+        ("Thanks", None, None, 64),
         ("When was the last visit?", None, None, 192),
         ("Explain what this means.", None, None, 448),
         ("Please show the full care history and timeline.", None, None, 768),
