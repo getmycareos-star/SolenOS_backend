@@ -5561,7 +5561,7 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
         return None
 
     query_tokens = [
-        token for token in re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())
+        token for token in re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)
         if token not in _DOCUMENT_ANSWER_STOPWORDS
     ]
     query_terms = {
@@ -5636,26 +5636,64 @@ def _document_extractive_answer(user_text: str, context_lines: list[str]) -> str
 
 def _document_reply_contains_source_detail(reply: str, extractive_answer: str) -> bool:
     """Require a document answer to reuse at least two meaningful source terms."""
-    source_terms = set(re.findall(r"[a-z0-9']{3,}", (extractive_answer or "").casefold()))
-    reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
+    source_terms = set(re.findall(r"[\\w']{3,}", (extractive_answer or "").casefold(), flags=re.UNICODE))
+    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     meaningful = source_terms - _DOCUMENT_ANSWER_STOPWORDS
     return len(meaningful & reply_terms) >= 3
 
 
 _CARE_HISTORY_TOPIC_GROUPS = {
-    "sleep": {"sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night"},
-    "lunch": {"lunch", "midday"},
-    "dinner": {"dinner", "supper", "evening"},
-    "breakfast": {"breakfast"},
-    "appetite": {"appetite", "ate", "eating", "food", "meal", "snack"},
-    "mobility": {"mobility", "walk", "walked", "walking", "walker", "frame", "transfer", "transfers"},
-    "mood": {"mood", "calm", "calmer", "agitated", "unsettled", "upset"},
-    "hydration": {"water", "drink", "drank", "drinking", "hydration", "fluid", "fluids"},
-    "medication": {"medication", "medicine", "dose", "tablet", "pill", "prescribed"},
+    "sleep": {
+        "sleep", "slept", "sleeping", "rest", "rested", "woke", "waking", "overnight", "night",
+        "sueño", "dormir", "durmió", "durmiendo", "despertó", "despierta", "noche", "reposo",
+        "sommeil", "dormait", "dormi", "réveillé", "réveillée", "nuit", "repos",
+    },
+    "lunch": {"lunch", "midday", "almuerzo", "comida", "déjeuner"},
+    "dinner": {"dinner", "supper", "evening", "cena", "dîner", "souper"},
+    "breakfast": {"breakfast", "desayuno", "petit-déjeuner"},
+    "appetite": {
+        "appetite", "ate", "eating", "food", "meal", "snack", "apetito", "comer", "comió",
+        "comiendo", "alimento", "alimentos", "hambre", "appétit", "manger", "mangé", "repas",
+        "nourriture", "déjeuner",
+    },
+    "mobility": {
+        "mobility", "walk", "walked", "walking", "walker", "frame", "transfer", "transfers",
+        "movilidad", "caminar", "caminó", "caminando", "andador", "mobilité", "marcher",
+        "marché", "marche", "déambulation",
+    },
+    "mood": {
+        "mood", "calm", "calmer", "agitated", "unsettled", "upset", "ánimo", "humor",
+        "tranquilo", "inquieto", "agitado", "humeur", "calme", "agité", "agitation", "contrarié",
+    },
+    "hydration": {
+        "water", "drink", "drank", "drinking", "hydration", "fluid", "fluids", "agua",
+        "beber", "bebió", "bebiendo", "líquidos", "hidratación", "eau", "boire", "hydratation",
+        "liquide",
+    },
+    "medication": {
+        "medication", "medicine", "dose", "tablet", "pill", "prescribed", "medicamento",
+        "medicación", "medicina", "dosis", "pastilla", "comprimido", "médicament", "médicaments",
+        "comprimé", "pilule", "ordonnance",
+    },
+    "falls": {
+        "fall", "fell", "fallen", "slipped", "slip", "caída", "caídas", "cayó", "resbaló",
+        "chute", "tombé", "tombée", "glissé", "glissade",
+    },
+    "pain": {
+        "pain", "hurt", "hurting", "ache", "dolor", "duele", "dolía", "dolorido",
+        "douleur", "souffrir", "mal",
+    },
 }
 _MEDICATION_DOSE_RECALL_RE = re.compile(
     r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
-    r"(?:prescribe|recommend|change|set)\b",
+    r"(?:prescribe|recommend|change|set)\b|"
+    r"\bqu[eé]\s+(?:hemos|han|he|hab[eé]is)\s+(?:registrado|anotado|guardado|apuntado)\b|"
+    r"\bqu[eé]\s+(?:dice|dijo)\s+(?:el\s+)?(?:registro|historial|expediente)\b|"
+    r"\bqu['’]est-ce\s+qu['’]on\s+a\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
+    r"\bqu['’]est-ce\s+que\s+(?:j['’]ai|nous\s+avons|vous\s+avez)\s+(?:not[eé]|enregistr[eé]|sauvegard[eé])\b|"
+    r"\bque\s+dit\s+(?:le\s+)?(?:dossier|historique|registre)\b|"
+    r"\bqu[eé]lle\s+dose\s+(?:a\s+)?(?:prescrit|recommand[eé]|chang[eé])\b|"
+    r"\bqu[eé]\s+dosis\s+(?:indic[oó]|prescribi[oó]|recomend[oó]|cambi[oó])\b",
     re.IGNORECASE,
 )
 
@@ -5695,7 +5733,7 @@ _CARE_HISTORY_STOPWORDS = {
 
 
 def _care_history_requested_topics(user_text: str) -> list[tuple[str, set[str]]]:
-    tokens = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold()))
+    tokens = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE))
     requested = [
         (label, variants)
         for label, variants in _CARE_HISTORY_TOPIC_GROUPS.items()
@@ -5798,7 +5836,7 @@ def _care_history_recall_context_lines(
         caregiver_report = _care_history_event_text({"description": row.description})
         if not caregiver_report:
             continue
-        report_terms = set(re.findall(r"[a-z0-9']{3,}", caregiver_report.casefold()))
+        report_terms = set(re.findall(r"[\\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
         if not any(report_terms.intersection(variants) for _, variants in topics):
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
@@ -5958,7 +5996,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         return None
 
     topics = _care_history_requested_topics(user_text)
-    query_terms = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())) - _CARE_HISTORY_STOPWORDS
+    query_terms = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - _CARE_HISTORY_STOPWORDS
     candidates: list[tuple[int, int, int, str, set[str]]] = []
     order = 0
 
@@ -6006,7 +6044,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             continue
         if not description:
             continue
-        terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        terms = set(re.findall(r"[\\w']{3,}", description.casefold(), flags=re.UNICODE))
         if source_type == "care_assertions":
             terms.update(re.findall(r"[a-z0-9']{3,}", source_text.casefold()))
         matched_topics = {
@@ -6111,7 +6149,7 @@ def _caregiver_question_extractive_answer(user_text: str, context_lines: list[st
         "professional", "doctor", "clinician", "care", "team", "about", "for",
         "mum", "mom", "her", "his", "their", "person", "person's",
     }
-    query_terms = set(re.findall(r"[a-z0-9']{3,}", (user_text or "").casefold())) - stop_words
+    query_terms = set(re.findall(r"[\\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - stop_words
     candidates: list[tuple[int, int, str]] = []
     for order, line in enumerate(context_lines):
         brace = (line or "").find("{")
@@ -6156,7 +6194,7 @@ def _care_history_reply_covers_requested_topics(
     context_lines: list[str],
 ) -> bool:
     topics = _care_history_requested_topics(user_text)
-    reply_terms = set(re.findall(r"[a-z0-9']{3,}", (reply or "").casefold()))
+    reply_terms = set(re.findall(r"[\\w']{3,}", (reply or "").casefold(), flags=re.UNICODE))
     topic_terms = set().union(*(variants for _, variants in topics))
     detail_stopwords = _CARE_HISTORY_STOPWORDS | {
         "mum", "her", "his", "she", "he", "they", "was", "were", "is", "are",
@@ -6182,7 +6220,7 @@ def _care_history_reply_covers_requested_topics(
         description = _care_history_event_text(record)
         if not description:
             continue
-        terms = set(re.findall(r"[a-z0-9']{3,}", description.casefold()))
+        terms = set(re.findall(r"[\\w']{3,}", description.casefold(), flags=re.UNICODE))
         if not topics:
             generic_source_details.update(terms - detail_stopwords)
         for label, variants in topics:
