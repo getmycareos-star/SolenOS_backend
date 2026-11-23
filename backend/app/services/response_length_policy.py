@@ -32,7 +32,7 @@ _POLICIES = {
 
 _GREETING = re.compile(
     r"^(?:hi|hello|hey|hiya|howdy|good morning|good afternoon|good evening|good day|"
-    r"how are you|how are you doing|how are you today|how'?s it going|what'?s up|good night)(?: there)?[.!?]*$",
+    r"how are you|how are you doing|how are you today|how're you|how'?s it going|what'?s up|good night|yo|sup)(?: there| solenos)?[.!?]*$",
     re.I,
 )
 _ACK = re.compile(
