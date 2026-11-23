@@ -6574,11 +6574,20 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
         return True
     if "VAGUE CONCERN" in guidance and text.count("?") > 1:
         return True
-    if "DISTRESS RESPONSE" in guidance and re.search(
-        r"(?m)^\s*(?:[-*•]|\d+[.)])\s+",
-        text,
-    ):
-        return True
+    if "DISTRESS RESPONSE" in guidance:
+        sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+        if len(sentences) > 2 or len(text.split()) > 70:
+            return True
+        if re.search(
+            r"(?m)^\s*(?:[-*•]|\d+[.)])\s+",
+            text,
+        ):
+            return True
+        if re.search(
+            r"\b(?:let's|we can)\s+(?:make|create|build|start)\s+(?:a\s+)?(?:plan|checklist|schedule|routine)\b",
+            lowered,
+        ):
+            return True
     return False
 
 
