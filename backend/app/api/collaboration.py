@@ -6544,6 +6544,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
+    critical_safety = is_critical_safety_message(user_text)
     if not isinstance(reply, str) or not reply.strip():
         return False
     text = reply.strip()
@@ -6554,7 +6555,7 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     if not guidance:
         return False
     lowered = text.casefold()
-    if "LOW-CAPACITY RESPONSE" in guidance:
+    if "LOW-CAPACITY RESPONSE" in guidance and not critical_safety:
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         questions = text.count("?")
         list_lines = re.findall(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text)
@@ -6574,7 +6575,7 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
         return True
     if "VAGUE CONCERN" in guidance and text.count("?") > 1:
         return True
-    if "DISTRESS RESPONSE" in guidance:
+    if "DISTRESS RESPONSE" in guidance and not critical_safety:
         sentences = [part for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
         if len(sentences) > 2 or len(text.split()) > 70:
             return True
