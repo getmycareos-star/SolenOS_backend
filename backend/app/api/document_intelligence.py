@@ -91,6 +91,7 @@ class CandidateReview(BaseModel):
     expected_subject: str = Field(max_length=120)
     expected_observation: str = Field(max_length=500)
     expected_candidate_id: str | None = Field(default=None, max_length=128)
+    expected_review_status: Literal["pending_review", "corrected_pending_approval"] | None = None
     corrected_subject: str | None = Field(default=None, max_length=120)
     corrected_observation: str | None = Field(default=None, max_length=500)
     rationale: str | None = Field(default=None, max_length=1000)
@@ -1523,6 +1524,11 @@ def review_document_candidate(
     if (
         candidate.get("source_quote") != payload.expected_source_quote
     ):
+        raise HTTPException(
+            status_code=409,
+            detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
+        )
+    if payload.expected_review_status is not None and candidate.get("review_status") != payload.expected_review_status:
         raise HTTPException(
             status_code=409,
             detail="This document suggestion changed after it was displayed. Refresh the document review before deciding.",
