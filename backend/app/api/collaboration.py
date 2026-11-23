@@ -3143,12 +3143,10 @@ def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
             }
             record_type = source_type_map.get(source_type, source_type)
             record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-            if source_type == "appointment_workspaces":
-                freshness = record.get("source_freshness") if isinstance(record.get("source_freshness"), dict) else {}
-                if freshness.get("status") == "stale":
-                    record_type = "appointment_workspace_stale"
-                elif freshness.get("status") != "current":
-                    record_type = "appointment_workspace_currentness_unknown"
+            # Keep the reference type stable across freshness changes. The
+            # selected context record itself carries source_freshness and
+            # information_status; changing its identity type would make valid
+            # appointment-workspace references unresolvable downstream.
             record_id = (
                 payload.get("source_id")
                 or record.get("id")
