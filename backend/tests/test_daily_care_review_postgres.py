@@ -520,6 +520,7 @@ def test_daily_care_qwen_proposal_acceptance_deduplicates_across_analyses_postgr
             second_body = second.json()
             assert second_body["written_to_lcr"] is True
             assert second_body["reused_existing_assertion"] is True
+            assert "No duplicate entry was created" in second_body["message"]
             assert second_body["assertion_id"] == assertion_id
 
             third = client.post(
