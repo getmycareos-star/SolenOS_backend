@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care import CareEvent, Caregiver, Person
 from app.models.time_location import Appointment
-from app.models.appointment_workspace import AppointmentWorkspaceRecord
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareStateRevision, EvidenceObservation
@@ -1438,6 +1438,21 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
                     },
                 },
             ))
+            db.add(AppointmentWorkspaceRevision(
+                id="appointment-workspace-revision-2",
+                record_id="appointment-workspace-record",
+                person_id="appointment-workspace-person",
+                revision_number=2,
+                payload={
+                    "clinicianFindings": "The clinician previously asked the family to track sleep for one week.",
+                    "decisions": "Review the sleep notes at the next visit.",
+                    "epistemic_boundary": {
+                        "clinician_findings": "caregiver_recorded_clinician_statement_not_independently_verified",
+                    },
+                },
+                change_reason="Updated the tracking period after the visit",
+                changed_by_caregiver_id="appointment-workspace-caregiver",
+            ))
             db.commit()
             _load_source_schema.cache_clear()
             context = build_lcr_context(
@@ -1458,8 +1473,15 @@ def test_postgres_appointment_workspace_notes_are_retrievable_without_becoming_l
             "caregiver_recorded_clinician_statement_not_independently_verified"
         )
         assert item["payload"]["followUps"][0]["open_loop_id"] == "appointment-follow-up-loop"
+        revisions = context["sources"]["appointment_workspace_revisions"]
+        assert revisions["returned_count"] == 1
+        prior = revisions["items"][0]
+        assert prior["revision_number"] == 2
+        assert prior["information_status"] == "appointment_workspace_revision_history"
+        assert "one week" in prior["payload"]["clinicianFindings"]
         prompt_context = format_lcr_context_for_prompt(context)
         assert "appointment_workspace_caregiver_notes" in prompt_context
+        assert "appointment_workspace_revision_history" in prompt_context
         assert "not independently verified" in prompt_context
         assert "lcr_reconciliation" in prompt_context
     finally:
