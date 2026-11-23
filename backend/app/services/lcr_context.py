@@ -558,6 +558,33 @@ _SEARCH_STOPWORDS = {
 }
 
 
+_TEMPORAL_RANGE_TOKENS = {
+    "year", "years", "month", "months", "week", "weeks", "day", "days",
+    "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+}
+
+
+def _query_search_terms(
+    query: str | None,
+    *,
+    temporal_window: dict[str, str] | None = None,
+) -> list[str]:
+    """Keep date-range words out of lexical matching once a time filter is resolved."""
+    direct_terms = list(dict.fromkeys(
+        term for term in re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold())
+        if term not in _SEARCH_STOPWORDS
+    ))[:8]
+    if temporal_window:
+        direct_terms = [
+            term for term in direct_terms
+            if term not in _TEMPORAL_RANGE_TOKENS
+            and not re.fullmatch(r"20\d{2}(?:-\d{2}-\d{2})?", term)
+        ]
+    return direct_terms
+
+
 def _expanded_search_terms(terms: list[str]) -> list[str]:
     terms = [term for term in terms if term not in _SEARCH_STOPWORDS]
     expanded = list(terms)
@@ -835,14 +862,9 @@ def build_lcr_context(
     bounded to recent records. Unavailable sources are explicitly marked.
     """
     limit = max(1, min(int(limit_per_source), 200))
-    direct_terms = [
-        term for term in dict.fromkeys(re.findall(r"[A-Za-z0-9_-]{3,}", (query or "").casefold()))
-        if term not in _SEARCH_STOPWORDS
-    ][:8]
-    if temporal_window:
-        # Calendar-year and ISO-date tokens belong to the temporal filter, not
-        # to the care note's prose.
-        direct_terms = [term for term in direct_terms if not re.fullmatch(r"20\d{2}(?:-\d{2}-\d{2})?", term)]
+    # Date-range words belong to the temporal filter, not lexical matching.
+    # Written numbers such as "two" must not become care-text requirements.
+    direct_terms = _query_search_terms(query, temporal_window=temporal_window)
     terms = _expanded_search_terms(direct_terms)
     bind = db.get_bind()
     available_tables, metadata = _load_source_schema(bind)
