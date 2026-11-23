@@ -155,6 +155,14 @@ jobs:
 
           with engine.connect() as connection:
               current = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-          assert current == "20261122_01_qwen_job_event_update_guard", current
-          print("PASS: existing reminder preserved; owner backfilled; version, FK, index and Alembic head verified.")
+
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          config = Config("backend/alembic.ini")
+          script = ScriptDirectory.from_config(config)
+          heads = script.get_heads()
+          assert len(heads) == 1, heads
+          assert current == heads[0], {"database_revision": current, "repository_heads": heads}
+          print("PASS: existing reminder preserved; owner backfilled; version, FK, index and canonical Alembic head verified.")
           PY
