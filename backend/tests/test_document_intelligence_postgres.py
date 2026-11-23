@@ -919,6 +919,23 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
+        current_candidate_id = corrected_valid.json()["candidate"]["canonical_candidate"]["candidate_id"]
+        stale_candidate_identity = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json={
+                "candidate_index": 1,
+                "decision": "accept",
+                "expected_source_quote": quote_correct,
+                "expected_subject": caregiver_label,
+                "expected_candidate_id": "candidate-from-an-older-document-analysis",
+            },
+        )
+        assert stale_candidate_identity.status_code == 409, stale_candidate_identity.text
+        assert "suggestion changed after it was displayed" in stale_candidate_identity.json()["detail"]
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
         # Accepting the exact current statement creates the sole source-linked assertion.
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
@@ -928,6 +945,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "decision": "accept",
                 "expected_source_quote": quote_correct,
                 "expected_subject": caregiver_label,
+                "expected_candidate_id": current_candidate_id,
             },
         )
         assert accepted.status_code == 200, accepted.text
@@ -950,6 +968,7 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
                 "decision": "accept",
                 "expected_source_quote": quote_correct,
                 "expected_subject": caregiver_label,
+                "expected_candidate_id": current_candidate_id,
             },
         )
         assert accepted_retry.status_code == 200, accepted_retry.text
