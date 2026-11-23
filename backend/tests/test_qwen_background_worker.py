@@ -500,7 +500,6 @@ def test_worker_lease_maintainer_stops_when_another_worker_reclaims_job(monkeypa
 def test_worker_lease_maintainer_advances_only_after_successful_compare_and_swap(monkeypatch):
     claimed_at = datetime.now(timezone.utc)
     lease_state = {"locked_at": claimed_at, "lost": False}
-    refreshed_at = datetime.now(timezone.utc) + timedelta(seconds=1)
     calls = []
 
     def accept_current_lease(job_id, person_id, caregiver_id, *, expected_locked_at, now):
