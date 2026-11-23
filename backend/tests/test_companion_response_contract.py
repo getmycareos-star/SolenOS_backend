@@ -3908,3 +3908,40 @@ def test_companion_does_not_attribute_care_recipient_emotions_to_caregiver():
         assert "FEAR AND UNCERTAINTY RESPONSE" not in guidance
         assert "LONELINESS RESPONSE" not in guidance
         assert "ANGER RESPONSE" not in guidance
+
+def test_temporal_history_aggregator_does_not_upgrade_unsearchable_source_to_complete():
+    initial = {
+        "sources": {
+            "events": {
+                "status": "available",
+                "items": [{"id": "event-1"}],
+                "candidate_count": 1,
+                "returned_count": 1,
+                "candidate_scan_complete": True,
+                "has_more": False,
+            },
+            "legacy_optional": {
+                "status": "unsearchable",
+                "items": [],
+                "candidate_count": None,
+                "returned_count": 0,
+                "candidate_scan_complete": False,
+                "has_more": False,
+                "interpretation_limit": "This source cannot be searched for this topic.",
+            },
+        },
+        "history_coverage": "partial_search_coverage",
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+    }
+
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1", "What happened in 2025?",
+        initial, limit_per_source=10, max_pages=2,
+    )
+
+    assert merged["retrieval_scan_complete"] is False
+    assert merged["retrieval_projection_complete"] is False
+    assert merged["history_coverage"] == "partial_search_coverage"
+
