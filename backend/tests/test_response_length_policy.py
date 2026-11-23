@@ -13,6 +13,7 @@ def test_first_time_and_returning_greetings_have_distinct_targets_and_maxima():
     returning = resolve_response_length_policy("Hello", caregiver_stage="returning")
     assert (first.target_words, first.max_words) == (25, 40)
     assert (returning.target_words, returning.max_words) == (30, 55)
+    assert resolve_response_length_policy("Hello again", caregiver_stage="returning").intent == "returning_greeting"
 
 
 def test_explicit_caregiver_distress_uses_low_capacity_response_budget():
@@ -134,6 +135,7 @@ def test_shared_greeting_detector_matches_orientation_and_companion_boundaries()
     assert is_greeting_message("Hi!")
     assert is_greeting_message("Good morning, SolenOS")
     assert is_greeting_message("How are you today?")
+    assert is_greeting_message("Hello again")
     assert not is_greeting_message("Thanks")
     assert not is_greeting_message("Goodbye")
     assert not is_greeting_message("Good night")
