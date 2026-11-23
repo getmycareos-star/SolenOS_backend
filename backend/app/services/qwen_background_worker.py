@@ -305,7 +305,7 @@ def _merge_daily_capture_job_result(job: QwenBackgroundJob, updates: dict[str, A
     job.result_text = json.dumps(result, ensure_ascii=False, sort_keys=True)
 
 
-async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob) -> bool:
+async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob, lease_state: dict) -> bool:
     """Retry Delta reconciliation from persisted Daily Care sources without re-running extraction."""
     from app.models.capture_analysis import CaptureAnalysis
     from app.models.care import CareEvent, Evidence
@@ -383,12 +383,19 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         source_event_id=event_id,
         source_evidence_id=evidence_id,
     )
+    if lease_state.get("lost"):
+        db.rollback()
+        return True
     current = db.query(QwenBackgroundJob).filter(
         QwenBackgroundJob.id == job_id,
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
     ).populate_existing().with_for_update().first()
-    if current is None or current.status != "processing":
+    if (
+        current is None
+        or current.status != "processing"
+        or current.locked_at != lease_state.get("locked_at")
+    ):
         db.rollback()
         return True
     analysis = db.query(CaptureAnalysis).filter(
@@ -492,7 +499,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
     return True
 
 
-async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
+async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_state: dict) -> bool:
     """Extract a saved Daily Care report after the caregiver-facing save has committed."""
     # Copy immutable scope before releasing the claim transaction. The worker
     # must not hold PostgreSQL row locks while waiting for OCR/model inference.
@@ -699,7 +706,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         QwenBackgroundJob.person_id == person_id,
         QwenBackgroundJob.caregiver_id == caregiver_id,
     ).populate_existing().with_for_update().first()
-    if current_job is None or current_job.status == "cancelled":
+    if (
+        current_job is None
+        or current_job.status == "cancelled"
+        or current_job.locked_at != lease_state.get("locked_at")
+        or lease_state.get("lost")
+    ):
         db.rollback()
         return True
 
@@ -765,7 +777,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
             QwenBackgroundJob.person_id == person_id,
             QwenBackgroundJob.caregiver_id == caregiver_id,
         ).populate_existing().with_for_update().first()
-        if current_job is None or current_job.status == "cancelled":
+        if (
+            current_job is None
+            or current_job.status == "cancelled"
+            or current_job.locked_at != lease_state.get("locked_at")
+            or lease_state.get("lost")
+        ):
             db.rollback()
             return True
     else:
@@ -864,7 +881,12 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob) -> bool:
         .with_for_update()
         .first()
     )
-    if current_job is None or current_job.status != "processing":
+    if (
+        current_job is None
+        or current_job.status != "processing"
+        or current_job.locked_at != lease_state.get("locked_at")
+        or lease_state.get("lost")
+    ):
         db.rollback()
         return True
     logger.info(
@@ -1256,13 +1278,13 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         )
 
         if job.workflow == "daily_capture_extraction":
-            completed = await _process_daily_capture_extraction(db, job)
+            completed = await _process_daily_capture_extraction(db, job, lease_state)
             if lease_state and lease_state.get("lost"):
                 db.rollback()
                 return True
             return completed
         if job.workflow == "daily_capture_delta_reconciliation":
-            completed = await _process_daily_capture_delta_reconciliation(db, job)
+            completed = await _process_daily_capture_delta_reconciliation(db, job, lease_state)
             if lease_state and lease_state.get("lost"):
                 db.rollback()
                 return True
