@@ -156,3 +156,140 @@ def test_postgres_lease_compare_and_swap_rejects_a_reclaimed_job(monkeypatch):
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
+
+
+def test_postgres_document_worker_does_not_block_cancellation_during_ocr(monkeypatch):
+    """The queue row remains updateable while document extraction is running."""
+    suffix = uuid.uuid4().hex
+    person_id = f"document-cancel-person-{suffix}"
+    caregiver_id = f"document-cancel-caregiver-{suffix}"
+    job_id = str(uuid.uuid4())
+    monkeypatch.setattr(worker, "SessionLocal", SessionLocal)
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Document cancellation recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Document cancellation caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Process a saved document for caregiver review.",
+                context_text="",
+                workflow="document_intake",
+                evidence_ids_json='["document-cancel-evidence"]',
+                status="queued",
+                attempt_count=0,
+                available_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            ))
+            db.commit()
+
+        def cancel_while_ocr_runs(evidence_id, scoped_person_id, scoped_caregiver_id):
+            assert evidence_id == "document-cancel-evidence"
+            assert scoped_person_id == person_id
+            assert scoped_caregiver_id == caregiver_id
+            with SessionLocal() as db:
+                current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+                current.status = "cancelled"
+                current.locked_at = None
+                current.error_code = "document_deleted_during_processing"
+                db.commit()
+            return (
+                {"analysis_id": "analysis-not-used", "retryable_page_numbers": [], "retry_exhausted_page_numbers": []},
+                {"intelligence_status": "complete", "observations": [], "processed_page_count": 1, "total_page_count": 1, "unprocessed_page_numbers": []},
+            )
+
+        monkeypatch.setattr(worker, "_process_document_evidence", cancel_while_ocr_runs)
+        assert asyncio.run(worker.process_one_qwen_job(job_id)) is True
+        with SessionLocal() as db:
+            current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert current.status == "cancelled"
+            assert current.error_code == "document_deleted_during_processing"
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id, event_type="document_intake_completed"
+            ).count() == 0
+    finally:
+        with SessionLocal() as db:
+            db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_postgres_worker_discards_assistant_result_after_lease_reclaim(monkeypatch):
+    """An old worker cannot save a Companion answer after another worker claims the job."""
+    suffix = uuid.uuid4().hex
+    person_id = f"qwen-stale-output-person-{suffix}"
+    caregiver_id = f"qwen-stale-output-caregiver-{suffix}"
+    job_id = str(uuid.uuid4())
+    monkeypatch.setattr(worker, "SessionLocal", SessionLocal)
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Stale output recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Stale output caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Summarize the saved appointment note.",
+                context_text="",
+                evidence_ids_json="[]",
+                status="queued",
+                attempt_count=0,
+                available_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            ))
+            db.commit()
+
+        async def classify(*args, **kwargs):
+            return "appointment"
+
+        async def reclaim_during_inference(payload, request, inference_db):
+            newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
+            with SessionLocal() as db:
+                current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+                current.status = "processing"
+                current.locked_at = newer_lock
+                db.commit()
+            return {
+                "workflow": "appointment",
+                "reply": "This answer belongs to the stale worker.",
+                "ai_generated": True,
+                "provider_status": "available",
+                "model": "qwen3.5:4b",
+            }
+
+        monkeypatch.setattr(worker, "_classify_task", classify)
+        from app.api import collaboration
+        monkeypatch.setattr(collaboration, "qwen_support_assist", reclaim_during_inference)
+        assert asyncio.run(worker.process_one_qwen_job(job_id)) is True
+
+        with SessionLocal() as db:
+            current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert current.status == "processing"
+            assert current.locked_at is not None
+            assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id, event_type="job_completed"
+            ).count() == 0
+    finally:
+        with SessionLocal() as db:
+            db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
