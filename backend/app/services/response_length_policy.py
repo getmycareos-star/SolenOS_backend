@@ -56,7 +56,7 @@ _LOW_CAPACITY_SIGNAL = re.compile(
     re.I,
 )
 _STANDALONE_LOW_CAPACITY = re.compile(
-    r"^(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*$",
+    r"^(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out|sad|angry|frustrated|furious|upset|lonely|scared|frightened|afraid)[.!?]*$",
     re.I,
 )
 
@@ -66,6 +66,22 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
         return True
 
     capacity_terms = r"(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)"
+    # A caregiver may explicitly share the care recipient's just-described
+    # state without repeating the adjective ("Mum is exhausted, and I am too").
+    # Attribute only first-person agreement, never the patient's statement alone.
+    patient_capacity = re.search(
+        rf"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+        rf"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
+        rf".{{0,100}}\\b{capacity_terms}\\b",
+        value,
+    )
+    if patient_capacity and re.search(
+        r"\\bi(?:'m| am) too\\b|\\bi feel the same\\b",
+        value[patient_capacity.end():],
+    ):
+        return True
+    if re.search(r"\\bi(?:'ve| have) been crying\\b|\\bi can't stop crying\\b", value):
+        return True
     first_person = re.search(r"\bi(?:'m| am| feel)\b", value)
     if first_person is None:
         return False
