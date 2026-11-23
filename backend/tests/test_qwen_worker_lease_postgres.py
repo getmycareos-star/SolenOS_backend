@@ -293,3 +293,74 @@ def test_postgres_worker_discards_assistant_result_after_lease_reclaim(monkeypat
             db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
             db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
             db.commit()
+
+
+def test_postgres_worker_does_not_requeue_after_lease_reclaim_and_inference_error(monkeypatch):
+    """The exception path must not overwrite the status owned by a newer worker."""
+    suffix = uuid.uuid4().hex
+    person_id = f"qwen-stale-error-person-{suffix}"
+    caregiver_id = f"qwen-stale-error-caregiver-{suffix}"
+    job_id = str(uuid.uuid4())
+    monkeypatch.setattr(worker, "SessionLocal", SessionLocal)
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Stale error recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Stale error caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Summarize the saved appointment note.",
+                context_text="",
+                evidence_ids_json="[]",
+                status="queued",
+                attempt_count=0,
+                available_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+            ))
+            db.commit()
+
+        async def classify(*args, **kwargs):
+            return "appointment"
+
+        async def reclaim_then_fail(payload, request, inference_db):
+            newer_lock = datetime.now(timezone.utc) + timedelta(minutes=1)
+            with SessionLocal() as db:
+                current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+                current.status = "processing"
+                current.locked_at = newer_lock
+                db.commit()
+            raise RuntimeError("stale worker inference failed")
+
+        monkeypatch.setattr(worker, "_classify_task", classify)
+        from app.api import collaboration
+        monkeypatch.setattr(collaboration, "qwen_support_assist", reclaim_then_fail)
+        assert asyncio.run(worker.process_one_qwen_job(job_id)) is True
+
+        with SessionLocal() as db:
+            current = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert current.status == "processing"
+            assert current.locked_at is not None
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id,
+                event_type="job_completed",
+            ).count() == 0
+            assert db.query(QwenJobEvent).filter_by(
+                job_id=job_id,
+                event_type="job_retry_scheduled",
+            ).count() == 0
+            assert db.query(QwenModelOutput).filter_by(job_id=job_id).count() == 0
+    finally:
+        with SessionLocal() as db:
+            db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenModelOutput).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
