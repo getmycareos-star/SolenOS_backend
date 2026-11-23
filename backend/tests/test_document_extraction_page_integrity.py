@@ -169,3 +169,27 @@ def test_document_review_response_uses_persisted_page_numbers_for_standalone_sca
     assert response["extraction_processed_page_count"] == 1
     assert response["extraction_processed_page_numbers"] == [3]
     assert response["extraction_unprocessed_page_numbers"] == []
+
+
+def test_document_review_response_never_counts_a_failed_page_as_processed():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="partial-analysis",
+        source_evidence_id="partial-evidence",
+        source_text="[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\n[Page not processed: OCR engine error]\n[Page 3 OCR]\nThird page.",
+        extraction_status="partial",
+        candidates={
+            "kind": "document_extraction_v1",
+            "page_count": 3,
+            "processed_page_numbers": [1, 2, 3],
+            "unprocessed_page_numbers": [2],
+        },
+    )
+
+    response = _response(analysis)
+    assert response["extraction_processed_page_numbers"] == [1, 3]
+    assert response["extraction_unprocessed_page_numbers"] == [2]
+    assert response["interpretation_blocked"] is True
