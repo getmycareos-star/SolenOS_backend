@@ -2316,6 +2316,33 @@ def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
     assert truncated is True
 
 
+def test_companion_routes_indirect_stroke_signs_to_immediate_safety_response(monkeypatch):
+    client = setup_client(monkeypatch)
+    monkeypatch.setattr(
+        collaboration,
+        "_run_companion_inference_with_metrics",
+        lambda *args, **kwargs: pytest.fail("Critical safety messages must not wait for model inference."),
+    )
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "Mum's face is drooping and her speech is slurred.",
+            },
+        )
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["ai_generated"] is False
+        assert data["written_to_lcr"] is False
+        assert "may be an emergency" in data["reply"].casefold()
+        assert data["guard_verdict"] == "blocked"
+    finally:
+        teardown()
+
+
 def test_self_harm_emergency_response_directs_to_immediate_human_support():
     reply, note = collaboration._emergency_response_for_message(
         "I don't want to live anymore."
