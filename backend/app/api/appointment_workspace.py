@@ -788,6 +788,15 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
     event_items = _apply_lcr_event_correction_lineage(
         event_items, living_care_record_context,
     )
+    if any(
+        item.get("correction_lineage_status") != "checked"
+        for item in event_items
+    ):
+        living_care_record_context["retrieval_projection_complete"] = False
+        failed_sources = list(living_care_record_context.get("failed_sources") or [])
+        living_care_record_context["failed_sources"] = list(dict.fromkeys([
+            *failed_sources, "event_correction_lineage",
+        ]))
     appointment_items = [{
         "source_table": "appointments",
         "source_id": str(item.id),
