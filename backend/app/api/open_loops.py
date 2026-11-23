@@ -764,6 +764,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
             )
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)
+    expected_version = changes.pop("expected_version", None)
     evidence = changes.pop("evidence", [])
     _validate_source_evidence_references(db, person_id, evidence)
     key = changes.pop("idempotency_key", None)
