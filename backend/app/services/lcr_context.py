@@ -630,7 +630,7 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
         if freshness_status == "stale":
             return (
                 "appointment_workspace_stale",
-                "This caregiver-authored appointment workspace was saved before a later care-record change. Keep it as historical context, but do not present it as the current appointment plan without review.",
+                "This caregiver-authored appointment workspace was saved before a later care-record change. Keep it as historical context, but do not present it as the current appointment plan without review. Notes about what a clinician said are caregiver-recorded and not independently verified.",
             )
         if freshness_status != "current":
             return (
