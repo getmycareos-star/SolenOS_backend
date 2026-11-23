@@ -631,7 +631,7 @@ def _append_assertion_revision(
 
 
 def set_assertion_status(db: Session, assertion_id: str, person_id: str, status: str, updated_by_caregiver_id: Optional[str] = None, review_after_days: Optional[int] = None) -> CareAssertion:
-    allowed = {"reported", "review_required", "accepted", "rejected", "superseded", "withdrawn"}
+    allowed = {"reported", "review_required", "accepted", "rejected", "superseded", "retracted", "withdrawn"}
     if status not in allowed:
         raise HTTPException(status_code=422, detail="Unsupported assertion status")
     assertion = db.query(CareAssertion).filter(
@@ -716,7 +716,7 @@ def get_freshness(
     review_reference = reviewed_at if assertion.assertion_status in {"accepted", "caregiver_reviewed"} else None
     reference = _utc(review_reference) or _utc(assertion.observed_at) or _utc(assertion.recorded_at)
     age_days = max(0, (now - reference).days) if reference else None
-    if assertion.assertion_status in {"rejected", "superseded", "withdrawn"}:
+    if assertion.assertion_status in {"rejected", "superseded", "retracted", "withdrawn"}:
         status = "historical"
         explanation = "This assertion was rejected, superseded, or withdrawn; it must not be presented as current."
     elif assertion.assertion_kind == "time_bound_observation":
