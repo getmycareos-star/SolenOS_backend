@@ -158,6 +158,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
+    # A lightweight migration unit test may provide only an inspector-compatible
+    # bind. Treat an absent dialect as non-PostgreSQL rather than dereferencing it.
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
 
     def drop_migration_owned_indexes() -> None:
         inspector = inspect(bind)
@@ -174,12 +177,12 @@ def downgrade() -> None:
                     and not bool(index.get("unique", False))
                     and _is_migration_owned_index(table_name, indexed_columns[0], name)
                 ):
-                    if bind.dialect.name == "postgresql":
+                    if dialect_name == "postgresql":
                         op.drop_index(name, table_name=table_name, postgresql_concurrently=True)
                     else:
                         op.drop_index(name, table_name=table_name)
 
-    if bind.dialect.name == "postgresql":
+    if dialect_name == "postgresql":
         # Keep rollback index removal from blocking ordinary table writes.
         with op.get_context().autocommit_block():
             drop_migration_owned_indexes()
