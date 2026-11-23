@@ -2768,7 +2768,35 @@ def _collect_full_lcr_context_pages(
         for name, source in merged_sources.items():
             if name == "companion_conversation":
                 continue
-            page_source = page_sources.get(name, {})
+            page_source = page_sources.get(name)
+            if not isinstance(page_source, dict):
+                source["status"] = "partial" if source.get("items") else "failed"
+                source["candidate_scan_complete"] = False
+                source["has_more"] = True
+                source["next_offset"] = offsets.get(name, source.get("next_offset"))
+                source["error_code"] = "history_page_missing"
+                source["interpretation_limit"] = (
+                    "A later page of this care-information source was not returned. "
+                    "The available records are partial and must not be treated as the full history."
+                )
+                continue
+            page_status = str(page_source.get("status") or "unknown")
+            if page_status in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}:
+                source["status"] = (
+                    "partial" if source.get("items") and page_status == "failed" else page_status
+                )
+                source["candidate_scan_complete"] = False
+                source["has_more"] = bool(page_source.get("has_more", True))
+                if page_status in {"failed", "partial"}:
+                    source["has_more"] = True
+                source["next_offset"] = page_source.get("next_offset") or offsets.get(name)
+                source["error_code"] = page_source.get("error_code") or "history_page_incomplete"
+                source["interpretation_limit"] = page_source.get("interpretation_limit") or (
+                    "A later page of this care-information source could not be fully retrieved. "
+                    "Do not treat the partial result as a complete history."
+                )
+            elif page_status == "available" and source.get("status") == "empty":
+                source["status"] = "available"
             existing_ids = {
                 str(item.get("id"))
                 for item in source.get("items", [])
