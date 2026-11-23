@@ -6561,7 +6561,8 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"why do i have to repeat|i said this already|you forgot|"
         r"this is ridiculous|you are not listening|this is useless|"
         r"you(?:'re| are) (?:useless|stupid)|you keep getting this wrong|"
-        r"this keeps failing)\b",
+        r"this keeps failing|i(?:'m| am) (?:really |very |so )?frustrated with (?:being asked again|repeating myself|this system)|"
+        r"i feel (?:really |very |so )?fed up with (?:this system|being asked again))\b",
         text,
     )
     low_capacity = is_low_capacity_caregiver_message(text)
@@ -6675,7 +6676,8 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"i'm worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i am worried about (?:the dementia|her dementia|his dementia|the medication|the medicine)|"
         r"i can't tell if (?:this is getting worse|something is wrong)|"
-        r"i cannot tell if (?:this is getting worse|something is wrong))\b",
+        r"i cannot tell if (?:this is getting worse|something is wrong)|"
+        r"i(?:'m| am) (?:angry|furious|frustrated|upset) (?:with|at) [^,]{1,60},\s*(?:and )?(?:afraid|scared|frightened|worried) about (?:what happens|the future|what will happen))\b",
         text,
     )
     loneliness = re.search(
