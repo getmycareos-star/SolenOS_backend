@@ -269,7 +269,12 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
     assert approved.json()["proposal"]["review_status"] == "accepted_by_caregiver"
     assert companion_body["source_assertion_ids"]
     assert "companion-shared-lcr-fact" in companion_body["source_lcr_context_ids"]
-    assert companion_body["lcr_context_coverage"]["history_coverage"] == "query_scanned_ranked_subset"
+    coverage = companion_body["lcr_context_coverage"]
+    assert coverage["history_coverage"] == "partial_source_history"
+    assert any(
+        source.get("status") == "unsearchable"
+        for source in coverage.get("source_limits", [])
+    ), coverage
     serialized_messages = json.dumps(captured["messages"], ensure_ascii=False)
     assert "Caregiver reported that sleep was poor last night." in serialized_messages
     assert "Caregiver reports poor sleep before breakfast." in serialized_messages
