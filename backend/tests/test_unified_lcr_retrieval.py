@@ -227,6 +227,8 @@ def test_full_history_projection_returns_more_than_fifty_matches_in_one_scan():
                     id=f"sleep-event-{index}", person_id="wide-person",
                     event_type="daily_observation", status="recorded",
                     occurred_at=now - timedelta(days=index),
+                    occurred_at_timezone="Africa/Lagos",
+                    location="Home",
                     title=f"Sleep history {index}",
                     description=f"Caregiver recorded sleep observation {index}.",
                     evidence_ids=[], created_by_caregiver_id="wide-caregiver",
@@ -247,6 +249,8 @@ def test_full_history_projection_returns_more_than_fifty_matches_in_one_scan():
         assert events["candidate_scan_complete"] is True
         assert events["has_more"] is False
         assert events["returned_history_complete"] is True
+        assert events["items"][0]["occurred_at_timezone"] == "Africa/Lagos"
+        assert events["items"][0]["location"] == "Home"
     finally:
         _close_postgres_conversation_db(engine, connection, schema)
 
