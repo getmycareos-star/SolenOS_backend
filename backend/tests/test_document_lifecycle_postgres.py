@@ -1286,6 +1286,7 @@ def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monke
                 "unreadable_page_numbers": [],
                 "extraction_method": "tesseract_ocr",
                 "extraction_attempt_count": 1,
+                "document_intelligence": {"status": "reviewed"},
             }
             analysis = CaptureAnalysis(
                 id=f"doc-stale-retry-analysis-{suffix}",
@@ -1316,9 +1317,21 @@ def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monke
                 ).hexdigest()
                 newer_metadata["newer_request_marker"] = "committed-before-older-retry"
                 newer_metadata["processed_page_numbers"] = [1, 2]
-                current.source_text = newer_text
-                current.extraction_status = "available"
-                current.candidates = newer_metadata
+                replacement = CaptureAnalysis(
+                    id=f"doc-stale-retry-replacement-{suffix}",
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_evidence_id=evidence_id,
+                    source_text=newer_text,
+                    extraction_status="available",
+                    candidates=newer_metadata,
+                    review_history=[],
+                )
+                newer_db.add(replacement)
+                newer_db.flush()
+                current_metadata = dict(current.candidates)
+                current_metadata["superseded_by_analysis_id"] = replacement.id
+                current.candidates = current_metadata
                 newer_db.commit()
             return (
                 "[Page 1]\nOriginal page one.\n[Page 2 OCR]\nLate older retry result.",
@@ -1331,11 +1344,16 @@ def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monke
                 evidence_id, _request(person_id, caregiver_id), retry_db
             )
 
-        assert result["analysis_id"] == analysis_id
+        assert result["analysis_id"] == f"doc-stale-retry-replacement-{suffix}"
         assert "Newer committed extraction." in result["extracted_text"]
         assert "Late older retry result." not in result["extracted_text"]
         with Session() as verify_db:
-            saved = verify_db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+            superseded = verify_db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+            saved = verify_db.query(CaptureAnalysis).filter_by(
+                id=f"doc-stale-retry-replacement-{suffix}",
+                person_id=person_id, source_evidence_id=evidence_id,
+            ).one()
+            assert superseded.candidates["superseded_by_analysis_id"] == saved.id
             assert saved.candidates["newer_request_marker"] == "committed-before-older-retry"
             assert "Newer committed extraction." in saved.source_text
             assert saved.extraction_status == "available"
