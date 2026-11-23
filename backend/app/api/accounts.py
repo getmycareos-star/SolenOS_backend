@@ -128,7 +128,10 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
     person_id, caregiver_id = _scoped_ids(request, db)
     email = _validate_email(payload.email)
     if db.query(CaregiverAccount).filter(CaregiverAccount.email_normalized == email).first():
-        raise HTTPException(status_code=409, detail="An account already uses this email address.")
+        raise HTTPException(
+            status_code=409,
+            detail="We couldn't create this account with those details. Please review the information and try again.",
+        )
     account = CaregiverAccount(
         email_normalized=email,
         password_hash=_hash_password(payload.password),
@@ -150,7 +153,10 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
             )
         except ValueError as exc:
             db.rollback()
-            raise HTTPException(status_code=409, detail="This caregiver identity cannot be linked safely.") from exc
+            raise HTTPException(
+                status_code=409,
+                detail="We couldn't create this account with those details. Please review the information and try again.",
+            ) from exc
         session.account_id = account.id
         db.add(RecoveryCodeSet(
             account_id=account.id,
@@ -166,7 +172,10 @@ def create_account(payload: AccountCreate, request: Request, db: Session = Depen
         raise
     except Exception:
         db.rollback()
-        raise HTTPException(status_code=409, detail="We could not create this account. The email or care record may already be registered.")
+        raise HTTPException(
+            status_code=409,
+            detail="We couldn't create this account with those details. Please review the information and try again.",
+        )
     db.refresh(account)
     return {
         "account": _account_json(account),

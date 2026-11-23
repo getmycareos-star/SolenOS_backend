@@ -563,3 +563,58 @@ def test_postgres_responsibility_transfer_requires_acceptance_and_preserves_hist
         # history; the CI database is discarded after the job.
         if engine:
             engine.dispose()
+
+
+def test_postgres_duplicate_account_signup_does_not_disclose_email_existence():
+    """A registration conflict must not reveal whether an email is already registered."""
+    suffix = uuid.uuid4().hex[:10]
+    email = f"duplicate-{suffix}@example.test"
+    password = "duplicate-account-password-456"
+
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"name": f"First person {suffix}", "caregiver_name": "First caregiver"},
+        )
+        assert first.status_code == 201, first.text
+        first_headers = {"Authorization": f"Bearer {first.json()['access_token']}"}
+        created = client.post(
+            "/api/v1/accounts",
+            headers=first_headers,
+            json={"email": email, "password": password},
+        )
+        assert created.status_code == 201, created.text
+
+        second = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"name": f"Second person {suffix}", "caregiver_name": "Second caregiver"},
+        )
+        assert second.status_code == 201, second.text
+        second_headers = {"Authorization": f"Bearer {second.json()['access_token']}"}
+        duplicate = client.post(
+            "/api/v1/accounts",
+            headers=second_headers,
+            json={"email": email, "password": "another-account-password-456"},
+        )
+        assert duplicate.status_code == 409, duplicate.text
+        detail = duplicate.json().get("detail", "")
+        assert detail == (
+            "We couldn't create this account with those details. "
+            "Please review the information and try again."
+        )
+        assert not any(
+            term in detail.lower()
+            for term in ("already", "exists", "registered", "email", "care record")
+        )
+
+        second_account = client.get("/api/v1/accounts/me", headers=second_headers)
+        assert second_account.status_code == 200, second_account.text
+        assert second_account.json().get("account") is None
+
+        first_login = client.post(
+            "/api/v1/accounts/login",
+            json={"email": email, "password": password},
+        )
+        assert first_login.status_code == 200, first_login.text
+        assert first_login.json()["person_id"] == first.json()["person"]["id"]
+
