@@ -1231,6 +1231,58 @@ def test_withdrawn_or_superseded_evidence_never_reads_as_current():
         assert "do not treat it as current evidence" in explanation
 
 
+def test_postgres_document_topic_retrieval_returns_verbatim_passage_beyond_preview():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        exact_passage = (
+            "Page 4: The clinic letter says the medication was held until Friday, "
+            "according to the discharge note."
+        )
+        source_text = ("Page 1: Routine administrative information. " * 180) + "\n" + exact_passage
+        with Session(bind=connection) as db:
+            person = Person(id="document-passage-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="document-passage-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add(CaptureAnalysis(
+                id="long-document-passage",
+                person_id=person.id,
+                caregiver_id=caregiver.id,
+                source_evidence_id="long-document-evidence",
+                source_text=source_text,
+                extraction_status="available",
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "filename": "long-clinic-letter.txt",
+                },
+                review_history=[],
+            ))
+            db.flush()
+            context = build_lcr_context(
+                db,
+                person.id,
+                caregiver_id=caregiver.id,
+                query="What does the clinic letter say about medication?",
+            )
+
+        extraction = next(
+            item for item in context["sources"]["document_extractions"]["items"]
+            if item["id"] == "long-document-passage"
+        )
+        assert extraction["source_text"].endswith("… [truncated]")
+        assert any(exact_passage in item["text"] for item in extraction["retrieved_source_passages"])
+        prompt = format_lcr_context_for_prompt(context, max_chars=12000)
+        assert exact_passage in prompt
+    finally:
+        connection.close()
+        engine.dispose()
+
+
 def test_postgres_lcr_preserves_exact_document_quotation_for_companion():
     engine, connection, schema = _postgres_conversation_db()
     try:
