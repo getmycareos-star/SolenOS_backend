@@ -994,11 +994,27 @@ def _retrieval_score(item: dict[str, Any], query: str, direct_terms: list[str], 
         "asserted_value": 3,
         "value_text": 3,
     }
-    fields = [
-        (key, str(value).casefold())
-        for key, value in item.items()
-        if key not in excluded and value is not None and not isinstance(value, (dict, list, tuple))
-    ]
+    def searchable_fields(value: Any, parent_key: str = "") -> list[tuple[str, str]]:
+        """Flatten descriptive nested fields while excluding identifiers and proposals."""
+        fields: list[tuple[str, str]] = []
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normalized_key = str(key).casefold()
+                if (
+                    normalized_key in excluded
+                    or normalized_key.endswith("_id")
+                    or normalized_key.endswith("_ids")
+                ):
+                    continue
+                fields.extend(searchable_fields(nested, normalized_key))
+        elif isinstance(value, (list, tuple)):
+            for nested in value:
+                fields.extend(searchable_fields(nested, parent_key))
+        elif value is not None and isinstance(value, (str, int, float, bool)):
+            fields.append((parent_key, str(value).casefold()))
+        return fields
+
+    fields = searchable_fields(item)
     haystack = " ".join(value for _, value in fields)
     record_terms = set(re.findall(r"[a-z0-9_-]{3,}", haystack))
     direct_present = [term for term in direct_terms if term in record_terms]
