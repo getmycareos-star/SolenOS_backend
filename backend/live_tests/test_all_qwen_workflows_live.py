@@ -17,6 +17,11 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.services.qwen_background_worker import ENABLED_WORKFLOWS
 
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
+if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not POSTGRES_DATABASE:
+    raise RuntimeError("Live Qwen workflow acceptance requires PostgreSQL; refusing a skipped non-PostgreSQL run.")
+
 pytestmark = pytest.mark.skipif(
     os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") != "1",
     reason="requires the dedicated real-Qwen workflow and migrated PostgreSQL",
