@@ -5025,6 +5025,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # for their explicit contracts; this adds canonical facts, reviewed assertions,
     # uncertainty, decisions, open loops and provenance without duplicating events,
     # evidence, appointments or document text already loaded above.
+    shared_lcr_context = None
+    shared_context_truncated = False
     shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
     if payload.workflow in shared_lcr_workflows:
         full_history_workflows = {
@@ -5072,7 +5074,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         )
         shared_items_added = 0
         shared_chars_added = 0
-        shared_context_truncated = False
         for source_name in canonical_sources:
             source = shared_lcr_context.get("sources", {}).get(source_name, {})
             for item in source.get("items", []):
@@ -5429,10 +5430,32 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         db, person_id, context_lines_to_source_records(context_lines)
     )
     claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
+    lcr_context_coverage = None
+    if shared_lcr_context is not None:
+        lcr_context_coverage = {
+            "schema_status": shared_lcr_context.get("schema_status"),
+            "history_coverage": shared_lcr_context.get("history_coverage"),
+            "retrieval_scan_complete": bool(shared_lcr_context.get("retrieval_scan_complete")),
+            "retrieval_projection_complete": bool(shared_lcr_context.get("retrieval_projection_complete")),
+            "page_limit_reached": bool(shared_lcr_context.get("page_limit_reached")),
+            "prompt_context_complete": not shared_context_truncated,
+            "missing_required_sources": list(shared_lcr_context.get("missing_required_sources") or []),
+            "missing_optional_sources": list(shared_lcr_context.get("missing_optional_sources") or []),
+            "sources": {
+                name: {
+                    "status": source.get("status"),
+                    "candidate_scan_complete": bool(source.get("candidate_scan_complete")),
+                    "has_more": bool(source.get("has_more")),
+                    "selection_truncated": bool(source.get("selection_truncated")),
+                }
+                for name, source in shared_lcr_context.get("sources", {}).items()
+            },
+        }
     return {
         "workflow": payload.workflow,
         "reply": reply,
         "claim_provenance": claim_provenance,
+        "lcr_context_coverage": lcr_context_coverage,
         "ai_generated": True,
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
         "authority": "solenos_care_record_and_caregiver",
