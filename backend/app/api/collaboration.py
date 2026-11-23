@@ -6614,16 +6614,7 @@ def _build_retrieval_receipt(
         "missing_required_sources": missing_required,
         "missing_optional_sources": missing_optional,
         "source_gaps": source_gaps,
-        "source_limits": [
-            {
-                "source_type": name,
-                "status": source.get("status"),
-                "interpretation_limit": source.get("interpretation_limit"),
-            }
-            for name, source in source_receipts.items()
-            if source.get("status") in {"failed", "partial", "unsearchable"}
-            and source.get("interpretation_limit")
-        ][:20],
+        "source_limits": list(coverage.get("source_limits") or [])[:20],
         "pages_fetched": coverage.get("pages_fetched"),
         "temporal_window": coverage.get("temporal_window"),
         "sources": source_receipts,
