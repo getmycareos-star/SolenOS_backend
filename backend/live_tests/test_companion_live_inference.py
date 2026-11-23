@@ -1156,7 +1156,7 @@ def test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led():
 
         self_blame = _ask(
             client, session,
-            "I lost my temper today. I feel like I'm failing her as a caregiver.",
+            "I lost my temper today. I feel guilty, and I feel like I'm failing her as a caregiver.",
             grief_data.get("session_id"),
         )
         assert self_blame.status_code == 200, self_blame.text
@@ -1169,7 +1169,7 @@ def test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led():
 
         positive = _ask(
             client, session,
-            "What a relief. We had a calm afternoon together and she smiled.",
+            "What a relief. I'm grateful we had a calm afternoon together and she smiled.",
             self_blame_data.get("session_id"),
         )
         assert positive.status_code == 200, positive.text
