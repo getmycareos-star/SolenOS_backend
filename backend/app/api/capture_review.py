@@ -125,13 +125,19 @@ def review_capture_candidate(
     snapshot_supplied = (
         payload.expected_source_quote is not None
         or payload.expected_subject is not None
+        or payload.expected_observation is not None
     )
     if snapshot_supplied:
-        if payload.expected_source_quote is None or payload.expected_subject is None:
+        if (
+            payload.expected_source_quote is None
+            or payload.expected_subject is None
+            or payload.expected_observation is None
+        ):
             raise HTTPException(status_code=422, detail="A complete candidate snapshot is required")
         if (
             candidate.get("source_quote") != payload.expected_source_quote
             or candidate.get("subject") != payload.expected_subject
+            or candidate.get("observation") != payload.expected_observation
         ):
             raise HTTPException(
                 status_code=409,
