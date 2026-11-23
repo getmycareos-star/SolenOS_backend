@@ -6456,7 +6456,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     )
     overload = re.search(
         r"\b(?:i(?:'m| am) (?:really |very |so )?overwhelmed|i(?:'m| am) (?:really |very |so )?exhausted|i feel (?:really |very |so )?(?:overwhelmed|exhausted|burnt out|burned out)|"
-        r"i(?:'m| am) so tired|i can't keep up|i cannot keep up|"
+        r"i(?:'m| am) (?:really |very |so )?(?:tired|worn out|drained)|i can't keep up|i cannot keep up|"
         r"i (?:really )?(?:don't|do not) even know what i'm supposed to do anymore|"
         r"i don't know what to do anymore|everything is too much|"
         r"i can't manage(?: all this)?|i cannot manage(?: all this)?|"
@@ -6471,6 +6471,15 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"i(?:'m| am) (?:really |very |so )?(?:sad|lonely|scared|frightened|afraid|anxious|grieving)|"
         r"i feel (?:really |very |so )?(?:sad|alone|lonely|scared|frightened|afraid|anxious|helpless)|"
         r"i(?:'ve| have) been crying|i can't stop crying|i feel like crying)\b",
+        text,
+    )
+    standalone_overload = re.fullmatch(
+        r"(?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)[.!?]*",
+        text,
+    )
+    standalone_distress = re.fullmatch(
+        r"(?:really |very |so )?(?:sad|angry|upset|lonely|scared|frightened|afraid|anxious|"
+        r"helpless|frustrated|furious)[.!?]*",
         text,
     )
     correction = re.search(
@@ -6496,7 +6505,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "that access failed; if the information is absent, say only that it is not present in the available "
             "record. Never claim the problem is fixed unless the relevant retrieval or action actually succeeded."
         )
-    if overload:
+    if overload or standalone_overload:
         guidance.append(
             "LOW-CAPACITY RESPONSE: The caregiver explicitly signals overload or exhaustion. Keep the response "
             "short and grounded in the retrieved situation. Do not produce a checklist, broad care lecture, "
@@ -6509,7 +6518,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
             "that an appointment, reminder, update, or other action is scheduled, completed, or changed. "
             "Prefer present-tense wording and no more than two short sentences."
         )
-    if distress:
+    if distress or standalone_distress:
         guidance.append(
             "DISTRESS RESPONSE: The caregiver expresses distress. Do not force a care workflow, interrogate them, "
             "minimize their experience, or assume they want advice. A brief acknowledgement and space to pause may "
