@@ -494,7 +494,7 @@ def test_worker_lease_maintainer_stops_when_another_worker_reclaims_job(monkeypa
     lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
     calls = []
 
-    def reject_old_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now):
+    def reject_old_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now=None):
         calls.append((job_id, person_id, caregiver_id, expected_locked_at))
         with lease_state["_lock"]:
             lease_state["lost"] = True
@@ -519,7 +519,7 @@ def test_worker_lease_maintainer_advances_only_after_successful_compare_and_swap
     lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
     calls = []
 
-    def accept_current_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now):
+    def accept_current_lease(job_id, person_id, caregiver_id, *, expected_locked_at, lease_state, now=None):
         calls.append((expected_locked_at, now))
         with lease_state["_lock"]:
             if len(calls) == 1:
