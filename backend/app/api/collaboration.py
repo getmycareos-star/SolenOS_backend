@@ -3336,7 +3336,7 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
 def _companion_message_needs_revision(text: str, max_words: int | None = 250) -> bool:
     """Enforce the selected interaction maximum; critical safety has no generic word ceiling."""
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
-    if not words or (max_words is not None and len(words) > max_words):
+    if not (text or "").strip() or (max_words is not None and count_response_words(text) > max_words):
         return True
     if any(words[i] == words[i + 1] == words[i + 2] for i in range(len(words) - 2)):
         return True
