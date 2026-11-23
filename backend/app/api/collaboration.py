@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, inspect, or_, select, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -119,6 +119,15 @@ def _build_unified_lcr_context_or_422(*args, **kwargs):
         return build_unified_lcr_context(*args, **kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SQLAlchemyError as exc:
+        logger.exception("Companion LCR context retrieval failed")
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "SolenOS couldn't retrieve the saved care information for this response. "
+                "No empty or complete care history is assumed; please retry."
+            ),
+        ) from exc
 
 
 def _should_fetch_full_lcr_context_pages(context: dict, care_journey_request: bool) -> bool:
@@ -2752,19 +2761,24 @@ def _collect_full_lcr_context_pages(
             if name != "companion_conversation"
         ):
             break
-        page_context = build_unified_lcr_context(
-            db,
-            person_id,
-            caregiver_id,
-            limit_per_source=limit_per_source,
-            query=query,
-            conversation_limit=1,
-            include_all_history=True,
-            source_offsets=offsets,
-        )
-        page_contexts.append(page_context)
+        try:
+            page_context = build_unified_lcr_context(
+                db,
+                person_id,
+                caregiver_id,
+                limit_per_source=limit_per_source,
+                query=query,
+                conversation_limit=1,
+                include_all_history=True,
+                source_offsets=offsets,
+            )
+        except SQLAlchemyError:
+            logger.exception("Companion LCR history page retrieval failed")
+            page_context = None
+        if isinstance(page_context, dict):
+            page_contexts.append(page_context)
         page_count += 1
-        page_sources = page_context.get("sources", {})
+        page_sources = page_context.get("sources", {}) if isinstance(page_context, dict) else {}
         page_failure_detected = False
         for name, source in merged_sources.items():
             if name == "companion_conversation":
