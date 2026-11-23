@@ -16,6 +16,7 @@ from app.core.database import SessionLocal
 from app.models.notifications import CareNotification
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.reminder import CareReminder
+from app.models.open_loop import OpenLoopRecord
 
 
 def test_postgres_reminder_assignment_history_and_due_notification_recipient():
@@ -360,3 +361,80 @@ def test_postgres_reminder_completion_snooze_and_cancellation_keep_actor_history
             "care.reminder.cancelled",
         }
         assert all(event.actor_id == caregiver_id for event in events)
+
+
+def test_postgres_follow_up_approval_rejects_stale_open_loop_version():
+    suffix = uuid.uuid4().hex[:12]
+    client = TestClient(app)
+    created = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": f"Stale suggestion person {suffix}", "caregiver_name": "Primary caregiver"},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    person_id = body["person"]["id"]
+    caregiver_id = body["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {body['access_token']}"}
+
+    evidence = client.post(
+        "/api/v1/evidence",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "type": "caregiver_report",
+            "source_text": "The clinic asked the family to call to confirm the appointment.",
+            "uploaded_by_caregiver_id": caregiver_id,
+        },
+    )
+    assert evidence.status_code == 200, evidence.text
+    evidence_id = evidence.json()["id"]
+    suggestion_id = f"open_loop_records:stale-loop-{suffix}"
+
+    with SessionLocal() as db:
+        loop = OpenLoopRecord(
+            id=f"stale-loop-{suffix}",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            loop_type="follow_up",
+            title="Confirm appointment",
+            description="Call the clinic to confirm the appointment.",
+            status="open",
+            source_fingerprint=f"stale-fingerprint-{suffix}",
+            source_type="caregiver_report",
+            source_id=evidence_id,
+            evidence=[{"evidence_id": evidence_id}],
+            request_text="Call the clinic to confirm the appointment.",
+            version=1,
+        )
+        db.add(loop)
+        db.commit()
+        loop.version = 2
+        loop.description = "The clinic has already confirmed the appointment."
+        db.commit()
+
+    payload = {
+        "explicit_approval": True,
+        "idempotency_key": f"stale-approval-{suffix}-0001",
+        "suggestion_id": suggestion_id,
+        "suggestion_version": 1,
+        "title": "Call the clinic to confirm the appointment",
+        "action_type": "call",
+        "rationale": "The saved follow-up requests confirmation.",
+        "limitations": "The source may have changed since it was reviewed.",
+        "evidence_ids": [evidence_id],
+    }
+    stale = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=headers,
+        json=payload,
+    )
+    assert stale.status_code == 409, stale.text
+    assert "changed after it was shown" in stale.json()["detail"]
+
+    payload["suggestion_version"] = 2
+    current = client.post(
+        f"/api/v1/registered-actions/{person_id}/approve",
+        headers=headers,
+        json=payload,
+    )
+    assert current.status_code == 201, current.text
