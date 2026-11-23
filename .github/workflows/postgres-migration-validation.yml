@@ -103,6 +103,10 @@ jobs:
         working-directory: backend
         run: python -m alembic upgrade head
 
+      - name: Verify Daily Care review approval, correction and isolation on PostgreSQL
+        working-directory: backend
+        run: python -m pytest tests/test_daily_care_review_postgres.py -q
+
       - name: Verify Qwen worker classification lease fencing on PostgreSQL
         working-directory: backend
         shell: bash
