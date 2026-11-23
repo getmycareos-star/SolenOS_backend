@@ -2134,7 +2134,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
         for item in considered
     ]
     appointment_mode = purpose == "professional_appointment"
-    response_length_policy = resolve_response_length_policy("appointment preparation" if appointment_mode else "care handoff")
+    response_length_policy = resolve_response_length_policy("", intent_hint="appointment_preparation" if appointment_mode else "care_handoff")
     audience_guidance = (
         "Write for a healthcare professional: concise, dated, neutral, source-attributed, and explicit about uncertainty."
         if audience == "professional" else
