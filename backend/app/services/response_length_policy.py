@@ -41,42 +41,42 @@ _ACK = re.compile(
     re.I,
 )
 _EMOTIONAL = re.compile(
-    r"\\b(?:exhausted|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
+    r"\b(?:exhausted|overwhelmed|burnt out|burned out|can't cope|cannot cope|scared|"
     r"frightened|panicking|terrified|at my limit|falling apart|i'm struggling|"
-    r"i am struggling|need a break|no sleep|up all night)\\b",
+    r"i am struggling|need a break|no sleep|up all night)\b",
     re.I,
 )
 _CRITICAL = re.compile(
-    r"\\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
+    r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|chest pain|severe bleeding|choking|"
     r"overdose|suicide attempt|life[- ]threatening|collapsed|seizure|cannot wake|"
-    r"can't wake|blue lips|gasping|heavy bleeding)\\b",
+    r"can't wake|blue lips|gasping|heavy bleeding)\b",
     re.I,
 )
 _APPOINTMENT = re.compile(
-    r"\\b(?:appointment|doctor visit|clinic visit|questions for the doctor|prepare for (?:the )?visit)\\b",
+    r"\b(?:appointment|doctor visit|clinic visit|questions for the doctor|prepare for (?:the )?visit)\b",
     re.I,
 )
 _HANDOFF = re.compile(
-    r"\\b(?:handoff|hand-off|shift change|caregiver update|update the next caregiver|share with the next caregiver)\\b",
+    r"\b(?:handoff|hand-off|shift change|caregiver update|update the next caregiver|share with the next caregiver)\b",
     re.I,
 )
 _DOCUMENT = re.compile(
-    r"\\b(?:document|discharge summary|letter|medical record|uploaded file|attachment)\\b",
+    r"\b(?:document|discharge summary|letter|medical record|uploaded file|attachment)\b",
     re.I,
 )
 _PATTERN = re.compile(
-    r"\\b(?:trend|pattern|over time|changed|change|worse|worsening|improved|decline|"
-    r"increased|decreased|more often|less often)\\b",
+    r"\b(?:trend|pattern|over time|changed|change|worse|worsening|improved|decline|"
+    r"increased|decreased|more often|less often)\b",
     re.I,
 )
 _COMPLEX_HISTORY = re.compile(
-    r"\\b(?:full history|complete history|care journey|timeline|everything that happened|"
-    r"over the last|over the past|across the last|compare .* records|multiple events)\\b",
+    r"\b(?:full history|complete history|care journey|timeline|everything that happened|"
+    r"over the last|over the past|across the last|compare .* records|multiple events)\b",
     re.I,
 )
 _EXPLANATION = re.compile(
-    r"\\b(?:explain|why|how does|what does .* mean|help me understand|what should i know)\\b",
+    r"\b(?:explain|why|how does|what does .* mean|help me understand|what should i know)\b",
     re.I,
 )
 
@@ -128,14 +128,14 @@ def resolve_response_length_policy(
     if _EXPLANATION.search(value):
         return _POLICIES["explanation"]
     if len(value.split()) <= 12 and re.search(
-        r"\\b(?:when|where|which|who|what time|how many|is|are|was|were)\\b", value
+        r"\b(?:when|where|which|who|what time|how many|is|are|was|were)\b", value
     ):
         return _POLICIES["simple_factual_answer"]
     return _POLICIES["explanation"]
 
 
 def count_response_words(text: str) -> int:
-    return len(re.findall(r"[^\\W_]+(?:['’][^\\W_]+)*", text or "", flags=re.UNICODE))
+    return len(re.findall(r"[^\W_]+(?:['’][^\W_]+)*", text or "", flags=re.UNICODE))
 
 
 def response_exceeds_hard_maximum(text: str, policy: ResponseLengthPolicy) -> bool:
