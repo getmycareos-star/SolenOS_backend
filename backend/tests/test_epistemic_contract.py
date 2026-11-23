@@ -19,6 +19,7 @@ from app.services.epistemic_contract import assertion_information_status
         ("inferred", "withdrawn", "historical_assertion"),
         ("verified", "rejected", "historical_assertion"),
         ("conflicting", "superseded", "historical_assertion"),
+        ("verified", "retracted", "historical_assertion"),
     ],
 )
 def test_epistemic_state_is_independent_of_review_lifecycle(
