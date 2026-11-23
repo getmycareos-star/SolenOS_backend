@@ -265,6 +265,28 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     finally:
         db.close()
 
+
+def _post_capture_review(client, path, headers, payload):
+    """Bind test decisions to the exact candidate snapshot returned by the API."""
+    analysis_id = path.rsplit("/", 2)[-2]
+    current = client.get(
+        f"/api/v1/capture/analyses/{analysis_id}",
+        headers=headers,
+    )
+    candidate = {}
+    if current.status_code == 200:
+        observations = current.json().get("candidates", {}).get("observations", [])
+        index = payload.get("candidate_index", 0)
+        if isinstance(observations, list) and 0 <= index < len(observations):
+            candidate = observations[index]
+    bound_payload = {
+        **payload,
+        "expected_source_quote": candidate.get("source_quote") or "",
+        "expected_subject": candidate.get("subject") or "",
+        "expected_observation": candidate.get("observation") or "",
+    }
+    return client.post(path, headers=headers, json=bound_payload)
+
 def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_assertion(monkeypatch):
     client = TestClient(app)
     session = create_session(client, "Care recipient")
@@ -325,15 +347,16 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     finally:
         db.close()
 
-    reviewed = client.post(
+    reviewed = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
-        headers=auth,
-        json={
+        auth,
+        {
             "candidate_index": 0,
             "decision": "correct",
             "corrected_observation": "Mum slept poorly last night.",
         },
-    )
+        )
     assert reviewed.status_code == 200, reviewed.text
     result = reviewed.json()
     assert result["candidate"]["observation"] == "Mum slept badly last night."
@@ -361,11 +384,12 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     finally:
         db.close()
 
-    accepted = client.post(
+    accepted = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert accepted.status_code == 200, accepted.text
     accepted_body = accepted.json()
     assert accepted_body["written_to_lcr"] is True
@@ -386,11 +410,12 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
     assert persisted_payload["written_to_lcr"] is True
     assert persisted_payload["review_required"] is False
 
-    repeated = client.post(
+    repeated = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert repeated.status_code == 409, repeated.text
 
     current_care = client.get("/api/v1/care-continuity/current-care", headers=auth)
@@ -458,11 +483,12 @@ def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(mon
     analysis_id = saved.json()["qwen_analysis_id"]
     process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
 
-    rejected = client.post(
+    rejected = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "reject"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "reject"},
+        )
     assert rejected.status_code == 200, rejected.text
     assert rejected.json()["written_to_lcr"] is False
     assert rejected.json()["candidate"]["review_status"] == "rejected_by_caregiver"
@@ -477,11 +503,12 @@ def test_daily_capture_rejection_never_creates_lcr_assertion_or_allows_retry(mon
     assert persisted_rejection.json()["written_to_lcr"] is False
 
     for decision in ("accept", "reject"):
-        retry = client.post(
+        retry = _post_capture_review(
+            client,
             f"/api/v1/capture/analyses/{analysis_id}/review",
-            headers=auth,
-            json={"candidate_index": 0, "decision": decision},
-        )
+            auth,
+            {"candidate_index": 0, "decision": decision},
+            )
         assert retry.status_code == 409, retry.text
 
     db = TestSessionLocal()
@@ -525,11 +552,12 @@ def test_capture_review_rejects_foreign_analysis_and_invalid_candidate_index(mon
     process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
     second_auth = {"Authorization": f"Bearer {second['access_token']}"}
 
-    foreign = client.post(
+    foreign = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=second_auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        second_auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert foreign.status_code == 404, foreign.text
 
     invalid_index = client.post(
@@ -570,24 +598,27 @@ def test_capture_review_rejects_repeat_decisions_and_empty_corrections(monkeypat
     process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
     auth = {"Authorization": f"Bearer {session['access_token']}"}
 
-    empty_correction = client.post(
+    empty_correction = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "correct"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "correct"},
+        )
     assert empty_correction.status_code == 422, empty_correction.text
 
-    accepted = client.post(
+    accepted = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert accepted.status_code == 200, accepted.text
-    repeat = client.post(
+    repeat = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "reject"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "reject"},
+        )
     assert repeat.status_code == 409, repeat.text
 
 def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_quote(monkeypatch):
@@ -622,11 +653,12 @@ def test_daily_capture_cannot_promote_model_observation_not_supported_by_source_
     analysis_id = saved.json()["qwen_analysis_id"]
     process_daily_capture_job(saved.json()["qwen_job_id"], monkeypatch)
 
-    accepted = client.post(
+    accepted = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{analysis_id}/review",
-        headers=auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert accepted.status_code == 409, accepted.text
     assert "not supported by its preserved source passage" in accepted.json()["detail"]
     assert accepted.json()["detail"].find("no LCR assertion") >= 0
@@ -805,11 +837,12 @@ def test_capture_candidate_review_requires_correct_records_permission():
     finally:
         db.close()
 
-    denied_review = client.post(
+    denied_review = _post_capture_review(
+        client,
         "/api/v1/capture/analyses/nonexistent-analysis/review",
-        headers=headers,
-        json={"candidate_index": 0, "decision": "reject"},
-    )
+        headers,
+        {"candidate_index": 0, "decision": "reject"},
+        )
     assert denied_review.status_code == 403, denied_review.text
     assert "correct records" in denied_review.text.lower()
 
@@ -891,11 +924,12 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     )
     assert visible.status_code == 200, visible.text
 
-    reviewed = client.post(
+    reviewed = _post_capture_review(
+        client,
         f"/api/v1/capture/analyses/{body['qwen_analysis_id']}/review",
-        headers=second_auth,
-        json={"candidate_index": 0, "decision": "accept"},
-    )
+        second_auth,
+        {"candidate_index": 0, "decision": "accept"},
+        )
     assert reviewed.status_code == 200, reviewed.text
     result = reviewed.json()
     assert result["written_to_lcr"] is True
