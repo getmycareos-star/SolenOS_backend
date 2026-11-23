@@ -1,6 +1,7 @@
 """PostgreSQL-only regression coverage for Qwen worker lease ownership."""
 import asyncio
 import os
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +16,7 @@ pytestmark = pytest.mark.skipif(
 
 from app.core.database import SessionLocal
 from app.main import app
+from app.models.care import Caregiver, Person
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput
 from app.services import qwen_background_worker as worker
 
@@ -81,3 +83,76 @@ def test_reclaimed_worker_cannot_overwrite_classified_workflow_on_postgresql(mon
                 job_id=job_id,
                 event_type="job_completed",
             ).count() == 0
+
+
+def test_postgres_lease_compare_and_swap_rejects_a_reclaimed_job(monkeypatch):
+    """Renewal must match the exact persisted lock, not only job identity/status."""
+    suffix = uuid.uuid4().hex
+    person_id = f"lease-cas-person-{suffix}"
+    caregiver_id = f"lease-cas-caregiver-{suffix}"
+    job_id = str(uuid.uuid4())
+    claimed_at = datetime.now(timezone.utc)
+    monkeypatch.setattr(worker, "SessionLocal", SessionLocal)
+    try:
+        with SessionLocal() as db:
+            db.add(Person(id=person_id, name="Lease CAS test recipient"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id,
+                name="Lease CAS test caregiver",
+                relationship="Family",
+                person_id=person_id,
+            ))
+            db.flush()
+            db.add(QwenBackgroundJob(
+                id=job_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                task_text="Review a saved care note.",
+                context_text="",
+                workflow="appointment",
+                status="processing",
+                attempt_count=1,
+                locked_at=claimed_at,
+                available_at=claimed_at,
+            ))
+            db.commit()
+
+        lease_state = {"locked_at": claimed_at, "lost": False, "_lock": threading.Lock()}
+        refreshed_at = claimed_at + timedelta(seconds=30)
+        assert worker._refresh_qwen_job_lease_once(
+            job_id,
+            person_id,
+            caregiver_id,
+            expected_locked_at=claimed_at,
+            lease_state=lease_state,
+            now=refreshed_at,
+        ) is True
+        assert lease_state["locked_at"] == refreshed_at
+
+        newer_lock = refreshed_at + timedelta(minutes=1)
+        with SessionLocal() as db:
+            job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            job.status = "processing"
+            job.locked_at = newer_lock
+            db.commit()
+
+        assert worker._refresh_qwen_job_lease_once(
+            job_id,
+            person_id,
+            caregiver_id,
+            expected_locked_at=refreshed_at,
+            lease_state=lease_state,
+        ) is False
+        assert lease_state["lost"] is True
+        with SessionLocal() as db:
+            job = db.query(QwenBackgroundJob).filter_by(id=job_id).one()
+            assert job.status == "processing"
+            assert job.locked_at == newer_lock
+    finally:
+        with SessionLocal() as db:
+            db.query(QwenJobEvent).filter_by(job_id=job_id).delete(synchronize_session=False)
+            db.query(QwenBackgroundJob).filter_by(id=job_id).delete(synchronize_session=False)
+            db.query(Caregiver).filter_by(id=caregiver_id).delete(synchronize_session=False)
+            db.query(Person).filter_by(id=person_id).delete(synchronize_session=False)
+            db.commit()
