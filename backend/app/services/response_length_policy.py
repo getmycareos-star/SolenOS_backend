@@ -99,7 +99,11 @@ _SELF_HARM_CRITICAL = re.compile(
 _CRITICAL = re.compile(
     r"\b(?:not breathing|trouble breathing|can't breathe|cannot breathe|unresponsive|"
     r"unconscious|stroke symptoms|face drooping|possible stroke|suspected stroke|"
-    r"having a stroke|signs of stroke|sudden weakness|chest pain with difficulty breathing|"
+    r"having a stroke|signs of stroke|sudden weakness|slurred speech|speech is slurred|"
+    r"sudden confusion|suddenly confused|new confusion|sudden vision loss|"
+    r"one[- ]sided weakness|weakness on one side|numbness on one side|"
+    r"sudden numbness|one side of (?:the )?face drooping|"
+    r"chest pain with difficulty breathing|"
     r"severe chest pain|new chest pain|chest pain now|having chest pain|"
     r"heart attack symptoms|possible heart attack|suspected heart attack|having a heart attack|"
     r"severe bleeding|heavy bleeding|is choking|currently choking|choking now|"
