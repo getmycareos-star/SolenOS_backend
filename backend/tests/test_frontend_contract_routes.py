@@ -946,7 +946,7 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
                 else "Use a situation-dependent length; do not omit material safety information to meet a generic word count."
             )
             assert expected_length in prompt, workflow
-            expected_tokens = 40 if workflow == "emergency_readiness" else policy.token_budget
+            expected_tokens = 64 if workflow == "emergency_readiness" else policy.token_budget
             assert captured[-1][1]["options"]["num_predict"] == expected_tokens, workflow
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
