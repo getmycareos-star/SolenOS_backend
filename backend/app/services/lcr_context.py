@@ -1342,6 +1342,13 @@ def build_lcr_context(
                         _retrieval_score(item, query or "", direct_terms, expanded_only)
                         if direct_terms else 0
                     )
+                    if source_name == "document_extractions" and str(item.get("extraction_status") or "").casefold() in {
+                        "partial", "failed", "pending", "processing", "queued", "running", "unavailable",
+                    }:
+                        # Surface unreadable or still-processing documents as
+                        # explicit evidence gaps even when their empty text
+                        # cannot earn a lexical relevance score.
+                        score += 8
                     # The SQL ordering is deterministic. Python's stable sort retains
                     # that order for ties while prioritising exact/direct query matches.
                     ranked_items.append((score, rows_seen if exact_ordered_history else candidate_count, item))
