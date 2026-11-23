@@ -3111,6 +3111,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 else [str(item["evidence_id"])] if source == "evidence_observations" and item.get("evidence_id")
                 else []
             ),
+            "version": item.get("version") if source == "open_loop_records" else None,
         }
         if source == "evidence_observations":
             summary_item["supersedes_observation_id"] = item.get("supersedes_observation_id")
