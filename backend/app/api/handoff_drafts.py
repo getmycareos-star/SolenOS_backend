@@ -30,6 +30,7 @@ from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from app.services.response_length_policy import resolve_response_length_policy, count_response_words
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
+from app.services.lcr_context import build_lcr_context
 
 router = APIRouter(prefix="/handoff-drafts", tags=["care handoff drafts"])
 logger = logging.getLogger(__name__)
@@ -732,6 +733,59 @@ def _draft_content_hash(content: dict) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _attach_event_correction_lineage(source_records: list[dict], lcr_context: dict) -> list[dict]:
+    """Attach canonical event correction state to handoff source snapshots."""
+    sources = lcr_context.get("sources") if isinstance(lcr_context, dict) else {}
+    sources = sources if isinstance(sources, dict) else {}
+    event_source = sources.get("events") if isinstance(sources.get("events"), dict) else {}
+    canonical_items = event_source.get("items") if isinstance(event_source.get("items"), list) else []
+    canonical_by_id = {
+        str(item.get("id")): item for item in canonical_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    for record in source_records:
+        if not isinstance(record, dict) or record.get("source_table") != "care_events":
+            continue
+        canonical = canonical_by_id.get(str(record.get("source_id") or ""))
+        if canonical is None:
+            status = "event_currentness_unknown"
+            lineage_status = "failed"
+            limit = (
+                "The current Living Care Record projection did not confirm this event's correction history. "
+                "Keep it as history; do not present it as the latest account."
+            )
+            corrections = []
+            pending = []
+        else:
+            status = canonical.get("information_status") or "event_currentness_unknown"
+            lineage_status = canonical.get("correction_lineage_status") or "failed"
+            limit = canonical.get("interpretation_limit") or (
+                "The event's currentness could not be established from the Living Care Record."
+            )
+            corrections = canonical.get("superseded_by_corrections") or []
+            pending = canonical.get("pending_corrections") or []
+        record["information_status"] = status
+        record["correction_lineage_status"] = lineage_status
+        record["interpretation_limit"] = limit
+        record["corrections"] = corrections
+        record["pending_corrections"] = pending
+        details = record.get("details") if isinstance(record.get("details"), dict) else {}
+        details.update({
+            "information_status": status,
+            "correction_lineage_status": lineage_status,
+            "interpretation_limit": limit,
+            "corrections": corrections,
+            "pending_corrections": pending,
+        })
+        record["details"] = details
+        if status in {
+            "historical_event", "event_correction_pending",
+            "event_currentness_unknown", "unprocessed_capture",
+        }:
+            record["stale_warning"] = True
+    return source_records
+
+
 def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
     """Bind each generated or source-only briefing claim to its LCR source."""
     generation = content.get("generation") if isinstance(content, dict) else None
@@ -749,9 +803,14 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
         source = source_by_ref.get(source_ref) if isinstance(source_ref, str) else None
         quote = item.get("supporting_quote")
         exact_match = bool(source and isinstance(quote, str) and quote.strip() and quote in str(source.get("text") or ""))
+        source_information_status = str((source or {}).get("information_status") or "").casefold()
         stale = bool(source and (
             source.get("stale_warning")
             or source.get("source_revision_status") in {"stale", "changed", "unavailable"}
+            or source_information_status in {
+                "historical_event", "event_correction_pending",
+                "event_currentness_unknown", "unprocessed_capture",
+            }
         ))
         support_status = (
             "matched_historical_only" if exact_match and stale else
@@ -771,6 +830,11 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
                 "epistemic_status": source.get("epistemic_status"),
                 "assertion_status": source.get("assertion_status"),
                 "record_status": source.get("record_status"),
+                "information_status": source.get("information_status"),
+                "correction_lineage_status": source.get("correction_lineage_status"),
+                "corrections": list(source.get("corrections") or []),
+                "pending_corrections": list(source.get("pending_corrections") or []),
+                "interpretation_limit": source.get("interpretation_limit"),
                 "reporter_label": (
                     next((
                         str(evidence.get("reported_by_label") or evidence.get("original_author")).strip()
@@ -781,7 +845,15 @@ def _handoff_claim_provenance(content: dict, source_snapshot: dict) -> dict:
                     or str((source.get("details") or {}).get("source_label") or "").strip()
                     or None
                 ),
-                "source_state_label": "This source may have changed since it was saved." if stale else None,
+                "source_state_label": (
+                    "This original report was corrected or withdrawn; keep it as history, not the current account."
+                    if source_information_status == "historical_event" else
+                    "A correction is still processing; do not treat this report as the latest account."
+                    if source_information_status == "event_correction_pending" else
+                    "Correction history could not be checked; currentness is unknown."
+                    if source_information_status == "event_currentness_unknown" else
+                    "This source may have changed since it was saved." if stale else None
+                ),
                 "supporting_quote": quote,
                 "related_evidence": list(source.get("evidence_sources") or []),
                 "related_evidence_ids": [str(value) for value in (source.get("evidence_ids") or [])],
@@ -2836,6 +2908,21 @@ def prepare_handoff_draft(
     request_id = (request.headers.get("x-request-id") or "").strip() or str(uuid.uuid4())
     if len(request_id) > 255:
         raise HTTPException(status_code=422, detail="Draft request ID must be 255 characters or fewer")
+    event_records_present = any(
+        isinstance(record, dict) and record.get("source_table") == "care_events"
+        for record in records
+    )
+    if event_records_present:
+        try:
+            event_lineage_context = build_lcr_context(
+                db, person_id, caregiver_id=caregiver_id,
+                limit_per_source=40, include_all_history=True,
+            )
+        except Exception:
+            logger.exception("Handoff correction-aware event projection failed")
+            event_lineage_context = {}
+        records = _attach_event_correction_lineage(records, event_lineage_context)
+
     source_snapshot = {
         "snapshot_id": str(uuid.uuid4()),
         "snapshot_at": now.isoformat(),
