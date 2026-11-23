@@ -28,8 +28,10 @@ def configure_gateway(monkeypatch):
 
 def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
     configure_gateway(monkeypatch)
+    attempts = {"count": 0}
 
     def missing_model(*args, **kwargs):
+        attempts["count"] += 1
         raise urllib.error.HTTPError(
             "http://ollama.internal/api/chat",
             404,
@@ -44,6 +46,29 @@ def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
     assert error.value.status_code == 503
     assert error.value.detail["code"] == "model_not_installed"
     assert error.value.detail["reason"] == "configured_model_missing"
+    assert attempts["count"] == 1, "a missing model must not be retried"
+
+
+def test_qwen_gateway_retries_one_transient_upstream_http_failure(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(qwen_gateway.time, "sleep", lambda _seconds: None)
+    attempts = {"count": 0}
+
+    def transient_then_success(*args, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise urllib.error.HTTPError(
+                "http://ollama.internal/api/chat",
+                503,
+                "Service Unavailable",
+                {"Retry-After": "0"},
+                io.BytesIO(b'{"error":"model is loading"}'),
+            )
+        return FakeResponse(json.dumps({"message": {"content": "Recovered response."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", transient_then_success)
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Recovered response."
+    assert attempts["count"] == 2
 
 
 def test_qwen_gateway_distinguishes_connection_failure(monkeypatch):
