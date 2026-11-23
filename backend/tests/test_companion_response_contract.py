@@ -3334,3 +3334,60 @@ def test_companion_prompt_preserves_document_source_caveats_in_plain_language():
     assert "recommendation" in rendered
     assert "explicitly_negated" not in rendered
     assert "caregiver_reviewed_report_not_independently_verified" not in rendered
+
+
+
+def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypatch):
+    client = setup_client(monkeypatch)
+    captured = {}
+
+    def fake_qwen(base, model, messages, options=None):
+        captured["messages"] = messages
+        return "I cannot confirm this from the records retrieved for this response."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    original_builder = collaboration.build_unified_lcr_context
+
+    def include_unsearchable_source(*args, **kwargs):
+        context = original_builder(*args, **kwargs)
+        context["sources"]["legacy_optional"] = {
+            "status": "unsearchable",
+            "items": [],
+            "candidate_count": None,
+            "returned_count": 0,
+            "candidate_scan_complete": False,
+            "has_more": False,
+            "interpretation_limit": (
+                "This source cannot be searched for this topic; its lack of returned records "
+                "does not establish that no matching care information exists."
+            ),
+        }
+        context["retrieval_scan_complete"] = False
+        context["retrieval_projection_complete"] = False
+        context["history_coverage"] = "partial_source_history"
+        return context
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", include_unsearchable_source)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What have we recorded about sleep?"},
+        )
+        assert response.status_code == 200, response.text
+        coverage = response.json()["lcr_context_coverage"]
+        assert coverage["history_coverage"] == "partial_source_history"
+        assert any(
+            item["source_type"] == "legacy_optional"
+            and item["status"] == "unsearchable"
+            and "cannot be searched for this topic" in item["interpretation_limit"]
+            for item in coverage["source_limits"]
+        )
+        user_prompt = captured["messages"][-1]["content"]
+        assert "legacy_optional" in user_prompt
+        assert "cannot be searched for this topic" in user_prompt
+        assert "cannot confirm from the records retrieved" in user_prompt.casefold()
+    finally:
+        teardown()
