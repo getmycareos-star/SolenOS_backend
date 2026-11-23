@@ -321,6 +321,12 @@ def test_indirect_self_harm_language_uses_unbounded_critical_safety_policy():
         "I'm thinking about suicide.",
         "I might hurt myself.",
         "I'm afraid I might hurt someone.",
+        "Mum wants to die.",
+        "Dad wants to kill himself.",
+        "She told me she wants to die.",
+        "He wishes he were dead.",
+        "Mum is hurting herself.",
+        "They cannot keep themselves safe.",
     ):
         assert is_critical_safety_message(message), message
         policy = resolve_response_length_policy(message)
