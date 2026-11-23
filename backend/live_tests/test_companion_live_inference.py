@@ -966,6 +966,24 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         ), fear_reply
         assert not re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", fear_reply), fear_reply
 
+        sad_question = _ask(
+            client,
+            session,
+            "I'm sad about how things are going. Please explain what the record says about Mum's sleep this week in detail.",
+            session_id,
+        )
+        assert sad_question.status_code == 200, sad_question.text
+        sad_question_data = sad_question.json()
+        assert sad_question_data.get("ai_generated") is True, sad_question_data
+        assert sad_question_data.get("written_to_lcr") is False, sad_question_data
+        assert event_id in sad_question_data.get("source_event_ids", []), sad_question_data
+        sad_question_reply = sad_question_data.get("reply", "")
+        assert 12 < len(sad_question_reply.split()) <= 180, sad_question_reply
+        assert any(
+            term in sad_question_reply.casefold()
+            for term in ("waking", "overnight", "restless", "sleep")
+        ), sad_question_reply
+
         grief = _ask(
             client,
             session,
