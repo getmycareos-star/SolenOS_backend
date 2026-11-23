@@ -71,6 +71,22 @@ def save_original(session_data, source_text):
     return evidence_id
 
 
+def review_payload(analysis_id, candidate_index, decision, **extra):
+    """Build a review request from the persisted candidate snapshot shown to the caregiver."""
+    with Session() as db:
+        analysis = db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
+        intelligence = (analysis.candidates or {}).get("document_intelligence") or {}
+        candidates = intelligence.get("observations") or []
+        candidate = candidates[candidate_index]
+        return {
+            "candidate_index": candidate_index,
+            "decision": decision,
+            "expected_source_quote": candidate.get("source_quote") or "",
+            "expected_subject": candidate.get("subject") or "",
+            **extra,
+        }
+
+
 def test_duplicate_copy_warning_does_not_change_document_assertion_meaning():
     original = {
         "field_type": "observation",
@@ -180,7 +196,7 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         first_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_ids[0]}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_ids[0], 0, "accept"),
         )
         assert first_review.status_code == 200, first_review.text
         first_assertion_id = first_review.json()["source_record_ref"]["record_id"]
@@ -189,7 +205,7 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         duplicate_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_ids[1]}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_ids[1], 0, "accept"),
         )
         assert duplicate_review.status_code == 200, duplicate_review.text
         assert duplicate_review.json()["source_record_ref"]["record_id"] == first_assertion_id
@@ -200,7 +216,7 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
         conflicting_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_ids[2]}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_ids[2], 0, "accept"),
         )
         assert conflicting_review.status_code == 409, conflicting_review.text
 
@@ -358,7 +374,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         rejected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 0, "decision": "reject"},
+            json=review_payload(analysis_id, 0, "reject"),
         )
         assert rejected.status_code == 200, rejected.text
         assert rejected.json()["written_to_lcr"] is False
@@ -366,12 +382,11 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         qualifier_dropping_correction = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 0,
-                "decision": "correct",
-                "corrected_subject": "Metformin",
-                "corrected_observation": "Metformin 1000 mg twice daily.",
-            },
+            json=review_payload(
+                analysis_id, 0, "correct",
+                corrected_subject="Metformin",
+                corrected_observation="Metformin 1000 mg twice daily.",
+            ),
         )
         assert qualifier_dropping_correction.status_code == 409, qualifier_dropping_correction.text
 
@@ -379,12 +394,11 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 1,
-                "decision": "correct",
-                "corrected_subject": "Meal intake",
-                "corrected_observation": quotes[1],
-            },
+            json=review_payload(
+                analysis_id, 1, "correct",
+                corrected_subject="Meal intake",
+                corrected_observation=quotes[1],
+            ),
         )
         assert corrected.status_code == 200, corrected.text
         assert corrected.json()["written_to_lcr"] is False
@@ -409,7 +423,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         accepted = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={"candidate_index": 1, "decision": "accept"},
+            json=review_payload(analysis_id, 1, "accept"),
         )
         assert accepted.status_code == 200, accepted.text
         assert accepted.json()["written_to_lcr"] is True
@@ -553,7 +567,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         denied_review = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=foreign,
-            json={"candidate_index": 0, "decision": "accept"},
+            json=review_payload(analysis_id, 0, "accept"),
         )
         assert denied_review.status_code == 404
         denied_history = client.get(
@@ -736,36 +750,33 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         unsupported_correction = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 0,
-                "decision": "correct",
-                "corrected_subject": "Metformin",
-                "corrected_observation": "Metformin 5000 mg daily.",
-            },
+            json=review_payload(
+                analysis_id, 0, "correct",
+                corrected_subject="Metformin",
+                corrected_observation="Metformin 5000 mg daily.",
+            ),
         )
         assert unsupported_correction.status_code == 409, unsupported_correction.text
 
         qualifier_dropping_correction = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 0,
-                "decision": "correct",
-                "corrected_subject": "Metformin",
-                "corrected_observation": "Metformin 1000 mg twice daily.",
-            },
+            json=review_payload(
+                analysis_id, 0, "correct",
+                corrected_subject="Metformin",
+                corrected_observation="Metformin 1000 mg twice daily.",
+            ),
         )
         assert qualifier_dropping_correction.status_code == 409, qualifier_dropping_correction.text
 
         corrected = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
             headers=auth,
-            json={
-                "candidate_index": 0,
-                "decision": "correct",
-                "corrected_subject": "Metformin",
-                "corrected_observation": quote,
-            },
+            json=review_payload(
+                analysis_id, 0, "correct",
+                corrected_subject="Metformin",
+                corrected_observation=quote,
+            ),
         )
         assert corrected.status_code == 200, corrected.text
         assert corrected.json()["candidate"]["review_status"] == "corrected_pending_approval"
