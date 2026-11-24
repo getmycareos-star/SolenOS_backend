@@ -548,11 +548,11 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             for reference in aggregate.get("source_references", [])
             for evidence_id in reference.get("related_evidence_ids", [])
         ))
-        evidence_rows = db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
+        evidence_rows = _active_person_evidence_query(db, person_id).filter(
             EvidenceModel.id.in_(evidence_ids or {"__no_linked_evidence__"}),
         ).all() if evidence_ids else []
         evidence_by_id = {str(item.id): item for item in evidence_rows}
+        active_evidence_ids = set(evidence_by_id)
         attribution_ids = set()
         for item in evidence_rows:
             attribution_ids.update(
@@ -573,8 +573,8 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         if evidence_ids and inspect(db.get_bind()).has_table("evidence_observations"):
             observations = db.query(EvidenceObservation).filter(
                 EvidenceObservation.person_id == person_id,
-                EvidenceObservation.evidence_id.in_(evidence_ids),
-            ).all()
+                EvidenceObservation.evidence_id.in_(active_evidence_ids or {"__no_active_evidence__"}),
+            ).all() if active_evidence_ids else []
             for observation in observations:
                 searchable = " ".join((
                     observation.attribute or "",
