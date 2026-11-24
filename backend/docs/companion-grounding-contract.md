@@ -12,11 +12,12 @@ Every Companion request constructs its caregiver context from the server-validat
 
 - Caregiver ID and care-recipient ID are bound to the same active grant on every request. The linked account ID, when present, is retained in backend context for identity/audit correlation and is not sent to Qwen.
 - Full name, preferred name, recorded relationship, grant role, access scope, and effective permissions come from the authenticated caregiver and grant records. A greeting may use the caregiver's preferred name but excludes recipient identity, relationship, role, permissions, and care responsibilities.
-- Companion local time is derived only from the caregiver's explicitly configured IANA timezone. Missing or invalid values produce an unknown local-time state; the server timezone and device location are not substitutes.
+- Companion local time is derived only from the caregiver's explicitly configured IANA timezone. Missing or invalid values produce an unknown local-time state; the server timezone and device location are not substitutes. Migration `20261124_02_caregiver_timezone_authority` clears legacy timezone values unless an append-only audit event proves they came from the authenticated caregiver-preferences endpoint.
 - Notification-delivery timezone is independent. It neither configures nor invalidates the Companion timezone, and changing one preference does not mutate the other.
 - Locale, date format, measurement system, and communication style are caregiver preferences. They do not change clinical source values or patient facts.
 - Responsibilities and open loops are included only when they belong to the authenticated caregiver or a valid joint assignment for the authorized recipient.
 - Conversation history is scoped to the authenticated caregiver and recipient. Conversation text can resolve references but is not clinical evidence and cannot silently create or modify an LCR assertion.
+- First-time versus returning status is derived from persisted user turns for that exact caregiver/recipient pair, never from the current chat text. Greeting-only requests receive the status but not prior dialogue or care details. First-time greetings must identify SolenOS Companion; returning greetings must not claim memory of content that was not retrieved.
 
 The backend is the authorization authority. Qwen receives a minimal identity envelope for response wording; it cannot select identities, widen access, establish local time, or perform a write.
 
