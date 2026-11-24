@@ -11258,6 +11258,16 @@ def update_care_notification_preferences(
         preference.quiet_hours_end = payload.quiet_hours_end
     if payload.timezone_name is not None:
         preference.timezone_name = payload.timezone_name
+        caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
+        if caregiver is None:
+            raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
+        caregiver.timezone = payload.timezone_name
+        caregiver.timezone_configured = True
+        profile = db.query(CaregiverProfile).filter_by(
+            person_id=person_id, session_caregiver_id=caregiver_id,
+        ).first()
+        if profile is not None:
+            profile.timezone = payload.timezone_name
     if any(value is not None for value in (
         payload.quiet_hours_enabled, payload.reminders_enabled,
         payload.quiet_hours_start, payload.quiet_hours_end, payload.timezone_name,
@@ -11450,3 +11460,108 @@ def update_consent(payload: ConsentUpdate, request: Request, db: Session = Depen
     db.refresh(record)
     return {"ok": True, **_consent_response(record)}
 
+
+
+class CaregiverPreferencesUpdate(BaseModel):
+    preferred_name: Optional[str] = Field(default=None, max_length=80)
+    timezone: Optional[str] = Field(default=None, min_length=1, max_length=64)
+    locale: Optional[str] = Field(default=None, min_length=2, max_length=16)
+    date_format: Optional[Literal["MM/DD/YYYY", "DD/MM/YYYY", "YYYY-MM-DD"]] = None
+    measurement_system: Optional[Literal["us_customary", "metric"]] = None
+    communication_style: Optional[Literal["concise", "balanced", "detailed"]] = None
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_caregiver_timezone(cls, value):
+        if value is not None:
+            try:
+                ZoneInfo(value)
+            except ZoneInfoNotFoundError as exc:
+                raise ValueError("timezone must be a valid IANA timezone") from exc
+        return value
+
+    @field_validator("preferred_name")
+    @classmethod
+    def validate_preferred_name(cls, value):
+        if value is not None and not value.strip():
+            raise ValueError("preferred_name must not be blank")
+        return value.strip() if value is not None else None
+
+    @field_validator("locale")
+    @classmethod
+    def validate_locale(cls, value):
+        if value is not None and not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", value):
+            raise ValueError("locale must use a language or language-region tag")
+        return value
+
+
+@router.get("/caregiver/preferences")
+def get_caregiver_preferences(request: Request, db: Session = Depends(get_db)):
+    person_id, caregiver_id = _scope(request, db)
+    caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
+    return {
+        "preferred_name": caregiver.preferred_name,
+        "timezone": caregiver.timezone if caregiver.timezone_configured else None,
+        "timezone_configured": bool(caregiver.timezone_configured),
+        "locale": caregiver.locale,
+        "date_format": caregiver.date_format,
+        "measurement_system": caregiver.measurement_system,
+        "communication_style": caregiver.communication_style,
+    }
+
+
+@router.patch("/caregiver/preferences")
+def update_caregiver_preferences(
+    payload: CaregiverPreferencesUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    person_id, caregiver_id = _scope(request, db)
+    caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=422, detail="Choose at least one caregiver preference to update")
+
+    if "preferred_name" in updates:
+        caregiver.preferred_name = updates["preferred_name"]
+    if "timezone" in updates:
+        caregiver.timezone_configured = updates["timezone"] is not None
+        caregiver.timezone = updates["timezone"] or "UTC"
+        notification_preference = db.query(CareNotificationPreference).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).first()
+        if notification_preference is not None:
+            notification_preference.timezone_name = caregiver.timezone
+        profile = db.query(CaregiverProfile).filter_by(
+            person_id=person_id, session_caregiver_id=caregiver_id,
+        ).first()
+        if profile is not None:
+            profile.timezone = caregiver.timezone
+    for field_name in ("locale", "date_format", "measurement_system", "communication_style"):
+        if field_name in updates:
+            setattr(caregiver, field_name, updates[field_name])
+
+    db.add(AuditLogEvent(
+        id=str(uuid.uuid4()), actor_id=caregiver_id, subject_id=person_id,
+        person_id=person_id, caregiver_id=caregiver_id,
+        action="caregiver.preferences.update", target_type="caregiver_preferences",
+        target_id=caregiver_id, occurred_at=datetime.now(timezone.utc),
+        outcome="allowed", request_id=request.headers.get("x-request-id") or str(uuid.uuid4()),
+        policy_version="caregiver-preferences-v1",
+        record_metadata={"updated_fields": sorted(updates.keys())},
+    ))
+    db.commit()
+    db.refresh(caregiver)
+    return {
+        "preferred_name": caregiver.preferred_name,
+        "timezone": caregiver.timezone if caregiver.timezone_configured else None,
+        "timezone_configured": bool(caregiver.timezone_configured),
+        "locale": caregiver.locale,
+        "date_format": caregiver.date_format,
+        "measurement_system": caregiver.measurement_system,
+        "communication_style": caregiver.communication_style,
+    }
