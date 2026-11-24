@@ -278,8 +278,8 @@ def test_qwen_quote_expansion_restores_source_attribution_before_review(monkeypa
     assert canonical["source_attribution"] == "caregiver_reported"
 
 def test_background_daily_capture_extraction_uses_internal_care_extraction_specialist(monkeypatch):
-    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
-    from app.services.qwen_workflows import ENABLED_WORKFLOWS, INTERNAL_API_WORKFLOWS
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence, INTERNAL_API_WORKFLOWS
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS
 
     captured = {}
 
