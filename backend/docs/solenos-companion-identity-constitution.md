@@ -55,3 +55,9 @@ A prompt is not an access-control mechanism. Backend authorization, persistence,
 
 ## Versioning
 Version this specification independently from model prompts. Model migrations retain the same identity and behavioral acceptance suite. Changes require review of affected workflows, backend controls, and regression tests.
+
+
+## Inference-path coverage and acceptance
+The current production Qwen inference entry point is `app.services.qwen_gateway.qwen_chat`. It applies selected specialist instructions and then the shared SolenOS system contract before constructing the Ollama request. API workflows and durable background jobs that call `qwen_chat` inherit the constitution centrally. Direct model calls outside this gateway are not approved production inference paths; evaluation scripts may call a model directly only when explicitly testing the model and must not be mistaken for caregiver-facing application execution.
+
+The identity regression suite must verify both the assembled message contract and the serialized payload sent by the gateway. It must verify that the constitution appears after workflow instructions, so conflicting task instructions cannot redefine the product identity. This is instruction precedence, not a guarantee of model compliance; live model tests remain required.
