@@ -85,6 +85,7 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     # the prior assertion and correction lineage rather than treating it as
     # a generic coordination concern.
     "caregiver_feedback": ("lcr_retrieval", "event_lifecycle"),
+    "sharing_export": ("lcr_retrieval", "handoff_appointment"),
     "care_transition": ("lcr_retrieval", "handoff_appointment"),
     "incident_follow_through": ("lcr_retrieval", "caregiver_continuity"),
     "emergency_readiness": ("lcr_retrieval", "companion"),
@@ -103,7 +104,6 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
 # need a care-domain specialist prompt. The global authority contract still applies.
 WORKFLOWS_WITHOUT_SPECIALISTS = frozenset({
     "reminders_notifications",
-    "sharing_export",
     "roles_access",
     "account_recovery",
     "settings_security",
