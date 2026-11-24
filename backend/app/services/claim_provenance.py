@@ -185,6 +185,40 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
     return records
 
 
+def build_shared_origin_evidence_pairs(evidence_records: list[Any]) -> set[frozenset[str]]:
+    """Derive same-origin pairs only from explicit parent or exact source-reference lineage.
+
+    Callers must supply evidence rows already scoped to one person. Identical text
+    hashes are deliberately not treated as shared origin: independent sources can
+    contain identical wording.
+    """
+    rows = {
+        str(getattr(row, "id", "") or ""): row
+        for row in evidence_records or []
+        if getattr(row, "id", None)
+    }
+    pairs: set[frozenset[str]] = set()
+    references: dict[str, list[str]] = {}
+    for evidence_id, row in rows.items():
+        parent_id = str(getattr(row, "parent_evidence_id", "") or "")
+        if parent_id and parent_id in rows and parent_id != evidence_id:
+            pairs.add(frozenset((evidence_id, parent_id)))
+        reference = re.sub(
+            r"\\s+",
+            " ",
+            str(getattr(row, "original_source_reference", "") or "").strip(),
+        ).casefold()
+        if reference:
+            references.setdefault(reference, []).append(evidence_id)
+    for evidence_ids in references.values():
+        unique_ids = list(dict.fromkeys(evidence_ids))
+        for index, left in enumerate(unique_ids):
+            for right in unique_ids[index + 1:]:
+                if left != right:
+                    pairs.add(frozenset((left, right)))
+    return pairs
+
+
 def build_distinct_event_aggregate(
     events: list[dict[str, Any]],
     *,
