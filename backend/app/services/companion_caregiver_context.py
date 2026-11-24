@@ -64,7 +64,10 @@ def build_companion_caregiver_context(
 
     full_name = _clean(getattr(caregiver, "name", None), limit=160)
     preferred_name = _clean(getattr(caregiver, "preferred_name", None), limit=80)
-    display_name = preferred_name or full_name
+    first_name = full_name.split()[0] if full_name else None
+    if first_name and first_name.casefold() in {"family", "caregiver", "primary", "unknown"}:
+        first_name = None
+    display_name = preferred_name or first_name
     timezone_name = _clean(getattr(caregiver, "timezone", None), limit=64)
     timezone_configured = bool(getattr(caregiver, "timezone_configured", False))
     timezone_status = "not_configured"
