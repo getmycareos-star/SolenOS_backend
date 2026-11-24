@@ -70,6 +70,7 @@ from app.api.accounts import router as accounts_router
 from app.api.caregiver_access import router as caregiver_access_router
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.api.privacy_requests import router as privacy_requests_router
+from app.api.transparency import router as transparency_router
 from app.api.identity_security import router as identity_security_router
 from app.api.security_incidents import router as security_incidents_router
 from app.schemas.situation import InteractionPauseResponse, SituationInput, SituationResponse
@@ -333,6 +334,7 @@ app.include_router(anonymous_sessions_router, prefix="/api/v1")
 app.include_router(accounts_router, prefix="/api/v1")
 app.include_router(caregiver_access_router, prefix="/api/v1")
 app.include_router(privacy_requests_router, prefix="/api/v1")
+app.include_router(transparency_router, prefix="/api/v1")
 app.include_router(identity_security_router, prefix="/api/v1")
 app.include_router(security_incidents_router, prefix="/api/v1")
 app.include_router(api_v1_router, prefix="/api/v1")
@@ -473,6 +475,8 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                 # Privacy requests remain available to authorized document-limited caregivers.
                 # The handler scopes each request to the authenticated caregiver and record.
                 "/api/v1/privacy/requests",
+                # Transparency is restricted to the current caregiver grant and record scope.
+                "/api/v1/transparency",
                 "/api/documents",
                 "/api/v1/sessions/refresh",
             )
