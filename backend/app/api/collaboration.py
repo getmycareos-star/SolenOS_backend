@@ -5546,10 +5546,19 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         for source_name in canonical_sources:
             source = shared_lcr_context.get("sources", {}).get(source_name, {})
             for item in source.get("items", []):
+                prompt_item = item
+                if focused_event_assist and not can_view_documents and source_name == "assertions":
+                    # Preserve the reviewed LCR assertion while withholding
+                    # document excerpts and source context from a caregiver
+                    # who lacks permission to view the underlying document.
+                    prompt_item = {
+                        key: value for key, value in item.items()
+                        if key not in {"source_text", "source_context", "evidence_ids"}
+                    }
                 line = (
                     f"Canonical LCR source ({source_name}; "
-                    f"information_status={item.get('information_status', 'unknown')}): "
-                    + json.dumps(item, ensure_ascii=False, default=str)
+                    f"information_status={prompt_item.get('information_status', 'unknown')}): "
+                    + json.dumps(prompt_item, ensure_ascii=False, default=str)
                 )
                 if shared_items_added >= max_shared_items or shared_chars_added + len(line) > max_shared_chars:
                     shared_context_truncated = True
