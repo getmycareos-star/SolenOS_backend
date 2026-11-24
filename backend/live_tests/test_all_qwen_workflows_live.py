@@ -92,6 +92,7 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
     from app.services import qwen_gateway
     from app.services.qwen_gateway import _estimate_prompt_tokens, qwen_chat
     from app.services.qwen_specialized_prompts import (
+        SPECIALIZED_PROMPTS,
         WORKFLOW_SPECIALISTS,
         apply_specialized_intelligence,
         select_specialized_domains,
