@@ -1,4 +1,4 @@
-"""Transparency evidence endpoint tests; PostgreSQL-backed when TEST_POSTGRES_URL is set."""
+"""Transparency evidence endpoint tests; requires a real PostgreSQL database."""
 import hashlib
 import os
 import secrets
@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 pytestmark = pytest.mark.session_security
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
@@ -29,14 +28,9 @@ from app.models.privacy_request import DataSubjectRequest
 TEST_POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")
 COMPANION_POSTGRES_URL = os.getenv("SOLENOS_COMPANION_TEST_DATABASE_URL")
 POSTGRES_URL = TEST_POSTGRES_URL or COMPANION_POSTGRES_URL
-if POSTGRES_URL:
-    engine = create_engine(POSTGRES_URL, pool_pre_ping=True)
-else:
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+if not POSTGRES_URL:
+    pytest.skip("Transparency evidence integration requires PostgreSQL; SQLite is not supported.", allow_module_level=True)
+engine = create_engine(POSTGRES_URL, pool_pre_ping=True)
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -54,9 +48,7 @@ def setup_function():
         with engine.begin() as connection:
             connection.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
             connection.exec_driver_sql("CREATE SCHEMA public")
-        Base.metadata.create_all(bind=engine)
-    elif not COMPANION_POSTGRES_URL:
-        Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
 
@@ -64,8 +56,6 @@ def setup_function():
 def teardown_function():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
-    if not POSTGRES_URL:
-        Base.metadata.drop_all(bind=engine)
 
 
 def _create_session(client, caregiver_name="Primary caregiver"):
