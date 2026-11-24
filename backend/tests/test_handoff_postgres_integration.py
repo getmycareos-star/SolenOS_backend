@@ -85,6 +85,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
         HandoffRecord,
     )
     from app.models.notifications import CareNotification
+    from app.models.uncertainty import OpenQuestion
 
     client = TestClient(app)
     owner = _create_session(client, "PostgreSQL initiating caregiver")
@@ -116,6 +117,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     event_id = str(uuid.uuid4())
     analysis_id = str(uuid.uuid4())
     shared_analysis_id = str(uuid.uuid4())
+    open_question_evidence_id = str(uuid.uuid4())
+    open_question_id = str(uuid.uuid4())
     original_document = b"Clinic letter: follow-up appointment date is 12 December."
     shared_original_document = b"Older family caregiver document: current mobility support instructions."
     document_sha = hashlib.sha256(original_document).hexdigest()
@@ -149,6 +152,18 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                 original_source_reference="family/mobility-support",
                 uploaded_at=datetime.now(timezone.utc) - timedelta(days=45),
             ),
+            Evidence(
+                id=open_question_evidence_id,
+                person_id=owner["person"]["id"],
+                type="caregiver_observation",
+                evidence_kind="caregiver_report",
+                epistemic_status="caregiver_reported",
+                source_text="The caregiver reported that the current transfer support level was not recorded and needs confirmation before the next handoff.",
+                source_type="caregiver_report",
+                uploaded_by_caregiver_id=owner["caregiver"]["id"],
+                reported_by_caregiver_id=owner["caregiver"]["id"],
+                reported_by_label="Family caregiver",
+            ),
             CareEvent(
                 id=event_id,
                 person_id=owner["person"]["id"],
@@ -163,6 +178,28 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
             ),
         ])
         db.flush()
+        db.add(OpenQuestion(
+            id=open_question_id,
+            person_id=owner["person"]["id"],
+            question="What transfer support is required for the next handoff?",
+            description="The current transfer support level is not recorded.",
+            subject_type="person",
+            subject_id=owner["person"]["id"],
+            status="open",
+            necessity="necessary",
+            necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
+            evidence_ids=[open_question_evidence_id],
+            context=[{
+                "source_kind": "caregiver_report",
+                "source_id": open_question_evidence_id,
+                "source_record_refs": [{"record_type": "evidence", "record_id": open_question_evidence_id}],
+                "necessity_assessment": {
+                    "necessity_rationale": "The receiving caregiver needs the current support level to safely plan transfers.",
+                    "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level.",
+                    "evidence_ids": [open_question_evidence_id],
+                },
+            }],
+        ))
         db.add_all([
             EvidenceUpload(
                 evidence_id=document_id,
@@ -220,7 +257,8 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     def grounded_qwen(records, purpose, audience):
         daily = next((row for row in records if row["source_type"] == "daily_care_observation"), None)
         document = next((row for row in records if row["source_type"] == "document_extracted_text"), None)
-        if daily is None or document is None:
+        open_question = next((row for row in records if row["source_type"] == "open_question"), None)
+        if daily is None or document is None or open_question is None:
             return {"status": "not_generated_no_fixture_sources", "provider": "ollama", "model": "qwen-postgres-integration-fixture", "sections": []}
         return {
             "status": "generated",
@@ -251,6 +289,18 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                     "recorded_at": document["recorded_at"],
                     "stale_warning": document["stale_warning"],
                 },
+                {
+                    "section": "Unresolved transfer-support question",
+                    "source_ref": f"{open_question['source_table']}:{open_question['source_id']}",
+                    "summary": "The transfer support level remains unresolved and needs caregiver confirmation.",
+                    "supporting_quote": open_question["text"][: min(120, len(open_question["text"]))],
+                    "text": open_question["text"],
+                    "epistemic_status": open_question.get("epistemic_status"),
+                    "record_status": open_question.get("record_status"),
+                    "event_at": open_question.get("event_at"),
+                    "recorded_at": open_question.get("recorded_at"),
+                    "stale_warning": open_question.get("stale_warning"),
+                },
             ],
         }
 
@@ -279,6 +329,14 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert any(row["source_id"] == analysis_id for row in prepared.json()["source_references"])
     assert any(row["source_id"] == shared_analysis_id for row in prepared.json()["source_references"])
     assert any(row["source_id"] == shared_document_id for row in prepared.json()["source_references"])
+    assert any(
+        row["source_table"] == "open_questions" and row["source_id"] == open_question_id
+        for row in prepared.json()["source_references"]
+    )
+    assert any(
+        section.get("source_ref") == f"open_questions:{open_question_id}"
+        for section in prepared.json()["generation"]["sections"]
+    )
 
     # The reporting window changes period events, not older same-person context.
     for window_days in (7, 14, 30):
