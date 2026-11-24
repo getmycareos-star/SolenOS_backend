@@ -13,10 +13,11 @@ from sqlalchemy import func, inspect, or_
 from sqlalchemy.orm import Session
 
 from app.models.anonymous_session import AnonymousSession
+from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care import CareEvent, Caregiver, Correction, Evidence
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion
+from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_export import PrivacyExportArtifact
@@ -128,6 +129,7 @@ def build_transparency_evidence(
         "active_session": "complete" if active_session else "unavailable",
         "sharing_members": "not_authorized",
         "documents": "not_authorized",
+        "document_review": "not_authorized",
         "lcr": "not_authorized",
         "audit_activity": "not_authorized",
         "privacy_requests": "not_checked",
@@ -236,6 +238,17 @@ def build_transparency_evidence(
             .all()
         )
         extraction_counts = {str(status or "unknown"): int(count) for status, count in extraction_rows}
+        extraction_query = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id.is_not(None),
+        )
+        extraction_count = extraction_query.count()
+        recent_extractions = (
+            extraction_query.order_by(CaptureAnalysis.created_at.desc(), CaptureAnalysis.id.desc())
+            .limit(MAX_RECENT_ITEMS + 1)
+            .all()
+        )
+        has_more_extractions = len(recent_extractions) > MAX_RECENT_ITEMS
         items.append({
             "kind": "documents_and_extraction",
             "source_service": "evidence_evidence_uploads_capture_analyses",
@@ -249,17 +262,162 @@ def build_transparency_evidence(
                 "recent_documents_limit": MAX_RECENT_ITEMS,
                 "has_more_recent_documents": has_more,
                 "extraction_status_counts": extraction_counts,
+                "extraction_record_count": int(extraction_count),
+                "recent_extractions": [{
+                    "analysis_id": str(row.id),
+                    "source_evidence_id": str(row.source_evidence_id),
+                    "extraction_status": row.extraction_status,
+                    "created_at": _iso(row.created_at),
+                    "updated_at": _iso(row.updated_at),
+                } for row in recent_extractions[:MAX_RECENT_ITEMS]],
+                "recent_extractions_limit": MAX_RECENT_ITEMS,
+                "has_more_extractions": has_more_extractions,
                 "upload_binary_metadata_available": uploads_available,
                 "records_missing_upload_metadata_in_returned_window": missing_upload_metadata,
             },
         })
-        coverage["documents"] = "partial" if has_more or not uploads_available or missing_upload_metadata else "complete_metadata"
+        coverage["documents"] = "partial" if has_more or has_more_extractions or not uploads_available or missing_upload_metadata else "complete_metadata"
+
+        if _table_available(db, "document_review_events"):
+            review_query = db.query(DocumentReviewEvent).filter(
+                DocumentReviewEvent.person_id == person_id
+            )
+            review_count = review_query.count()
+            review_rows = (
+                review_query.order_by(DocumentReviewEvent.created_at.desc(), DocumentReviewEvent.id.desc())
+                .limit(MAX_RECENT_ITEMS + 1)
+                .all()
+            )
+            has_more_reviews = len(review_rows) > MAX_RECENT_ITEMS
+            reviewer_ids = {str(row.caregiver_id) for row in review_rows[:MAX_RECENT_ITEMS]}
+            reviewer_names = {
+                str(row.id): row.name for row in db.query(Caregiver).filter(
+                    Caregiver.person_id == person_id,
+                    Caregiver.id.in_(reviewer_ids),
+                ).all()
+            } if reviewer_ids else {}
+            items.append({
+                "kind": "document_review_history",
+                "source_service": "document_review_events",
+                "scope": {"person_id": person_id},
+                "observed_at": now.isoformat(),
+                "status": "available",
+                "completeness": "recent_bounded_append_only_review_events",
+                "details": {
+                    "review_event_count": int(review_count),
+                    "recent_reviews": [{
+                        "review_event_id": str(row.id),
+                        "analysis_id": str(row.analysis_id),
+                        "source_evidence_id": str(row.source_evidence_id),
+                        "candidate_index": row.candidate_index,
+                        "decision_version": row.decision_version,
+                        "decision": row.decision,
+                        "reviewer_name": reviewer_names.get(str(row.caregiver_id), "Another caregiver"),
+                        "resulting_assertion_id": str(row.resulting_assertion_id) if row.resulting_assertion_id else None,
+                        "created_at": _iso(row.created_at),
+                    } for row in review_rows[:MAX_RECENT_ITEMS]],
+                    "recent_reviews_limit": MAX_RECENT_ITEMS,
+                    "has_more_reviews": has_more_reviews,
+                },
+            })
+            coverage["document_review"] = "partial" if has_more_reviews else "complete_recent_window"
+        else:
+            items.append({
+                "kind": "document_review_history",
+                "source_service": "document_review_events",
+                "scope": {"person_id": person_id},
+                "observed_at": now.isoformat(),
+                "status": "unavailable",
+                "completeness": "unavailable",
+                "reason": "The document review history table is not available in the connected database schema.",
+            })
+            coverage["document_review"] = "unavailable"
 
     if can_view_lcr:
         assertion_status_counts = _count_by(db, CareAssertion, CareAssertion.assertion_status, person_id)
         epistemic_state_counts = _count_by(db, CareAssertion, CareAssertion.epistemic_state, person_id)
         event_count = db.query(func.count(CareEvent.id)).filter(CareEvent.person_id == person_id).scalar() or 0
         correction_status_counts = _count_by(db, Correction, Correction.processing_status, person_id)
+        correction_query = db.query(Correction).filter(Correction.person_id == person_id)
+        correction_count = correction_query.count()
+        recent_corrections = (
+            correction_query.order_by(Correction.created_at.desc(), Correction.id.desc())
+            .limit(MAX_RECENT_ITEMS + 1)
+            .all()
+        )
+        has_more_corrections = len(recent_corrections) > MAX_RECENT_ITEMS
+        correction_actor_ids = {str(row.caregiver_id) for row in recent_corrections[:MAX_RECENT_ITEMS]}
+        correction_actor_names = {
+            str(row.id): row.name for row in db.query(Caregiver).filter(
+                Caregiver.person_id == person_id,
+                Caregiver.id.in_(correction_actor_ids),
+            ).all()
+        } if correction_actor_ids else {}
+
+        revision_rows = []
+        has_more_revisions = False
+        if _table_available(db, "care_state_revisions"):
+            revision_rows = (
+                db.query(CareStateRevision)
+                .filter(CareStateRevision.person_id == person_id)
+                .order_by(CareStateRevision.changed_at.desc(), CareStateRevision.id.desc())
+                .limit(MAX_RECENT_ITEMS + 1)
+                .all()
+            )
+            has_more_revisions = len(revision_rows) > MAX_RECENT_ITEMS
+        revision_actor_ids = {
+            str(row.changed_by_caregiver_id) for row in revision_rows[:MAX_RECENT_ITEMS]
+            if row.changed_by_caregiver_id
+        }
+        revision_actor_names = {
+            str(row.id): row.name for row in db.query(Caregiver).filter(
+                Caregiver.person_id == person_id,
+                Caregiver.id.in_(revision_actor_ids),
+            ).all()
+        } if revision_actor_ids else {}
+
+        proposal_query = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.person_id == person_id
+        )
+        if not can_manage_members:
+            proposal_query = proposal_query.filter(AIOutputLCRProposal.caregiver_id == caregiver_id)
+        proposal_count = proposal_query.count()
+        proposal_rows = (
+            proposal_query.order_by(AIOutputLCRProposal.created_at.desc(), AIOutputLCRProposal.id.desc())
+            .limit(MAX_RECENT_ITEMS + 1)
+            .all()
+        )
+        has_more_proposals = len(proposal_rows) > MAX_RECENT_ITEMS
+        proposal_ids = [str(row.id) for row in proposal_rows[:MAX_RECENT_ITEMS]]
+        decision_rows = (
+            db.query(AIOutputLCRDecision)
+            .filter(
+                AIOutputLCRDecision.person_id == person_id,
+                AIOutputLCRDecision.proposal_id.in_(proposal_ids),
+            )
+            .order_by(AIOutputLCRDecision.created_at.desc(), AIOutputLCRDecision.id.desc())
+            .limit(MAX_RECENT_ITEMS * 2)
+            .all()
+        ) if proposal_ids else []
+        decision_actor_ids = {
+            str(row.reviewer_caregiver_id) for row in decision_rows if row.reviewer_caregiver_id
+        }
+        decision_actor_names = {
+            str(row.id): row.name for row in db.query(Caregiver).filter(
+                Caregiver.person_id == person_id,
+                Caregiver.id.in_(decision_actor_ids),
+            ).all()
+        } if decision_actor_ids else {}
+        decisions_by_proposal: dict[str, list[dict[str, Any]]] = {}
+        for row in decision_rows:
+            decisions_by_proposal.setdefault(str(row.proposal_id), []).append({
+                "decision_id": str(row.id),
+                "decision": row.decision,
+                "reviewer_name": decision_actor_names.get(str(row.reviewer_caregiver_id), "Another caregiver"),
+                "resulting_lcr_revision_id": row.resulting_lcr_revision_id,
+                "created_at": _iso(row.created_at),
+            })
+
         assertion_rows = (
             db.query(CareAssertion)
             .filter(CareAssertion.person_id == person_id)
@@ -280,6 +438,43 @@ def build_transparency_evidence(
                 "assertion_status_counts": assertion_status_counts,
                 "epistemic_state_counts": epistemic_state_counts,
                 "correction_processing_status_counts": correction_status_counts,
+                "correction_count": int(correction_count),
+                "recent_corrections": [{
+                    "correction_id": str(row.id),
+                    "target_type": row.target_type,
+                    "target_id": str(row.target_id),
+                    "processing_status": row.processing_status,
+                    "processing_attempts": row.processing_attempts,
+                    "actor_name": correction_actor_names.get(str(row.caregiver_id), "Another caregiver"),
+                    "created_at": _iso(row.created_at),
+                    "processed_at": _iso(row.processed_at),
+                } for row in recent_corrections[:MAX_RECENT_ITEMS]],
+                "recent_corrections_limit": MAX_RECENT_ITEMS,
+                "has_more_corrections": has_more_corrections,
+                "recent_revisions": [{
+                    "revision_id": str(row.id),
+                    "target_type": row.target_type,
+                    "target_id": str(row.target_id),
+                    "revision_number": row.revision_number,
+                    "change_kind": row.change_kind,
+                    "changed_by": revision_actor_names.get(str(row.changed_by_caregiver_id), "SolenOS system" if not row.changed_by_caregiver_id else "Another caregiver"),
+                    "changed_at": _iso(row.changed_at),
+                    "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
+                } for row in revision_rows[:MAX_RECENT_ITEMS]],
+                "has_more_revisions": has_more_revisions,
+                "proposal_count": int(proposal_count),
+                "recent_proposals": [{
+                    "proposal_id": str(row.id),
+                    "proposal_type": row.proposal_type,
+                    "status": row.status,
+                    "created_at": _iso(row.created_at),
+                    "expires_at": _iso(row.expires_at),
+                    "source_event_ids": [str(value) for value in (row.source_event_ids_json or [])],
+                    "source_evidence_ids": [str(value) for value in (row.source_evidence_ids_json or [])],
+                    "decisions": decisions_by_proposal.get(str(row.id), []),
+                } for row in proposal_rows[:MAX_RECENT_ITEMS]],
+                "recent_proposals_limit": MAX_RECENT_ITEMS,
+                "has_more_proposals": has_more_proposals,
                 "recent_assertions": [{
                     "assertion_id": str(row.id),
                     "field": row.field,
@@ -294,7 +489,7 @@ def build_transparency_evidence(
                 "has_more_assertions": has_more_assertions,
             },
         })
-        coverage["lcr"] = "partial" if has_more_assertions else "complete_aggregate_and_recent"
+        coverage["lcr"] = "partial" if (has_more_assertions or has_more_corrections or has_more_revisions or has_more_proposals) else "complete_aggregate_and_recent"
 
     if can_view_lcr and _table_available(db, "audit_log_events"):
         audit_query = db.query(AuditLogEvent).filter(AuditLogEvent.person_id == person_id)
