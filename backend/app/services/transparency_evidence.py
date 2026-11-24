@@ -886,7 +886,7 @@ def build_transparency_evidence(
     processing_count = None
     processing_has_more = False
     if processing_policy_available:
-        processing_scope = "person_id = :person_id OR subject_id = :person_id"
+        processing_scope = "(person_id = :person_id OR subject_id = :person_id OR (person_id IS NULL AND subject_id IS NULL))"
         processing_count = db.execute(
             text(f"SELECT COUNT(*) FROM data_processing_records WHERE ({processing_scope}) "
                  "AND (active_from IS NULL OR active_from <= :now) "
@@ -937,15 +937,17 @@ def build_transparency_evidence(
         "scope": {"person_id": person_id},
         "observed_at": now.isoformat(),
         "status": (
-            "available" if processing_policy_available and legal_holds_available
+            "available" if processing_policy_available and bool(processing_count) and legal_holds_available
             else "partial" if processing_policy_available or legal_holds_available
             else "unavailable"
         ),
         "completeness": (
-            "partial" if processing_has_more or legal_holds_have_more
+            "partial" if (
+                processing_has_more or legal_holds_have_more
+                or not processing_policy_available or not bool(processing_count)
+                or not legal_holds_available
+            )
             else "scoped_runtime_records"
-            if processing_policy_available and legal_holds_available
-            else "partial_or_unavailable_schema"
         ),
         "details": {
             "processing_policy_record_count": int(processing_count) if processing_count is not None else None,
@@ -977,8 +979,8 @@ def build_transparency_evidence(
     })
     coverage["privacy_policy"] = (
         "partial" if (
-            not processing_policy_available or not legal_holds_available
-            or processing_has_more or legal_holds_have_more
+            not processing_policy_available or not bool(processing_count)
+            or not legal_holds_available or processing_has_more or legal_holds_have_more
         ) else "scoped_runtime_records"
     )
 
