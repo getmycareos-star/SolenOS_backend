@@ -56,6 +56,7 @@ def test_qwen_context_budget_retries_with_balanced_source_context(monkeypatch):
 
     assert len(attempts) > 1
     assert len(attempts[-1]) <= 350
+    assert "Some authorized records were omitted" in attempts[-1]
     assert reply == "The saved note reports an unfinished breakfast."
     assert selected_raw
     assert rendered
