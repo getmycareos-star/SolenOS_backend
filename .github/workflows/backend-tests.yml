@@ -550,6 +550,8 @@ jobs:
 
       - name: Verify document medication conflict questions are source-backed on PostgreSQL
         run: python -m pytest backend/tests/test_document_lifecycle_postgres.py::test_postgres_document_medication_conflict_creates_professional_question_without_changing_medication -q -vv
+      - name: Verify evidence-grounded historical reconstruction and source isolation on PostgreSQL
+        run: python -m pytest backend/tests/test_messy_care_1000_api_postgres.py::test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time backend/tests/test_messy_care_1000_api_postgres.py::test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_history -q -vv
 
   qwen-image-build:
     # Keep the heavyweight live-Qwen image/inference check manual; core release gates
