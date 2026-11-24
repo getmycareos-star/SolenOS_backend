@@ -1978,11 +1978,23 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
         "recorded_at": item.ingested_at.isoformat() if item.ingested_at else (item.uploaded_at.isoformat() if item.uploaded_at else None),
     } for item in source_evidence_rows)
+    # Every source above was selected through this reconciliation's
+    # authenticated person-scoped queries. Carry that server-derived scope into
+    # claim matching; a record ID or exact wording alone must never authorize a
+    # cross-person provenance match.
+    scoped_summary_source_records = [
+        {**source_record, "person_id": str(person_id)}
+        for source_record in summary_source_records
+    ]
     for summary_name in ("event_summary", "caregiver_summary", "clinician_summary"):
         summary_text = str(result.get(summary_name) or "").strip()
         if not summary_text:
             continue
-        summary_provenance = build_claim_provenance(summary_text, summary_source_records)
+        summary_provenance = build_claim_provenance(
+            summary_text,
+            scoped_summary_source_records,
+            expected_person_id=str(person_id),
+        )
         for summary_index, summary_claim in enumerate(summary_provenance.get("claims", [])):
             summary_status = summary_claim.get("support_status")
             summary_refs = enrich_delta_source_references(summary_claim.get("source_references") or [])
