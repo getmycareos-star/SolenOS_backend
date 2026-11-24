@@ -323,3 +323,17 @@ def test_unconfigured_timezone_is_explicitly_unknown_in_companion_identity_envel
     assert identity["timezone_name"] is None
     assert identity["local_date"] is None
     assert identity["local_time"] is None
+
+
+def test_authenticated_account_identity_is_retained_in_backend_context_not_model_envelope():
+    context = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(),
+        authenticated_account_id="account-123",
+    )
+    assert context["authenticated_account_id"] == "account-123"
+
+    identity = build_companion_prompt_identity_context(context, "Margaret Williams")
+    assert identity["caregiver_display_name"] == "Mary"
+    assert "authenticated_account_id" not in identity
+    assert "account-123" not in str(identity)
