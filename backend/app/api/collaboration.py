@@ -7193,15 +7193,15 @@ def _contains_fabricated_empathy(reply: str) -> bool:
     if not isinstance(reply, str) or not reply.strip():
         return False
     patterns = (
-        r"\\bi know exactly how you feel\\b",
-        r"\\bi know how you feel\\b",
-        r"\\bi understand exactly how you feel\\b",
-        r"\\bi feel your pain\\b",
-        r"\\bi(?:'ve| have) been through (?:this|the same thing)\\b",
-        r"\\bi(?:'ve| have) been there\\b",
-        r"\\bas a caregiver myself\\b",
-        r"\\byou must (?:be )?feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\\b",
-        r"\\byou are probably feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\\b",
+        r"\bi know exactly how you feel\b",
+        r"\bi know how you feel\b",
+        r"\bi understand exactly how you feel\b",
+        r"\bi feel your pain\b",
+        r"\bi(?:'ve| have) been through (?:this|the same thing)\b",
+        r"\bi(?:'ve| have) been there\b",
+        r"\bas a caregiver myself\b",
+        r"\byou must (?:be )?feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\b",
+        r"\byou are probably feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\b",
     )
     return any(re.search(pattern, reply, flags=re.IGNORECASE) for pattern in patterns)
 
