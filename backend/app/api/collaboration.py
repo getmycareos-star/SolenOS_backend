@@ -5631,13 +5631,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     and source.get("interpretation_limit")
                 ][:20],
                 "sources": {
-                    name: {
-                        "status": source.get("status"),
-                        "returned_count": source.get("returned_count", 0),
-                        "candidate_scan_complete": source.get("candidate_scan_complete", False),
-                        "has_more": source.get("has_more", False),
-                        "interpretation_limit": source.get("interpretation_limit"),
-                    }
+                    name: {"status": source.get("status")}
                     for name, source in shared_lcr_context.get("sources", {}).items()
                 },
             }, ensure_ascii=False, default=str)
