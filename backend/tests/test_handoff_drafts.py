@@ -1284,7 +1284,12 @@ def test_qwen_appointment_briefing_uses_only_lcr_snapshot_and_appointment_contex
         "event_at": "2026-11-20T09:00:00+00:00",
         "recorded_at": "2026-11-10T09:00:00+00:00",
         "text": "Follow-up visit scheduled.",
-    }], "professional_appointment", "professional")
+    }], "professional_appointment", "professional", audit_context={
+        "person_id": "person-1",
+        "caregiver_id": "caregiver-1",
+        "request_id": "handoff-request-1",
+        "source_refs": ["appointments:visit-1"],
+    })
 
     system_prompt = observed["messages"][0]["content"]
     request_payload = json.loads(observed["messages"][1]["content"])
@@ -1295,6 +1300,8 @@ def test_qwen_appointment_briefing_uses_only_lcr_snapshot_and_appointment_contex
     assert "do not use model memory" in system_prompt.lower()
     assert "target: 150 words; hard maximum: 250" in system_prompt
     assert observed["options"]["num_predict"] == 768
+    assert observed["audit_context"]["person_id"] == "person-1"
+    assert observed["audit_context"]["source_refs"] == ["appointments:visit-1"]
     assert result["sections"][0]["supporting_quote"] == "Follow-up visit scheduled."
 
 
