@@ -6359,6 +6359,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
             data[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     try:
+        revision_payload = data
         if resource == "record-change-items":
             # A change item is not merely an audit annotation: its after-value
             # must become the canonical care-fact value in the same transaction.
@@ -6409,6 +6410,7 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 )
             if before_value["fact_value"] == after_value["fact_value"]:
                 raise HTTPException(status_code=422, detail="The replacement must change the saved care-fact wording")
+            before_snapshot = _jsonable(dict(current_fact))
             fact_changes = {"fact_value": after_value["fact_value"]}
             if "updated_at" in facts_table.c:
                 fact_changes["updated_at"] = datetime.now(timezone.utc)
@@ -6416,11 +6418,25 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 facts_table.c.id == data["target_id"],
                 facts_table.c.person_id == person_id,
             ).values(**fact_changes))
+            after_snapshot = db.execute(
+                select(facts_table).where(
+                    facts_table.c.id == data["target_id"],
+                    facts_table.c.person_id == person_id,
+                )
+            ).mappings().one()
+            # Dedicated revision rows and the unified as-of ledger store full
+            # persisted snapshots; the change-item row itself retains the
+            # narrower before/after field values supplied by the caregiver.
+            revision_payload = {
+                **data,
+                "before_value": before_snapshot,
+                "after_value": _jsonable(dict(after_snapshot)),
+            }
 
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
         if resource == "record-change-items":
-            _append_revision_for_change_item(db, person_id, caregiver_id, data)
+            _append_revision_for_change_item(db, person_id, caregiver_id, revision_payload)
         # These source records are inserted with SQLAlchemy Core, so the ORM
         # revision listener cannot see them. Append their first revision in the
         # same transaction as the source row.
