@@ -5880,7 +5880,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             reasons.append("unrequested_token")
         if _contains_unsupported_care_claim(candidate, source_context):
             reasons.append("unsupported_care_claim")
-        if _contains_unsupported_operational_claim(candidate, source_context, context_lines):
+        if _contains_unsupported_operational_claim(candidate, source_context, prompt_context_lines):
             reasons.append("unsupported_operational_claim")
         if _contains_unsupported_record_reference(candidate, source_context):
             reasons.append("unsupported_record_reference")
