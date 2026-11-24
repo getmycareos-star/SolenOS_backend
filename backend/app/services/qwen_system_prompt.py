@@ -2,6 +2,7 @@
 
 from app.services.solenos_identity import SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 from app.services.solenos_personality import SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
+from app.services.solenos_information_stewardship import SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
 
 SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 # SOLENOS — GLOBAL AI OPERATING CONTRACT
@@ -89,6 +90,8 @@ def apply_solenos_system_contract(messages: list[dict]) -> list[dict]:
     # Reassert shared authority after all task/specialist text. The core prompt
     # remains the global baseline; this compact suffix is the final conflict rule.
     combined += "\n\n" + SOLENOS_QWEN_NON_OVERRIDABLE_ENFORCEMENT
+    # Information stewardship applies to every workflow and follows task-specific instructions.
+    combined += "\n\n" + SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
     # The personality constitution follows task prompts so specialists cannot weaken it.
     combined += "\n\n" + SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
     # Product identity is appended last so task prompts cannot redefine it.
