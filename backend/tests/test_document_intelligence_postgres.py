@@ -296,7 +296,8 @@ def test_postgres_document_upload_extraction_reload_review_and_lcr_reconstructio
     quote_one = "Patient walked 20 metres with a frame on 12 October."
     quote_two = "The patient reports eating half of lunch on 2026-11-10 during the observation period."
 
-    def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
+    def deterministic_candidates(text, *, source_event_id, source_evidence_id=None, workflow_id="document_candidate_extraction"):
+        assert workflow_id == "document_candidate_extraction"
         # The durable worker processes bounded page/chunk windows. Each call
         # must return only verbatim candidates present in that exact chunk;
         # requiring every quote in every chunk incorrectly fails valid splits.
@@ -743,7 +744,8 @@ def test_postgres_authenticated_http_document_review_correction_and_lcr(monkeypa
     quote_reject = "Patient walked 20 metres with a frame on 12 October."
     quote_correct = "The patient ate half of lunch during the observation period."
 
-    def deterministic_candidates(extracted_text, *, source_event_id, source_evidence_id=None):
+    def deterministic_candidates(extracted_text, *, source_event_id, source_evidence_id=None, workflow_id="document_candidate_extraction"):
+        assert workflow_id == "document_candidate_extraction"
         assert extracted_text == source
         return {
             "observations": [
@@ -1270,7 +1272,8 @@ def test_postgres_document_intelligence_resumes_all_page_windows_and_preserves_p
     )
     seen_pages = []
 
-    def deterministic_page_candidates(page_text, *, source_event_id, source_evidence_id=None):
+    def deterministic_page_candidates(page_text, *, source_event_id, source_evidence_id=None, workflow_id="document_candidate_extraction"):
+        assert workflow_id == "document_candidate_extraction"
         match = re.search(r"Patient report: page (\d+) observation recorded\.", page_text)
         assert match, page_text
         page_number = int(match.group(1))
