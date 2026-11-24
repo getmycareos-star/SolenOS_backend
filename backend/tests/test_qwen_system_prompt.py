@@ -218,6 +218,7 @@ def test_qwen_gateway_serializes_the_shared_identity_and_personality(monkeypatch
     assert captured["payload"]["messages"][0]["role"] == "system"
     assert "SPECIALIST: CAREGIVER COMPANION" in serialized_system
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION in serialized_system
+    assert "Information stewardship — applies to every workflow" in serialized_system
     assert serialized_system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
     assert "SolenOS was founded by David Abuchi" in serialized_system
     assert captured["payload"]["messages"][1]["content"] == "Who created you?"
@@ -283,6 +284,7 @@ def test_every_enabled_workflow_keeps_shared_enforcement_after_its_task_prompt()
         enforcement_index = system.index("NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES")
         identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
         assert workflow_index < enforcement_index < identity_index, workflow
+        assert "Information stewardship — applies to every workflow" in system, workflow
         if workflow in WORKFLOW_SPECIALISTS:
             specialist_index = system.index("ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES")
             assert workflow_index < specialist_index < enforcement_index, workflow
