@@ -457,3 +457,23 @@ def test_qwen_gateway_ignores_invalid_quality_overrides(monkeypatch):
     assert captured["options"]["num_predict"] == 96
     assert captured["options"]["num_thread"] == 2
     assert captured["options"]["temperature"] == 0.2
+
+
+def test_qwen_gateway_sends_product_identity_in_actual_inference_payload(monkeypatch):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(request, **kwargs):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(json.dumps({"message": {"content": "I'm SolenOS Companion."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+    answer = qwen_gateway.qwen_chat([
+        {"role": "user", "content": "Who are you?"}
+    ])
+
+    assert answer == "I'm SolenOS Companion."
+    system = captured["payload"]["messages"][0]["content"]
+    assert "SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION" in system
+    assert "SolenOS was founded by David Abuchi" in system
+    assert "The user-facing product identity is SolenOS Companion, not Qwen." in system
