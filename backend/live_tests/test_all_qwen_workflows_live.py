@@ -503,22 +503,25 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     session = live_qwen_context["session"]
     evidence_ids = live_qwen_context["handoff_evidence_ids"]
     open_question_id = live_qwen_context["handoff_open_question_id"]
-    from app.core.database import SessionLocal
-    from app.models.uncertainty import OpenQuestion
-
-    with SessionLocal() as db:
-        db.add(OpenQuestion(
-            id=open_question_id,
-            person_id=session["person"]["id"],
-            question="What transfer support is required for the next handoff?",
-            description="The current transfer support level is not recorded.",
-            subject_type="person",
-            subject_id=session["person"]["id"],
-            status="open",
-            necessity="necessary",
-            necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
-            evidence_ids=[evidence_ids[0]],
-            context=[{
+    question_response = client.post(
+        "/api/v1/uncertainty/questions",
+        headers={
+            "Authorization": f"Bearer {session['access_token']}",
+            "X-Request-ID": str(uuid.uuid4()),
+        },
+        json={
+            "person_id": session["person"]["id"],
+            "question": "What transfer support is required for the next handoff?",
+            "subject_type": "person",
+            "subject_id": session["person"]["id"],
+            "status": "open",
+            "necessity": "necessary",
+            "necessity_rationale": "The receiving caregiver needs the current support level to safely plan transfers.",
+            "intended_answerer_role": "family_caregiver",
+            "intended_answerer_label": "Receiving caregiver",
+            "created_by_caregiver_id": session["caregiver"]["id"],
+            "evidence_ids": [evidence_ids[0]],
+            "context": [{
                 "source_kind": "caregiver_report",
                 "source_id": evidence_ids[0],
                 "source_record_refs": [{"record_type": "evidence", "record_id": evidence_ids[0]}],
@@ -528,8 +531,10 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
                     "evidence_ids": [evidence_ids[0]],
                 },
             }],
-        ))
-        db.commit()
+        },
+    )
+    assert question_response.status_code == 200, question_response.text
+    assert question_response.json()["id"] == open_question_id
     headers = {
         "Authorization": f"Bearer {session['access_token']}",
         "X-Request-ID": str(uuid.uuid4()),
