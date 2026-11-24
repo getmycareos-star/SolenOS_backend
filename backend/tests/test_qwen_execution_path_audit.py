@@ -50,3 +50,11 @@ def test_gateway_owns_the_only_native_ollama_chat_endpoint():
     assert 'base + "/api/chat"' in source
     assert "apply_specialized_intelligence(messages)" in source
     assert "apply_solenos_system_contract(messages)" in source
+
+
+def test_delta_engine_uses_the_shared_gateway_and_its_longitudinal_specialist():
+    source = (APP_ROOT / "services" / "delta_engine.py").read_text(encoding="utf-8")
+    assert "from app.services.qwen_gateway import get_ollama_config, qwen_chat" in source
+    assert "SOLENOS_WORKFLOW_ID: delta_engine." in source
+    assert "_request_delta_json(" in source
+    assert "base + \"/api/chat\"" not in source
