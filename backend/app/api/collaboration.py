@@ -5454,6 +5454,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # evidence, appointments or document text already loaded above.
     shared_lcr_context = None
     shared_context_truncated = False
+    focused_event_assist = False
     shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
     if payload.workflow in shared_lcr_workflows:
         focused_event_assist = anchored_event is not None and payload.workflow == "living_care_record"
