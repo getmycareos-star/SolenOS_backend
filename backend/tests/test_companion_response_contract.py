@@ -4359,7 +4359,7 @@ def test_detailed_evidence_lineage_is_only_sent_when_the_caregiver_asks_about_pr
 def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_match(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def unsupported_qwen(base, model, messages, options=None):
+    def unsupported_qwen(base, model, messages, options=None, audit_context=None):
         return "Mum's mobility has worsened."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
