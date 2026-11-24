@@ -755,6 +755,20 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             "evidence_reviews_has_more": evidence_review_has_more,
         }
 
+    verified_source_maps = {
+        "care_event": events,
+        "care_evidence": evidence,
+        "document_extraction": documents,
+        "appointment": appointments,
+        "care_handoff": handoffs,
+    }
+    # Context text is not proof of source identity. Only retain records that
+    # resolve to a persisted row scoped to this exact person.
+    records = [
+        record for record in records
+        if record.get("record_type") in verified_source_maps
+        and str(record.get("record_id") or "") in verified_source_maps[record.get("record_type")]
+    ]
     for record in records:
         record_id = str(record.get("record_id") or "")
         if record.get("record_type") == "care_event" and record_id in events:
