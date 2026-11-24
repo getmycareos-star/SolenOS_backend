@@ -183,10 +183,12 @@ def build_companion_caregiver_context(
             "involvement_status": _enum_value(getattr(caregiver_profile, "involvement_status", None)),
             "availability_status": _enum_value(getattr(caregiver_profile, "availability_status", None)),
             "is_primary_designated": bool(getattr(caregiver_profile, "is_primary_designated", False)),
+        "primary_designation_source": _clean(getattr(caregiver_profile, "primary_designation_source", None), limit=80),
+        "proximity_category": _enum_value(getattr(caregiver_profile, "proximity_category", None)),
         } if caregiver_profile is not None else None,
         "active_roles": [_role_context(row) for row in (active_roles or [])[:10]],
         "active_responsibilities": [
-            _responsibility_context(row) for row in (active_responsibilities or [])[:20]
+            _responsibility_context(row) for row in (active_responsibilities or [])[:10]
         ],
         "active_responsibilities_status": (
             "profile_not_linked" if caregiver_profile is None
@@ -194,7 +196,7 @@ def build_companion_caregiver_context(
             else "no_rows_returned"
         ),
         "active_responsibilities_truncated": bool(responsibilities_truncated),
-        "assigned_open_loops": [_open_loop_context(row) for row in (assigned_open_loops or [])[:20]],
+        "assigned_open_loops": [_open_loop_context(row) for row in (assigned_open_loops or [])[:8]],
         "assigned_open_loops_status": "available" if assigned_open_loops else "no_rows_returned",
         "assigned_open_loops_truncated": bool(open_loops_truncated),
     }
