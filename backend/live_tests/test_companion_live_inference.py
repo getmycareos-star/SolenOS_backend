@@ -1392,7 +1392,7 @@ def test_companion_identity_is_consistent_without_model_or_patient_context():
             assert body.get("response_mode") == "deterministic_product_identity", body
             assert body.get("written_to_lcr") is False, body
             assert body.get("persistence") == "conversation_only", body
-            assert "versioned SolenOS product identity" in (body.get("safety_note") or ""), body
+            assert "not the person's care record" in (body.get("safety_note") or ""), body
             coverage = body.get("lcr_context_coverage") or {}
             assert coverage.get("identity_question_context_skipped") is True, body
             assert body.get("source_event_ids") == [], body
