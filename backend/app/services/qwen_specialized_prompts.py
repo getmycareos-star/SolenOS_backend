@@ -274,6 +274,7 @@ Purpose: interpret event state transitions without erasing the audit trail.
 # caregiver text or source documents. They make specialist selection deterministic.
 WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "daily_capture": ("care_extraction",),
+    "daily_care_intelligence": ("lcr_retrieval", "longitudinal_reasoning", "care_extraction"),
     "care_claim_extraction": ("care_extraction",),
     "care_understanding": ("care_extraction",),
     "add_record": ("care_extraction", "event_lifecycle"),
