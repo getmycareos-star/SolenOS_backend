@@ -343,3 +343,65 @@ def test_no_matching_events_does_not_support_a_zero_incident_claim():
     )
     assert provenance["claims"][0]["support_status"] == "aggregate_not_validated"
     assert "does not establish that no incident occurred" in provenance["claims"][0]["aggregate_review"]["interpretation_limit"]
+
+def test_material_care_paraphrase_without_exact_source_match_is_rejected():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    provenance = build_claim_provenance(
+        "Mum's mobility has worsened.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "mobility-source",
+            "source_text": "Caregiver reported that Mum walked less steadily yesterday.",
+        }],
+    )
+    unmatched = unmatched_material_claims(provenance)
+    assert len(unmatched) == 1
+    assert unmatched[0]["support_status"] == "not_matched_to_saved_wording"
+
+
+def test_exact_material_care_wording_is_not_flagged_as_unmatched():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    sentence = "Caregiver reported that Mum felt unsteady."
+    provenance = build_claim_provenance(
+        sentence,
+        [{
+            "record_type": "care_evidence",
+            "record_id": "unsteady-source",
+            "source_text": sentence,
+        }],
+    )
+    assert unmatched_material_claims(provenance) == []
+
+
+def test_unsupported_appointment_status_is_a_material_claim():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    provenance = build_claim_provenance(
+        "The appointment is confirmed.",
+        [{
+            "record_type": "appointment",
+            "record_id": "appointment-1",
+            "source_text": "Appointment status: scheduled.",
+        }],
+    )
+    assert len(unmatched_material_claims(provenance)) == 1
+
+
+def test_unsupported_clinical_diagnosis_is_a_material_claim():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    provenance = build_claim_provenance("She has dementia.", [])
+    assert len(unmatched_material_claims(provenance)) == 1
+
+
+def test_questions_and_conditional_guidance_are_not_classified_as_care_assertions():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    provenance = build_claim_provenance(
+        "Has Mum's mobility changed?\\nPlease ask the clinician whether her medication needs review.",
+        [],
+    )
+    assert unmatched_material_claims(provenance) == []
+
