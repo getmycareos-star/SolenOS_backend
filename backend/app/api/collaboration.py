@@ -4536,8 +4536,8 @@ def _production_qwen_evaluation_cases() -> list[dict]:
             "question": "Prepare a clinician handoff summary that preserves the appointment dates, who reported them, and the unresolved blood-test question.",
             "required": ["2026-10-20", "2026-10-23"],
             "required_any": ["no result", "no blood test result", "no test result", "result is not recorded", "result is not present", "pending"],
-            "required_any_provenance": ["caregiver reported", "caregiver report", "reported by the caregiver", "according to the caregiver", "caregiver said"],
-            "required_any_unresolved": ["whether the blood test has been completed", "whether the test has been completed", "has the blood test been completed", "when the result is expected", "completion is not documented", "completion status is unknown", "remains unresolved"],
+            "required_any_provenance": ["caregiver reported", "caregiver reports", "caregiver-reported", "caregiver report", "caregiver's report", "reported by the caregiver", "according to the caregiver", "caregiver said"],
+            "required_any_unresolved": ["whether the blood test has been completed", "whether the test has been completed", "has the blood test been completed", "when the result is expected", "completion is not documented", "completion status is not documented", "completion status is unknown", "no confirmation of completion", "confirm whether the blood test was completed", "remains unresolved"],
         },
         {
             "criterion": "caregiver_continuity_gap",
