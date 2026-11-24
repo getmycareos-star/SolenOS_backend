@@ -7360,7 +7360,7 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bcan you export my information$",
         r"\bdo you share information with (?:my )?doctors or family$",
         r"\bcan you contact my doctor or family$",
-        r"\bcan you change a medication, appointment, or care plan$",
+        r"\bcan you change a medication appointment or care plan$",
         r"\bcan you save what i just told you$",
         r"\bwhich model (?:powers|is powering) you$",
         r"\bwhat model (?:powers|is powering) you$",
