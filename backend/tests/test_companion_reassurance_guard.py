@@ -57,6 +57,7 @@ def test_companion_rejects_categorical_reassurance_without_emotional_prompt(repl
 )
 def test_companion_allows_explicit_uncertainty_instead_of_false_reassurance(reply):
     assert not collaboration._contains_unsupported_reassurance(reply)
+    assert not collaboration._contains_fabricated_empathy(reply)
     assert not collaboration._caregiver_response_needs_revision(
         "What do the notes say?",
         reply,
@@ -79,3 +80,38 @@ def test_companion_reassurance_guard_handles_empty_and_non_string_values():
     assert not collaboration._contains_unsupported_reassurance("")
     assert not collaboration._contains_unsupported_reassurance(None)
     assert not collaboration._contains_unsupported_reassurance(123)
+
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "I know exactly how you feel.",
+        "I know how you feel.",
+        "I understand exactly how you feel.",
+        "I feel your pain.",
+        "I've been through this too.",
+        "I've been there.",
+        "As a caregiver myself, I understand.",
+        "You must be feeling guilty.",
+        "You are probably feeling overwhelmed.",
+    ],
+)
+def test_companion_rejects_fabricated_empathy_and_unfounded_emotional_assumptions(reply):
+    assert collaboration._contains_fabricated_empathy(reply)
+    assert collaboration._caregiver_response_needs_revision(
+        "I feel exhausted and guilty.",
+        reply,
+    )
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "You said you feel exhausted. We can take this one concern at a time.",
+        "I can help you review the information without assuming how you feel.",
+        "That sounds difficult. What would be most useful to focus on right now?",
+    ],
+)
+def test_companion_allows_proportionate_acknowledgement_without_claiming_lived_experience(reply):
+    assert not collaboration._contains_fabricated_empathy(reply)
