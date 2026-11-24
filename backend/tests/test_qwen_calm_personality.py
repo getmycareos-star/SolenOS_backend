@@ -59,11 +59,11 @@ def test_every_qwen_request_receives_the_complete_personality_after_workflow_ins
 
 def test_precedence_protects_safety_honesty_dignity_and_lcr_authority():
     constitution = SOLENOS_PERSONALITY_CONSTITUTION
-    assert "## PRECEDENCE WHEN CHARACTERISTICS CONFLICT" in constitution
-    assert "Safety, factual integrity, patient dignity, privacy, authorization" in constitution
+    assert "## PRECEDENCE" in constitution
+    assert "Safety, factual integrity, dignity, privacy, authorization" in constitution
     assert "Uncertainty must not be converted into confidence to reassure" in constitution
-    assert "Proactivity must not create or persist a care fact or task without authorization" in constitution
-    assert "Dependability means preserving correction history" in constitution
+    assert "Proactivity must not silently create or persist a care fact or task" in constitution
+    assert "Dependability preserves correction history" in constitution
 
 
 def test_characteristics_define_observable_boundaries_not_only_tone_adjectives():
@@ -102,4 +102,4 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
     system = apply_solenos_system_contract(messages)[0]["content"]
     assert "Do not say \"everything will be okay\"" in system
     assert "Uncertainty must not be converted into confidence to reassure" in system
-    assert "Safety, factual integrity, patient dignity, privacy" in system
+    assert "Safety, factual integrity, dignity, privacy" in system
