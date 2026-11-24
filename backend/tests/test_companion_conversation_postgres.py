@@ -15,6 +15,8 @@ pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated Post
 from app.main import app
 from app.models.care import CareEvent, Evidence
 from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
+from app.api import collaboration
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
@@ -249,3 +251,74 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
         assert stored_session.person_id == person_id
         assert stored_session.caregiver_id == caregiver_id
         assert json.loads(stored_message.source_record_refs_json) == source_refs
+
+def test_companion_output_validation_audit_records_pass_and_rejection_without_raw_content():
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Companion audit recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    passed_reply = f"PRIVATE_MODEL_REPLY_PASS_{suffix}"
+    rejected_reply = f"PRIVATE_MODEL_REPLY_REJECTED_{suffix}"
+
+    with Session() as db:
+        collaboration._record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id=f"companion-request-pass-{suffix}",
+            reply=passed_reply,
+            rejection_reasons=[],
+            ai_generated=True,
+            source_event_ids=[f"event-pass-{suffix}"],
+            source_evidence_ids=[f"evidence-pass-{suffix}"],
+            source_document_analysis_ids=[],
+            source_appointment_ids=[],
+            source_assertion_ids=[f"assertion-pass-{suffix}"],
+            source_lcr_context_ids=[],
+            source_freshness_assessment_ids=[],
+        )
+        db.commit()
+        passed = db.query(AISafetyCheck).filter_by(
+            person_id=person_id,
+            check_name="companion_response_grounding",
+            result="passed",
+        ).order_by(AISafetyCheck.created_at.desc()).first()
+        assert passed is not None
+        assert passed.details_json["request_id"] == f"companion-request-pass-{suffix}"
+        assert passed.details_json["caregiver_id"] == caregiver_id
+        assert passed.details_json["generator"] == "qwen"
+        assert passed.details_json["source_references"]["event_ids"] == [f"event-pass-{suffix}"]
+        assert passed_reply not in json.dumps(passed.details_json)
+
+        collaboration._record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id=f"companion-request-rejected-{suffix}",
+            reply=rejected_reply,
+            rejection_reasons=["unsupported_medication_claim", "unsupported_appointment_status"],
+            ai_generated=True,
+            source_event_ids=[f"event-rejected-{suffix}"],
+            source_evidence_ids=[f"evidence-rejected-{suffix}"],
+            source_document_analysis_ids=[],
+            source_appointment_ids=[f"appointment-rejected-{suffix}"],
+            source_assertion_ids=[],
+            source_lcr_context_ids=[],
+            source_freshness_assessment_ids=[],
+        )
+        rejected = db.query(AIOutputRejection).filter_by(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            reason_code="companion_grounding_validation_failed",
+        ).order_by(AIOutputRejection.created_at.desc()).first()
+        assert rejected is not None
+        assert rejected.reason_text == "unsupported_medication_claim,unsupported_appointment_status"
+        assert rejected.metadata_json["request_id"] == f"companion-request-rejected-{suffix}"
+        assert rejected_reply not in json.dumps(rejected.metadata_json)
+        assert db.query(AISafetyCheck).filter_by(
+            person_id=person_id,
+            check_name="companion_response_grounding",
+            result="rejected",
+        ).count() == 1
+
