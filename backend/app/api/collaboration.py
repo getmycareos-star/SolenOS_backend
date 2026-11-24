@@ -4360,8 +4360,8 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
         recorded_date = r"(?:2026-10-23|october\s+23,?\s+2026|23\s+october\s+2026)"
         checks["event_date_identified"] = bool(re.search(event_date, normalized))
         checks["event_date_associated"] = bool(re.search(
-            r"(?:appointment|happened|took place|occurred).{0,100}" + event_date
-            + r"|" + event_date + r".{0,100}(?:appointment|happened|took place|occurred)",
+            r"(?:appointment|happened|took place|occurred|was on|held on).{0,100}" + event_date
+            + r"|" + event_date + r".{0,100}(?:appointment|happened|took place|occurred|was on|held on)",
             normalized,
         ))
         checks["recorded_date_identified"] = bool(re.search(recorded_date, normalized))
@@ -4390,7 +4390,9 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
         checks["no_unsupported_trend"] = trend_claim is None or trend_is_qualified
     elif criterion == "caregiver_continuity_gap":
         missed_claim = re.search(
-            r"\b(?:the follow-up call|the call)\s+(?:was|is|has been)\s+missed\b",
+            r"\b(?:the follow-up call|the call)\s+(?:was|is|has been)\s+(?:missed|not completed|not made)\b"
+            r"|\bmissed the (?:follow-up )?call\b"
+            r"|\b(?:the follow-up call|the call)\s+(?:did not|didn't)\s+(?:happen|occur|take place)\b",
             normalized,
         )
         negated_context = ""
