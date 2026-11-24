@@ -964,7 +964,9 @@ jobs:
                   timezone="America/Los_Angeles",
                   timezone_configured=True,
               )
-              db.add_all([legacy_person, explicit_person, legacy_caregiver, explicit_caregiver])
+              db.add_all([legacy_person, explicit_person])
+              db.flush()
+              db.add_all([legacy_caregiver, explicit_caregiver])
               db.flush()
               db.add(AuditLogEvent(
                   actor_id=explicit_caregiver.id,
