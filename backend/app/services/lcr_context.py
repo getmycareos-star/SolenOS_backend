@@ -1665,19 +1665,28 @@ def build_lcr_context(
                     linked_ids = {
                         str(correction.get("id")) for correction in linked_corrections
                     }
+                    active_correction_statuses = {"pending", "processing", "queued", "retrying"}
                     pending_corrections = [
                         correction for correction in all_corrections
-                        if str(correction.get("processing_status") or "").casefold() != "completed"
+                        if str(correction.get("processing_status") or "legacy_unverified").casefold()
+                        in active_correction_statuses
                     ]
                     if pending_corrections:
                         item["pending_corrections"] = pending_corrections
+                    unknown_corrections = [
+                        correction for correction in all_corrections
+                        if str(correction.get("processing_status") or "legacy_unverified").casefold()
+                        not in active_correction_statuses | {"completed"}
+                    ]
                     completed_without_relationship = [
                         correction for correction in all_corrections
                         if str(correction.get("processing_status") or "").casefold() == "completed"
                         and str(correction.get("id")) not in linked_ids
                     ]
-                    if completed_without_relationship:
+                    if completed_without_relationship or unknown_corrections:
                         item["correction_lineage_status"] = "failed"
+                        if unknown_corrections:
+                            item["unverified_corrections"] = unknown_corrections
                     item["information_status"], item["interpretation_limit"] = _information_status("events", item)
                 correction_lineage_failed = any(
                     item.get("correction_lineage_status") == "failed"
