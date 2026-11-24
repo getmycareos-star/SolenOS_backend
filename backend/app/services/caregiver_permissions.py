@@ -26,7 +26,7 @@ def caregiver_has_permission(grant: CaregiverAccessGrant | None, permission: str
         return permission == "view_documents" and permission in set(permissions)
     if grant.access_scope != "full_record":
         return False
-    if bool(grant.can_manage_members):
+    if bool(getattr(grant, "can_manage_members", False)):
         return True
     return permission in set(permissions)
 
