@@ -670,14 +670,6 @@ async def ask_daily_care_qwen(
         DAILY_CARE_MAX_OUTPUT_TOKENS,
         response_length_policy.token_budget + (128 if payload.prepare_lcr_proposals else 0),
     )
-    daily_messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": json.dumps(prompt_payload, ensure_ascii=False)},
-    ]
-    daily_token_budget = min(
-        DAILY_CARE_MAX_OUTPUT_TOKENS,
-        response_length_policy.token_budget + (128 if payload.prepare_lcr_proposals else 0),
-    )
     try:
         raw = await __import__("asyncio").to_thread(
             qwen_chat,
