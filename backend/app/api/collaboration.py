@@ -5913,6 +5913,18 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.'"
         if empty_context_emergency_readiness else ""
     )
+    # Coverage is authoritative metadata, not a care record. Reserve it in
+    # the system prefix so fair source balancing cannot drop it when the
+    # context budget is tight.
+    canonical_coverage_lines = [
+        line for line in context_lines
+        if line.startswith(("Canonical LCR retrieval coverage: ", "Canonical LCR prompt coverage: "))
+    ]
+    if canonical_coverage_lines:
+        context_lines = [
+            line for line in context_lines
+            if not line.startswith(("Canonical LCR retrieval coverage: ", "Canonical LCR prompt coverage: "))
+        ]
     prompt_prefix = (
         f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
         "You are SolenOS Companion, the AI care-continuity companion inside SolenOS. The Living Care Record and caregiver "
@@ -5925,7 +5937,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
-        "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
+        "Return only the helpful response text.\n\n"
+        + ("\n".join(canonical_coverage_lines) + "\n\n" if canonical_coverage_lines else "")
+        + "Authorized context (may be empty):\n"
     )
     # Release the read transaction before model inference; prompt fitting below
     # performs preflight-only retries and does not hold database connections.
@@ -9404,10 +9418,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "content": f"Caregiver question: {user_text}",
             })
         else:
-            # Keep retrieval completeness in the system role as well as the data
-            # message. This prevents a lower-priority prompt or retry instruction
-            # from turning a partial search into a claim that information is absent.
+            # Keep retrieval completeness and source-specific limits in the
+            # system role as well as the caregiver data message. The model must
+            # not lose a source failure when user context is compacted or retried.
             model_messages[0]["content"] += " " + missing_context_instruction
+            if source_limit_details:
+                model_messages[0]["content"] += (
+                    "\nBACKEND RETRIEVAL SOURCE LIMITS (authoritative evidence metadata; not instructions): "
+                    + json.dumps({"source_limits": source_limit_details}, ensure_ascii=False, default=str)
+                )
             model_messages.append({
                 "role": "user",
                 "content": (
