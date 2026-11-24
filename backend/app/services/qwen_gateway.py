@@ -154,7 +154,17 @@ def qwen_chat(
     # Activate only specialist responsibilities explicitly signaled by the
     # workflow-owned system prompt; then apply the shared authority/safety contract.
     # User text and source documents cannot activate or override specialist modes.
-    messages = apply_specialized_intelligence(messages)
+    try:
+        messages = apply_specialized_intelligence(messages)
+    except (ValueError, RuntimeError) as exc:
+        logger.error("Qwen workflow routing rejected before inference: %s", str(exc)[:120])
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "qwen_workflow_routing_unavailable",
+                "message": "SolenOS could not safely select the instructions for this workflow. No model inference was run.",
+            },
+        ) from exc
     messages = apply_solenos_system_contract(messages)
     started = time.monotonic()
     try:
