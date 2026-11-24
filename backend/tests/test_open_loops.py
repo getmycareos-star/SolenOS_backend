@@ -1559,3 +1559,33 @@ def test_lifecycle_decisions_reject_missing_and_stale_versions():
         json={"expected_version": current_reopen_version, "text": "Reopen after reviewing the cancelled follow-up."},
     )
     assert reopened.status_code == 200, reopened.text
+
+
+def test_stale_versions_are_rejected_for_response_action_and_outcome_updates():
+    client = TestClient(app)
+    _, headers = session(client, "Stale caregiver action recipient")
+
+    for loop_type, endpoint in (
+        ("awaiting_response", "responses"),
+        ("follow_up", "outcomes"),
+        ("unresolved_concern", "actions"),
+    ):
+        loop = create_loop(client, headers, loop_type)
+        stale_version = loop["version"]
+        changed = client.patch(
+            f"/api/v1/open-loops/{loop['id']}",
+            headers=headers,
+            json={"title": "Updated after the caregiver viewed it"},
+        )
+        assert changed.status_code == 200, changed.text
+        response = client.post(
+            f"/api/v1/open-loops/{loop['id']}/{endpoint}",
+            headers=headers,
+            json={
+                "text": "Attempt to act on the version shown before the update.",
+                "evidence": [],
+                "expected_version": stale_version,
+                "idempotency_key": f"stale-action-{endpoint}-{loop['id']}",
+            },
+        )
+        assert response.status_code == 409, response.text
