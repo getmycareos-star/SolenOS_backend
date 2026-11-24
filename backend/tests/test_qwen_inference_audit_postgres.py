@@ -170,3 +170,45 @@ def test_qwen_gateway_persists_failed_invocation_outcome_on_postgres(monkeypatch
         assert metric.metrics_json["invocation_state"] == "finished"
         assert metric.metrics_json["upstream_error_category"] == "model_not_installed"
 
+def test_qwen_gateway_persists_incomplete_generation_as_failed_on_postgres(monkeypatch):
+    invocation_ids = []
+    original_persist = qwen_gateway._persist_inference_metric
+
+    def capture_persist(metric):
+        invocation_ids.append(metric.id)
+        return original_persist(metric)
+
+    monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", capture_persist)
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: ("http://ollama.internal", "qwen-test", 2.0),
+    )
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps({
+            "message": {"role": "assistant", "content": "PRIVATE_INCOMPLETE_OUTPUT"},
+            "done": False,
+            "done_reason": "length",
+        }).encode("utf-8")),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([
+            {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion."},
+            {"role": "user", "content": "Synthetic incomplete generation test."},
+        ])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "incomplete_model_response"
+    assert len(invocation_ids) == 1
+    with SessionLocal() as db:
+        metric = db.get(AIInferenceMetric, invocation_ids[0])
+        assert metric is not None
+        assert metric.outcome == "failed"
+        assert metric.metrics_json["done"] is False
+        assert metric.metrics_json["done_reason"] == "length"
+        assert metric.metrics_json["failure_reason"] == "generation_not_completed"
+        assert "PRIVATE_INCOMPLETE_OUTPUT" not in json.dumps(metric.metrics_json)
+
