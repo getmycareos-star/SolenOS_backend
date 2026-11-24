@@ -6,6 +6,10 @@ from app.services.solenos_personality import (
 )
 
 SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
+from app.services.solenos_identity import SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+from app.services.solenos_personality import SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
+
+SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 # SOLENOS — GLOBAL AI OPERATING CONTRACT
 
 Applies to every Qwen inference. SolenOS rules override model defaults.
