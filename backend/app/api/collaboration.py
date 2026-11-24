@@ -6146,7 +6146,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     rejection_reasons = response_rejection_reasons(reply)
     response_was_grounding_fallback = False
     response_origin = "qwen"
-    grounding_status = "source_validated"
+    grounding_status = "backend_validation_passed"
     if rejection_reasons:
         _record_companion_output_validation(
             db,
