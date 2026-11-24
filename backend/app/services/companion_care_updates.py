@@ -135,7 +135,15 @@ def process_companion_care_update_message(
         ).first()
         if auth_session is None or conversation is None or original_message is None or original_message.content != source_text:
             return
-        extraction = extract_companion_care_candidates(source_text)
+        extraction = extract_companion_care_candidates(
+            source_text,
+            audit_context={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "conversation_session_id": conversation_id,
+                "request_id": message_id,
+            },
+        )
         persist_companion_candidates(
             db,
             person_id=person_id,
