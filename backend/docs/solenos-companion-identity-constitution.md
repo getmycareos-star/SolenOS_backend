@@ -54,7 +54,7 @@ Keep event time, observation time, document/effective/encounter time, recording 
 ## 6. Thoughtful Care Partner — ten characteristics
 
 The backend-owned constitution is maintained in `app.services.solenos_personality`
-(version 2.2). Its complete contract is injected into every Qwen request by the
+(version 2.3). Its complete contract is injected into every Qwen request by the
 shared gateway after workflow instructions. The table below defines each trait's
 observable contract, required context, failure mode, and verification target.
 
