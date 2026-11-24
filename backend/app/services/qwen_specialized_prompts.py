@@ -56,7 +56,7 @@ Distinguish new report, pending review, accepted assertion, disputed item, corre
 # caregiver text or source documents. They make specialist selection deterministic.
 WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "daily_capture": ("care_extraction",),
-    "daily_care_intelligence": ("lcr_retrieval", "longitudinal_reasoning", "care_extraction"),
+    "daily_care_intelligence": ("lcr_retrieval", "longitudinal_reasoning"),
     "care_claim_extraction": ("care_extraction",),
     "care_understanding": ("care_extraction",),
     "add_record": ("care_extraction", "event_lifecycle"),
@@ -64,32 +64,32 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "document_candidate_extraction": ("document_intelligence", "care_extraction"),
     "living_care_record": ("lcr_retrieval", "companion"),
     "care_history_search": ("lcr_retrieval", "companion"),
-    "care_situation_change": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
-    "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+    "care_situation_change": ("lcr_retrieval", "longitudinal_reasoning"),
+    "delta_engine": ("lcr_retrieval", "longitudinal_reasoning"),
     "evidence_provenance": ("care_extraction", "reconciliation"),
     "uncertainty_contradictions": ("lcr_retrieval", "reconciliation"),
     "returning_caregiver": ("lcr_retrieval", "companion"),
     "appointment": ("lcr_retrieval", "handoff_appointment"),
-    "after_appointment": ("lcr_retrieval", "handoff_appointment", "event_lifecycle"),
+    "after_appointment": ("lcr_retrieval", "handoff_appointment"),
     "handoff": ("lcr_retrieval", "handoff_appointment"),
     "professional_summary": ("lcr_retrieval", "handoff_appointment"),
     "open_loops": ("lcr_retrieval", "caregiver_continuity"),
-    "two_week_review": ("lcr_retrieval", "longitudinal_reasoning", "caregiver_continuity"),
-    "decision_outcome": ("lcr_retrieval", "caregiver_continuity", "event_lifecycle"),
-    "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
+    "two_week_review": ("lcr_retrieval", "longitudinal_reasoning"),
+    "decision_outcome": ("lcr_retrieval", "caregiver_continuity"),
+    "medication_day": ("lcr_retrieval", "medication_continuity"),
     "care_coordination": ("lcr_retrieval", "caregiver_continuity"),
     "companion": ("lcr_retrieval", "companion"),
     "caregiver_feedback": ("lcr_retrieval", "caregiver_continuity"),
-    "care_transition": ("lcr_retrieval", "longitudinal_reasoning", "handoff_appointment"),
-    "incident_follow_through": ("lcr_retrieval", "caregiver_continuity", "event_lifecycle"),
+    "care_transition": ("lcr_retrieval", "handoff_appointment"),
+    "incident_follow_through": ("lcr_retrieval", "caregiver_continuity"),
     "emergency_readiness": ("lcr_retrieval", "companion"),
     "care_coverage_gap": ("lcr_retrieval", "caregiver_continuity"),
-    "care_instruction_change_tracker": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
-    "critical_information_completeness": ("lcr_retrieval", "caregiver_continuity", "reconciliation"),
+    "care_instruction_change_tracker": ("lcr_retrieval", "event_lifecycle"),
+    "critical_information_completeness": ("lcr_retrieval", "caregiver_continuity"),
     "personal_preferences_distress_context": ("lcr_retrieval", "companion"),
     "caregiver_strain_support": ("lcr_retrieval", "caregiver_continuity"),
     "document_validity_renewal": ("document_intelligence", "event_lifecycle"),
-    "record_lifecycle": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
+    "record_lifecycle": ("lcr_retrieval", "event_lifecycle"),
     "companion_care_update": ("care_extraction",),
     "caregiver_orientation": ("lcr_retrieval", "companion"),
 }
@@ -106,6 +106,8 @@ WORKFLOWS_WITHOUT_SPECIALISTS = frozenset({
     "ai_reliability",
     "audit_review",
 })
+
+MAX_SPECIALISTS_PER_REQUEST = 2
 
 # A classifier is a meta-task. Its prompt contains the names of every workflow,
 # so keyword matching it would incorrectly activate several care specialists.
@@ -149,7 +151,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
             for domain in WORKFLOW_SPECIALISTS.get(workflow_id.casefold(), ()):
                 if domain not in selected:
                     selected.append(domain)
-        return tuple(selected[:4])
+        return tuple(selected[:MAX_SPECIALISTS_PER_REQUEST])
 
     # Compatibility path for existing backend-owned prompts not yet tagged.
     selected = []
@@ -158,7 +160,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
             selected.append(domain)
     if "companion" in selected and "lcr_retrieval" not in selected:
         selected.insert(0, "lcr_retrieval")
-    return tuple(selected[:4])
+    return tuple(selected[:MAX_SPECIALISTS_PER_REQUEST])
 
 
 def apply_specialized_intelligence(messages: list[dict]) -> list[dict]:
