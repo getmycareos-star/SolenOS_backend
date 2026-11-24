@@ -223,10 +223,11 @@ def test_enabled_workflow_list_has_unique_entries_and_no_community():
     assert len(set(worker.ENABLED_WORKFLOWS)) == len(worker.ENABLED_WORKFLOWS)
     assert "community" not in worker.ENABLED_WORKFLOWS
 
-def test_background_classifier_requests_constrained_json_schema(monkeypatch):
+def test_background_classifier_requests_constrained_json_and_avoids_care_specialists(monkeypatch):
     seen = {}
 
-    def classify(*args, **kwargs):
+    def classify(messages, **kwargs):
+        seen["messages"] = messages
         seen.update(kwargs)
         return json.dumps({"workflow": "daily_capture"})
 
@@ -236,6 +237,11 @@ def test_background_classifier_requests_constrained_json_schema(monkeypatch):
     assert schema["type"] == "object"
     assert schema["properties"]["workflow"]["enum"] == list(worker.ENABLED_WORKFLOWS)
     assert schema["additionalProperties"] is False
+
+    from app.services.qwen_specialized_prompts import select_specialized_domains
+    system_prompt = seen["messages"][0]["content"]
+    assert "SOLENOS_META_TASK: workflow_classification." in system_prompt
+    assert select_specialized_domains(seen["messages"]) == ()
 
 
 def test_background_classifier_rejects_non_object_json(monkeypatch):
