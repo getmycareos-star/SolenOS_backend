@@ -869,6 +869,13 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
             term in overwhelmed_reply.casefold()
             for term in ("waking", "sleep", "overnight", "restless")
         ), overwhelmed_reply
+        assert not re.search(
+            r"\b(?:everything will be okay|there is nothing to worry about|"
+            r"it's probably nothing|guaranteed|will definitely be fine)\b",
+            overwhelmed_reply,
+            re.IGNORECASE,
+        ), overwhelmed_reply
+        assert overwhelmed_reply.count("!") <= 1, overwhelmed_reply
 
         pushback = _ask(
             client,
@@ -886,6 +893,11 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
         assert any(
             term in pushback_reply.casefold()
             for term in ("sorry", "right", "repeat", "record", "already shared", "information")
+        ), pushback_reply
+        assert not re.search(
+            r"\b(?:you should have|you already told me|you need to repeat|you failed to)\b",
+            pushback_reply,
+            re.IGNORECASE,
         ), pushback_reply
 
         distress = _ask(
@@ -939,6 +951,7 @@ def test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_
             sadness_reply,
             re.IGNORECASE,
         ), sadness_reply
+        assert sadness_reply.count("!") <= 1, sadness_reply
         assert not re.search(
             r"(?m)^\s*(?:[-*•]|\d+[.)])\s+",
             sadness_reply,
