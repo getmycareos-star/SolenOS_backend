@@ -1628,3 +1628,113 @@ def test_temporal_relations_contradictions_and_reference_frames_reject_foreign_f
         },
     )
     assert reference_frame.status_code == 422, reference_frame.text
+
+
+def test_temporal_fact_and_relationship_updates_reject_foreign_evidence_references():
+    from app.models.care import Evidence
+
+    client = TestClient(app)
+    owner = create_session(client, "Temporal evidence patch owner")
+    other = create_session(client, "Temporal evidence patch foreign owner")
+    db = TestSessionLocal()
+    try:
+        foreign = Evidence(
+            person_id=other["person"]["id"],
+            type="note",
+            source_text="Foreign source must never be linked.",
+            uploaded_by_caregiver_id=other["caregiver"]["id"],
+        )
+        db.add(foreign)
+        db.commit()
+        foreign_evidence_id = foreign.id
+    finally:
+        db.close()
+
+    owner_headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    created_fact = client.post(
+        "/api/v1/temporal/facts",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "subject_type": "care_event",
+            "subject_id": "temporal-evidence-patch",
+            "evidence_ids": [],
+        },
+    )
+    assert created_fact.status_code == 200, created_fact.text
+    fact_id = created_fact.json()["id"]
+
+    patched_fact = client.patch(
+        f"/api/v1/temporal/facts/{fact_id}",
+        headers=owner_headers,
+        json={"evidence_ids": [foreign_evidence_id]},
+    )
+    assert patched_fact.status_code == 422, patched_fact.text
+
+    relation = client.post(
+        "/api/v1/temporal/relations",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "fact_a_id": fact_id,
+            "fact_b_id": fact_id,
+            "relation_type": "simultaneous",
+            "evidence_ids": [foreign_evidence_id],
+        },
+    )
+    assert relation.status_code == 422, relation.text
+
+    contradiction = client.post(
+        "/api/v1/temporal/contradictions",
+        headers=owner_headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "subject_type": "care_event",
+            "subject_id": "temporal-evidence-patch",
+            "fact_a_id": fact_id,
+            "fact_b_id": fact_id,
+            "evidence_ids": [foreign_evidence_id],
+        },
+    )
+    assert contradiction.status_code == 422, contradiction.text
+
+
+def test_partial_temporal_contradiction_update_preserves_resolver_attribution():
+    client = TestClient(app)
+    owner = create_session(client, "Temporal resolver attribution")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    fact = client.post(
+        "/api/v1/temporal/facts",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "subject_type": "care_event",
+            "subject_id": "resolver-attribution",
+            "evidence_ids": [],
+        },
+    )
+    assert fact.status_code == 200, fact.text
+    fact_id = fact.json()["id"]
+
+    contradiction = client.post(
+        "/api/v1/temporal/contradictions",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "subject_type": "care_event",
+            "subject_id": "resolver-attribution",
+            "fact_a_id": fact_id,
+            "fact_b_id": fact_id,
+            "resolved_by_caregiver_id": owner["caregiver"]["id"],
+        },
+    )
+    assert contradiction.status_code == 200, contradiction.text
+    contradiction_id = contradiction.json()["id"]
+
+    updated = client.patch(
+        f"/api/v1/temporal/contradictions/{contradiction_id}",
+        headers=headers,
+        json={"resolution_notes": "Reviewed with the caregiver."},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["resolved_by_caregiver_id"] == owner["caregiver"]["id"]
