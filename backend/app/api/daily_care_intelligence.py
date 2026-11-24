@@ -497,6 +497,7 @@ def _fit_daily_care_prompt_context(
     lcr_context: dict[str, Any] | None,
     proposals_requested: bool,
     *,
+    matching_records_in_database: int | None = None,
     budget_chars: int = DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], int, bool]:
     """Fit evidence to a hard prompt budget without hiding omissions or source truncation."""
@@ -508,6 +509,9 @@ def _fit_daily_care_prompt_context(
                 "message": "Please shorten the question so Daily Care can preserve the relevant source information.",
             },
         )
+    total_matching_records = (
+        len(records) if matching_records_in_database is None else max(0, matching_records_in_database)
+    )
     source_summary = _daily_care_lcr_context_summary(lcr_context)
     has_more = any(
         source.get("has_more") is True
@@ -524,13 +528,13 @@ def _fit_daily_care_prompt_context(
             bounded_records.append(bounded)
             any_source_text_truncated = any_source_text_truncated or was_truncated
         while bounded_records:
-            omitted = max(0, len(records) - len(bounded_records))
+            omitted = max(0, total_matching_records - len(bounded_records))
             selection_truncated = omitted > 0 or any_source_text_truncated or has_more
             prompt_payload = {
                 "question": question,
                 "retrieved_history": bounded_records,
                 "retrieval_metadata": {
-                    "matching_records_in_database": len(records),
+                    "matching_records_in_database": total_matching_records,
                     "records_sent_to_model": len(bounded_records),
                     "records_omitted_from_model": omitted,
                     "selection_truncated": selection_truncated,
@@ -576,7 +580,7 @@ async def ask_daily_care_qwen(
     # Use full DB-side retrieval to find relevant history, then fit a transparent
     # evidence subset to the model context budget. Source IDs and dates remain intact.
     question_terms = set(_expanded_search_terms(
-        re.findall(r"[\\w'-]{3,}", payload.question.casefold())
+        re.findall(r"[\w'-]{3,}", payload.question.casefold())
     ))
     scored = []
     for row in records:
@@ -597,8 +601,8 @@ async def ask_daily_care_qwen(
         selected_candidates,
         bundle.get("lcr_context"),
         payload.prepare_lcr_proposals,
+        matching_records_in_database=len(records),
     )
-    records_omitted = max(records_omitted, len(records) - len(selected))
     history_scope = {
         **bundle["counts"],
         "lcr_context": bundle.get("lcr_context", {}),
