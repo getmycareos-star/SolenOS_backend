@@ -84,7 +84,7 @@ from app.services.document_binary_storage import (
 from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
-from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
+from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, build_shared_origin_evidence_pairs, context_lines_to_source_records, unmatched_material_claims
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
@@ -473,6 +473,12 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             if any(term in correction_text for term in topic_terms):
                 correction_evidence_ids.add(str(item.evidence_id))
     shared_origin_pairs = set()
+    if all_event_evidence_ids:
+        lineage_evidence_rows = db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.id.in_(all_event_evidence_ids),
+        ).all()
+        shared_origin_pairs.update(build_shared_origin_evidence_pairs(lineage_evidence_rows))
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
         shared_scope_filters = [
             and_(
@@ -495,10 +501,10 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             ),
             or_(*shared_scope_filters),
         ).all()
-        shared_origin_pairs = {
+        shared_origin_pairs.update({
             frozenset((str(item.source_evidence_id), str(item.related_evidence_id)))
             for item in shared_rows
-        }
+        })
     aggregate = build_distinct_event_aggregate(
         [{
             "id": str(row.id),
