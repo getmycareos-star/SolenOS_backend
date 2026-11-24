@@ -1,4 +1,3 @@
-"""
 from app.services.solenos_identity import (
     SOLENOS_IDENTITY_CONSTITUTION as SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
 )
