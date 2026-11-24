@@ -96,7 +96,7 @@ def build_evidence_lineage(
         # shared-origin review establish a shared source. Contradiction,
         # corroboration, generic relatedness, and duplicate-candidate links
         # must not be misread as proof of common origin.
-        establishes_shared_origin = status == "shared_origin" or relationship_type in {
+        establishes_shared_origin = status in {"shared_origin", "copied_or_same_origin"} or relationship_type in {
             "same_origin", "copied_from", "forwarded_from", "derived_from",
         }
         if establishes_shared_origin:
