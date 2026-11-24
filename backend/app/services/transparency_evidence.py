@@ -147,16 +147,24 @@ def build_transparency_evidence(
 
     if can_view_documents:
         uploads_available = _table_available(db, "evidence_uploads")
-        evidence_count = (
-            db.query(func.count(Evidence.id))
-            .filter(Evidence.person_id == person_id)
-            .scalar() or 0
+        document_filter = or_(
+            Evidence.type == "document",
+            Evidence.source_type == "document",
+            EvidenceUpload.evidence_id.is_not(None) if uploads_available else False,
         )
+        evidence_count_query = db.query(func.count(Evidence.id)).filter(
+            Evidence.person_id == person_id
+        )
+        if uploads_available:
+            evidence_count_query = evidence_count_query.outerjoin(
+                EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id
+            )
+        evidence_count = evidence_count_query.filter(document_filter).scalar() or 0
         if uploads_available:
             document_rows = (
                 db.query(Evidence, EvidenceUpload)
                 .outerjoin(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
-                .filter(Evidence.person_id == person_id)
+                .filter(Evidence.person_id == person_id, document_filter)
                 .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
                 .limit(MAX_RECENT_ITEMS + 1)
                 .all()
@@ -165,7 +173,10 @@ def build_transparency_evidence(
             document_rows = [
                 (row, None) for row in (
                     db.query(Evidence)
-                    .filter(Evidence.person_id == person_id)
+                    .filter(
+                        Evidence.person_id == person_id,
+                        or_(Evidence.type == "document", Evidence.source_type == "document"),
+                    )
                     .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
                     .limit(MAX_RECENT_ITEMS + 1)
                     .all()
