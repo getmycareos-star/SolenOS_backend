@@ -374,7 +374,14 @@ def build_transparency_evidence(
             .all()
         )
         extraction_counts = {str(status or "unknown"): int(count) for status, count in extraction_rows}
-        extraction_query = db.query(CaptureAnalysis).filter(
+        extraction_query = db.query(
+            CaptureAnalysis.id.label("id"),
+            CaptureAnalysis.source_evidence_id.label("source_evidence_id"),
+            CaptureAnalysis.extraction_status.label("extraction_status"),
+            CaptureAnalysis.candidates.label("candidates"),
+            CaptureAnalysis.created_at.label("created_at"),
+            CaptureAnalysis.updated_at.label("updated_at"),
+        ).filter(
             CaptureAnalysis.person_id == person_id,
             CaptureAnalysis.source_evidence_id.is_not(None),
         )
@@ -416,9 +423,17 @@ def build_transparency_evidence(
         coverage["documents"] = "partial" if has_more or has_more_extractions or not uploads_available or missing_upload_metadata else "complete_metadata"
 
         if _table_available(db, "document_review_events"):
-            review_query = db.query(DocumentReviewEvent).filter(
-                DocumentReviewEvent.person_id == person_id
-            )
+            review_query = db.query(
+                DocumentReviewEvent.id.label("id"),
+                DocumentReviewEvent.analysis_id.label("analysis_id"),
+                DocumentReviewEvent.source_evidence_id.label("source_evidence_id"),
+                DocumentReviewEvent.candidate_index.label("candidate_index"),
+                DocumentReviewEvent.decision_version.label("decision_version"),
+                DocumentReviewEvent.decision.label("decision"),
+                DocumentReviewEvent.caregiver_id.label("caregiver_id"),
+                DocumentReviewEvent.resulting_assertion_id.label("resulting_assertion_id"),
+                DocumentReviewEvent.created_at.label("created_at"),
+            ).filter(DocumentReviewEvent.person_id == person_id)
             review_count = review_query.count()
             review_rows = (
                 review_query.order_by(DocumentReviewEvent.created_at.desc(), DocumentReviewEvent.id.desc())
@@ -496,8 +511,18 @@ def build_transparency_evidence(
         has_more_revisions = False
         if revision_history_available:
             revision_rows = (
-                db.query(CareStateRevision)
-                .filter(CareStateRevision.person_id == person_id)
+                db.query(
+                    CareStateRevision.id.label("id"),
+                    CareStateRevision.target_type.label("target_type"),
+                    CareStateRevision.target_id.label("target_id"),
+                    CareStateRevision.revision_number.label("revision_number"),
+                    CareStateRevision.change_kind.label("change_kind"),
+                    CareStateRevision.before_state.label("before_state"),
+                    CareStateRevision.after_state.label("after_state"),
+                    CareStateRevision.changed_by_caregiver_id.label("changed_by_caregiver_id"),
+                    CareStateRevision.changed_at.label("changed_at"),
+                    CareStateRevision.evidence_ids.label("evidence_ids"),
+                ).filter(CareStateRevision.person_id == person_id)
                 .order_by(CareStateRevision.changed_at.desc(), CareStateRevision.id.desc())
                 .limit(MAX_RECENT_ITEMS + 1)
                 .all()
@@ -520,9 +545,17 @@ def build_transparency_evidence(
         proposal_count = None
         has_more_proposals = False
         if proposal_history_available:
-            proposal_query = db.query(AIOutputLCRProposal).filter(
-                AIOutputLCRProposal.person_id == person_id
-            )
+            proposal_query = db.query(
+                AIOutputLCRProposal.id.label("id"),
+                AIOutputLCRProposal.caregiver_id.label("caregiver_id"),
+                AIOutputLCRProposal.proposal_type.label("proposal_type"),
+                AIOutputLCRProposal.status.label("status"),
+                AIOutputLCRProposal.proposed_change_json.label("proposed_change_json"),
+                AIOutputLCRProposal.created_at.label("created_at"),
+                AIOutputLCRProposal.expires_at.label("expires_at"),
+                AIOutputLCRProposal.source_event_ids_json.label("source_event_ids_json"),
+                AIOutputLCRProposal.source_evidence_ids_json.label("source_evidence_ids_json"),
+            ).filter(AIOutputLCRProposal.person_id == person_id)
             if not can_manage_members:
                 proposal_query = proposal_query.filter(AIOutputLCRProposal.caregiver_id == caregiver_id)
             proposal_count = proposal_query.count()
@@ -537,7 +570,14 @@ def build_transparency_evidence(
         decision_rows = []
         has_more_decisions = False
         if decision_history_available and proposal_ids:
-            decision_query = db.query(AIOutputLCRDecision).filter(
+            decision_query = db.query(
+                AIOutputLCRDecision.id.label("id"),
+                AIOutputLCRDecision.proposal_id.label("proposal_id"),
+                AIOutputLCRDecision.reviewer_caregiver_id.label("reviewer_caregiver_id"),
+                AIOutputLCRDecision.decision.label("decision"),
+                AIOutputLCRDecision.resulting_lcr_revision_id.label("resulting_lcr_revision_id"),
+                AIOutputLCRDecision.created_at.label("created_at"),
+            ).filter(
                 AIOutputLCRDecision.person_id == person_id,
                 AIOutputLCRDecision.proposal_id.in_(proposal_ids),
             )
@@ -568,8 +608,21 @@ def build_transparency_evidence(
             })
 
         assertion_rows = (
-            db.query(CareAssertion)
-            .filter(CareAssertion.person_id == person_id)
+            db.query(
+                CareAssertion.id.label("id"),
+                CareAssertion.field.label("field"),
+                CareAssertion.asserted_value.label("asserted_value"),
+                CareAssertion.assertion_kind.label("assertion_kind"),
+                CareAssertion.source_label.label("source_label"),
+                CareAssertion.source_text.label("source_text"),
+                CareAssertion.source_event_id.label("source_event_id"),
+                CareAssertion.source_proposal_id.label("source_proposal_id"),
+                CareAssertion.assertion_status.label("assertion_status"),
+                CareAssertion.epistemic_state.label("epistemic_state"),
+                CareAssertion.recorded_at.label("recorded_at"),
+                CareAssertion.observed_at.label("observed_at"),
+                CareAssertion.evidence_ids.label("evidence_ids"),
+            ).filter(CareAssertion.person_id == person_id)
             .order_by(CareAssertion.recorded_at.desc(), CareAssertion.id.desc())
             .limit(MAX_RECENT_ITEMS + 1)
             .all()
