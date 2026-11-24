@@ -498,7 +498,10 @@ def test_actual_qwen_transport_applies_the_exact_route_for_every_enabled_workflo
 
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
 
-    for workflow in ENABLED_WORKFLOWS:
+    # Include internal production workflows such as companion care updates
+    # and document candidate extraction, not only public assist enum values.
+    all_routed_workflows = sorted(set(ENABLED_WORKFLOWS) | set(WORKFLOW_SPECIALISTS))
+    for workflow in all_routed_workflows:
         captured.clear()
         answer = qwen_gateway.qwen_chat([
             {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
