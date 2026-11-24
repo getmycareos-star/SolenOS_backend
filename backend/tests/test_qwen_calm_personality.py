@@ -131,8 +131,13 @@ def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contr
     for trait, contract in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS.items():
         assert required_fields.issubset(contract), trait
         for field in required_fields:
-            assert contract[field], (trait, field)
-            assert all(isinstance(item, str) and item.strip() for item in contract[field]), (trait, field)
+            value = contract[field]
+            assert value, (trait, field)
+            if field == "runtime_rule":
+                assert isinstance(value, str) and value.strip(), (trait, field)
+            else:
+                assert isinstance(value, (tuple, list)), (trait, field)
+                assert all(isinstance(item, str) and item.strip() for item in value), (trait, field)
         assert trait.upper() in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.upper(), trait
         assert trait.upper() in SOLENOS_PERSONALITY_CONSTITUTION.upper(), trait
 
