@@ -109,3 +109,29 @@ def test_qwen_runtime_identity_contains_canonical_answers_and_model_transparency
     )
     for phrase in required:
         assert phrase in identity
+
+
+def test_all_enabled_qwen_workflows_receive_the_same_complete_identity_and_personality():
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS
+
+    for workflow in sorted(ENABLED_WORKFLOWS):
+        routed = apply_specialized_intelligence([
+            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"},
+            {"role": "user", "content": "Has anything changed with my mother?"},
+        ])
+        system = apply_solenos_system_contract(routed)[0]["content"]
+
+        assert system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION), workflow
+        assert "NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES" in system, workflow
+        for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
+            contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
+            assert contract["runtime_rule"] in system, (workflow, trait)
+            for field in (
+                "observable_behaviors",
+                "required_context",
+                "prohibited_behaviors",
+                "violation_conditions",
+                "verification_cases",
+            ):
+                assert all(value in system for value in contract[field]), (workflow, trait, field)
