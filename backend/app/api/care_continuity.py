@@ -5461,13 +5461,11 @@ def update_follow_up_link(
             if len(evidence_ids) != len(set(evidence_ids)):
                 raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
             if evidence_ids:
-                evidence_table = _table(db, "evidence")
-                found = set(db.execute(
-                    select(evidence_table.c.id).where(
-                        evidence_table.c.person_id == person_id,
-                        evidence_table.c.id.in_(evidence_ids),
-                    )
-                ).scalars().all())
+                found = {
+                    str(value) for (value,) in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
+                        Evidence.id.in_(evidence_ids),
+                    ).all()
+                }
                 if found != set(evidence_ids):
                     raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
         for key, value in list(changes.items()):
@@ -5661,13 +5659,11 @@ def update_care_continuity_resource(
                 if len(value) != len(set(value)):
                     raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
                 if value:
-                    evidence_table = _table(db, "evidence")
-                    found = set(db.execute(
-                        select(evidence_table.c.id).where(
-                            evidence_table.c.person_id == person_id,
-                            evidence_table.c.id.in_(value),
-                        )
-                    ).scalars().all())
+                    found = {
+                        str(item) for (item,) in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
+                            Evidence.id.in_(value),
+                        ).all()
+                    }
                     if found != set(value):
                         raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
             elif isinstance(value, (list, dict)) and not isinstance(column.type, SQLJSON):
@@ -6041,13 +6037,9 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         if len(evidence_ids) != len(set(evidence_ids)):
             raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
         if evidence_ids:
-            evidence_table = _table(db, "evidence")
             owned_evidence_ids = {
-                str(row[0]) for row in db.execute(
-                    select(evidence_table.c.id).where(
-                        evidence_table.c.id.in_(evidence_ids),
-                        evidence_table.c.person_id == person_id,
-                    )
+                str(value) for (value,) in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
+                    Evidence.id.in_(evidence_ids),
                 ).all()
             }
             if owned_evidence_ids != set(evidence_ids):
