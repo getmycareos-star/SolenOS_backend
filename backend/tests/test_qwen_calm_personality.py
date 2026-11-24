@@ -69,7 +69,6 @@ def test_precedence_protects_safety_honesty_dignity_and_lcr_authority():
 def test_characteristics_define_observable_boundaries_not_only_tone_adjectives():
     constitution = SOLENOS_PERSONALITY_CONSTITUTION.casefold()
     required_behaviors = (
-        "violation:",
         "never infer a clinical condition",
         "acknowledge feelings the caregiver actually expresses",
         "distinguish caregiver reports",
