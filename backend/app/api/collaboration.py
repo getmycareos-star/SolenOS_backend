@@ -4897,6 +4897,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
         raise HTTPException(status_code=422, detail="Source text is required")
     _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
     system = (
+        "SOLENOS_WORKFLOW_ID: care_claim_extraction. "
         "Extract only discrete claims explicitly supported by the supplied source. Return JSON only: "
         '{"claims":[{"claim_text":"string","entity_type":"person|place|institution|object|symptom|behavior|medication|event|unknown",'
         '"event_type":"string","confidence_tag":"confirmed|reported|inferred|unknown|contradictory",'
@@ -4966,6 +4967,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         raise HTTPException(status_code=422, detail="Source text is required")
     _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
     system = (
+        "SOLENOS_WORKFLOW_ID: care_understanding. "
         "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
         "Match these exact structures: observations [{description,approximate_time:null|string,confidence:low|medium|high,raw_fragment}]; "
         "events [{description,time:null|string,participants:string[],raw_fragment}]; "
@@ -5639,6 +5641,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if empty_context_emergency_readiness else ""
     )
     prompt = (
+        f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
@@ -8378,6 +8381,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
         source_context.extend(aggregate_context_lines)
         system_prompt = (
+            "SOLENOS_WORKFLOW_ID: companion. "
             "You are SolenOS AI Companion for family caregivers. Answer the caregiver's current question directly "
             "in plain natural language. Do not use canned replies or fixed response maps. Use only relevant authorized "
             "care-record context. First answer the caregiver’s actual question; be concise unless detail is needed. "
