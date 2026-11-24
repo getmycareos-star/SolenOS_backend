@@ -207,7 +207,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
             for item in coverage["retrieval_receipt"]["source_limits"]
         )
         assert captured_prompts
-        assert "cannot be searched for this topic" in captured_prompts[0][-1]["content"]
+        assert "cannot be searched for this topic" in captured_prompts[0][0]["content"]
 
         missing_confirmation = client.post(
             f"/api/v1/companion/care-updates/from-message/{message_id}",
