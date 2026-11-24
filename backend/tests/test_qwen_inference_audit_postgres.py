@@ -1,9 +1,7 @@
 """PostgreSQL integration for durable, privacy-minimizing Qwen inference audit records."""
 import json
-import uuid
-
 import pytest
-from sqlalchemy.orm import Session
+from fastapi import HTTPException
 
 from app.core.database import SessionLocal
 from app.models.ai_output_governance import AIInferenceMetric
@@ -106,7 +104,7 @@ def test_qwen_gateway_does_not_deliver_answer_when_audit_record_cannot_persist(m
         }).encode("utf-8")),
     )
 
-    with pytest.raises(Exception) as error:
+    with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([
             {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion."},
             {"role": "user", "content": "Use synthetic evidence."},
