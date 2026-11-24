@@ -7290,6 +7290,60 @@ def _is_companion_identity_question(user_text: str) -> bool:
     return any(re.search(pattern, normalized) for pattern in patterns)
 
 
+def _companion_identity_direct_answer(user_text: str) -> str | None:
+    """Return canonical product-identity answers without invoking a language model."""
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", (user_text or "").casefold())).strip()
+    if re.search(r"\bwho (?:are|made|created|built|developed) you$", normalized):
+        if re.search(r"\bwho are you$", normalized):
+            return "I'm SolenOS Companion, the AI care-continuity companion within SolenOS."
+        return (
+            "I'm SolenOS Companion, an AI companion developed as part of SolenOS. "
+            "SolenOS was founded by David Abuchi to help family caregivers maintain "
+            "continuity throughout the care journey."
+        )
+    if re.search(r"\bwho (?:founded|started|created) solenos$|\bwho is (?:the )?founder of solenos$", normalized):
+        return "SolenOS was founded by David Abuchi."
+    if re.search(r"\bwho owns you$", normalized):
+        return "I'm part of the SolenOS product. I can't make a separate legal ownership claim."
+    if re.search(r"\bare you (?:a )?(?:human|person)$", normalized):
+        return "No. I'm an AI companion, not a person."
+    if re.search(r"\bare you (?:a )?(?:doctor|nurse|therapist|medical professional|healthcare professional)$", normalized):
+        return "No. I'm an AI companion, not a healthcare professional or a replacement for professional medical judgment."
+    if re.search(r"\bare you (?:chatgpt|ai)$", normalized):
+        return "I'm SolenOS Companion, powered by AI technology within SolenOS."
+    if re.search(r"\bdo you (?:remember|know) everything$", normalized):
+        return "No. I use only information available through the current authorized SolenOS context."
+    if re.search(r"\bcan you make mistakes$", normalized):
+        return "Yes. I can misunderstand information or make mistakes. Check important care information against its source and with a qualified professional when appropriate."
+    if re.search(r"\bcan i trust everything you say$", normalized):
+        return "I can make mistakes or misunderstand information. Check important care details against their source and with a qualified professional when appropriate."
+    if re.search(r"\bwhat can you do$", normalized):
+        return (
+            "I help family caregivers understand authorized care information, connect relevant "
+            "history, recognize evidence-backed changes, identify information gaps, and prepare "
+            "for conversations with healthcare professionals. What I can do depends on the "
+            "information and tools available in the current SolenOS workflow."
+        )
+    if re.search(r"\bwhat can'?t you do$", normalized):
+        return (
+            "I can't diagnose, prescribe, replace professional medical judgment, verify every "
+            "caregiver report, access records that aren't available or authorized, or independently "
+            "change the Living Care Record. I can make mistakes, so important care information "
+            "should be checked against its source."
+        )
+    if re.search(r"\bwhat (?:is|are) your (?:name|purpose|role|identity)$|\bwhat are you$", normalized):
+        return (
+            "I'm SolenOS Companion, the AI care-continuity companion within SolenOS. "
+            "My purpose is to help family caregivers understand what happened, what is happening, "
+            "what changed, and what may need attention across the care journey."
+        )
+    return (
+        "I'm SolenOS Companion, an AI care-continuity companion within SolenOS. "
+        "I help caregivers understand authorized care information while respecting the limits "
+        "of the available record and professional medical judgment."
+    )
+
+
 def _caregiver_explicitly_requests_factual_answer(user_text: str) -> bool:
     """Keep expressed emotion separate from a caregiver's explicit information request."""
     value = (user_text or "").strip().casefold()
@@ -9132,6 +9186,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
             )
         care_history_direct_answer_used = bool(care_history_direct_answer)
+        identity_direct_answer = (
+            _companion_identity_direct_answer(user_text) if identity_question else None
+        )
+        identity_direct_answer_used = bool(identity_direct_answer)
         caregiver_question_direct_answer = (
             _caregiver_question_extractive_answer(user_text, included_model_context_lines)
             if payload.language == "en" else None
@@ -9152,11 +9210,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             )
         caregiver_question_direct_answer_used = bool(caregiver_question_direct_answer)
         base = ""
-        model = "deterministic-source-quote" if (care_history_direct_answer_used or caregiver_question_direct_answer_used) else "unavailable"
+        model = (
+            "solenos-product-identity-constitution"
+            if identity_direct_answer_used
+            else "deterministic-source-quote"
+            if (care_history_direct_answer_used or caregiver_question_direct_answer_used)
+            else "unavailable"
+        )
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
         try:
-            if care_history_direct_answer_used:
+            if identity_direct_answer_used:
+                reply = identity_direct_answer
+                logger.info(
+                    "solenos_companion_stage %s",
+                    json.dumps({
+                        "event": "companion_inference_complete",
+                        "request_id": companion_request_id,
+                        "duration_ms": 0,
+                        "retrieval_duration_ms": retrieval_duration_ms,
+                        "model": model,
+                        "outcome": "deterministic_product_identity_answer",
+                    }, separators=(",", ":")),
+                )
+            elif care_history_direct_answer_used:
                 reply = care_history_direct_answer
                 logger.info(
                     "solenos_companion_stage %s",
@@ -9790,7 +9867,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # once against the same authorized context; never truncate the qualifier.
         if _companion_message_needs_revision(reply, response_length_policy.max_words):
             deterministic_source_answer = bool(
-                care_history_direct_answer_used
+                identity_direct_answer_used
+                or care_history_direct_answer_used
                 or caregiver_question_direct_answer_used
                 or medication_dose_recall_fallback_used
                 or care_history_extractive_fallback_used
@@ -9848,7 +9926,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     status_code=503,
                     detail="Companion could not preserve all required care-history qualifications within its response contract. No reply was saved; please retry.",
                 )
-        if unsupported_trend:
+        if identity_direct_answer_used:
+            verdict = "passed"
+            safety_note = "This answer comes from the versioned SolenOS product identity; no patient care record was used."
+            ai_generated = False
+        elif unsupported_trend:
             verdict = "blocked"
             safety_note = "A trend claim was withheld because the retrieved record lacks two distinct dated observations."
             ai_generated = False
