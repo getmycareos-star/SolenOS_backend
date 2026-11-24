@@ -153,6 +153,8 @@ def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_person
         system = apply_solenos_system_contract(routed)[0]["content"]
         assert system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION), workflow
         assert "NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES" in system, workflow
+        assert "Never invent numerical confidence scores" in system, workflow
+        assert "Keep evaluation criteria fixed before a run" in system, workflow
         for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
             anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
             assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system, (workflow, trait)
