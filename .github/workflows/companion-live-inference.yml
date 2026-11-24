@@ -2,7 +2,6 @@ name: Companion live Qwen inference evaluation
 # CI-only live Qwen acceptance suite and appointment outcome regression coverage on current main.
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
@@ -67,17 +66,23 @@ on:
       - "backend/tests/test_document_intelligence_lifecycle.py"
       - "backend/live_tests/test_document_intelligence_live.py"
       - "start-with-qwen.sh"
+  workflow_run:
+    workflows: ["Backend tests — main validation"]
+    types: [completed]
+    branches: [main]
 permissions:
   contents: read
   statuses: write
 
-# Let an active live-model run finish; keep only the newest pending main run.
+# Live model acceptance is sequenced after the complete backend suite.
+# A push event queues a skipped job and replaces any stale pending live run.
 concurrency:
   group: companion-live-qwen-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   live-qwen-evaluation:
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     services:
@@ -108,8 +113,10 @@ jobs:
       SOLENOS_RUN_LIVE_QWEN_EVAL: "1"
       SOLENOS_RUN_APPOINTMENT_ASSIST_LIVE_EVAL: "1"
     steps:
-      - name: Check out repository
+      - name: Check out the exact backend-tested revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Mark document and live-Qwen validation pending
         uses: actions/github-script@v7
         with:
@@ -117,7 +124,7 @@ jobs:
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              sha: context.sha,
+              sha: context.payload.workflow_run.head_sha || context.sha,
               state: "pending",
               context: "document-intelligence-live-validation",
               description: "Document OCR, PostgreSQL restart, review, LCR and real-Qwen suites are running",
