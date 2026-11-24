@@ -5017,6 +5017,163 @@ def reconstruct_recorded_state_as_of(
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             })
 
+    freshness_history = []
+    completeness_history = []
+    freshness_history_status = "unavailable_schema"
+    completeness_history_status = "unavailable_schema"
+    try:
+        freshness_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceFreshnessAssessment.__tablename__)
+        } if schema_inspector.has_table(EvidenceFreshnessAssessment.__tablename__) else set()
+        freshness_policy_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceFreshnessPolicy.__tablename__)
+        } if schema_inspector.has_table(EvidenceFreshnessPolicy.__tablename__) else set()
+    except Exception:
+        freshness_columns = set()
+        freshness_policy_columns = set()
+    freshness_required = {
+        "id", "person_id", "evidence_id", "policy_id", "policy_version", "freshness_status",
+        "source_time", "source_time_kind", "assessed_at", "age_days", "rationale", "assessed_by_caregiver_id",
+    }
+    freshness_policy_required = {"id", "person_id", "domain_key", "policy_version"}
+    if freshness_required.issubset(freshness_columns) and freshness_policy_required.issubset(freshness_policy_columns):
+        freshness_rows = (
+            db.query(EvidenceFreshnessAssessment)
+            .join(Evidence, Evidence.id == EvidenceFreshnessAssessment.evidence_id)
+            .join(EvidenceFreshnessPolicy, EvidenceFreshnessPolicy.id == EvidenceFreshnessAssessment.policy_id)
+            .filter(
+                EvidenceFreshnessAssessment.person_id == person_id,
+                Evidence.person_id == person_id,
+                EvidenceFreshnessPolicy.person_id == person_id,
+                EvidenceFreshnessAssessment.assessed_at <= as_of,
+            )
+            .order_by(EvidenceFreshnessAssessment.assessed_at.asc(), EvidenceFreshnessAssessment.id.asc())
+            .limit(limit + 1)
+            .all()
+        )
+        append_only_history_truncated = append_only_history_truncated or len(freshness_rows) > limit
+        freshness_rows = freshness_rows[:limit]
+        freshness_reviewer_ids = {
+            str(row.assessed_by_caregiver_id) for row in freshness_rows if row.assessed_by_caregiver_id
+        }
+        authorized_freshness_reviewer_ids = set()
+        if freshness_reviewer_ids:
+            authorized_freshness_reviewer_ids = {
+                str(value) for (value,) in db.query(Caregiver.id).filter(
+                    Caregiver.person_id == person_id,
+                    Caregiver.id.in_(freshness_reviewer_ids),
+                ).all()
+            }
+        freshness_history_status = "available" if freshness_rows else "empty"
+        freshness_history = [{
+            "assessment_id": str(row.id),
+            "evidence_id": str(row.evidence_id),
+            "policy_id": str(row.policy_id),
+            "policy_version": row.policy_version,
+            "freshness_status": row.freshness_status,
+            "source_time": row.source_time.isoformat() if row.source_time else None,
+            "source_time_kind": row.source_time_kind,
+            "age_days": row.age_days,
+            "rationale": row.rationale,
+            "assessed_by_caregiver_id": (
+                str(row.assessed_by_caregiver_id)
+                if row.assessed_by_caregiver_id and str(row.assessed_by_caregiver_id) in authorized_freshness_reviewer_ids else None
+            ),
+            "reviewer_scope_validation": (
+                "same_person_verified"
+                if row.assessed_by_caregiver_id and str(row.assessed_by_caregiver_id) in authorized_freshness_reviewer_ids
+                else "reviewer_not_verified"
+            ),
+            "assessed_at": row.assessed_at.isoformat() if row.assessed_at else None,
+        } for row in freshness_rows]
+
+    try:
+        completeness_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceCompletenessAssessment.__tablename__)
+        } if schema_inspector.has_table(EvidenceCompletenessAssessment.__tablename__) else set()
+        completeness_policy_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceCompletenessPolicy.__tablename__)
+        } if schema_inspector.has_table(EvidenceCompletenessPolicy.__tablename__) else set()
+    except Exception:
+        completeness_columns = set()
+        completeness_policy_columns = set()
+    completeness_required = {
+        "id", "person_id", "policy_id", "policy_version", "subject_type", "subject_id",
+        "assessment_status", "required_fields", "satisfied_fields", "missing_fields",
+        "evidence_ids", "rationale", "assessment_basis", "semantic_sufficiency",
+        "assessed_by_caregiver_id", "assessed_at",
+    }
+    completeness_policy_required = {"id", "person_id", "domain_key", "purpose_key", "policy_version"}
+    if completeness_required.issubset(completeness_columns) and completeness_policy_required.issubset(completeness_policy_columns):
+        completeness_rows = (
+            db.query(EvidenceCompletenessAssessment)
+            .join(EvidenceCompletenessPolicy, EvidenceCompletenessPolicy.id == EvidenceCompletenessAssessment.policy_id)
+            .filter(
+                EvidenceCompletenessAssessment.person_id == person_id,
+                EvidenceCompletenessPolicy.person_id == person_id,
+                EvidenceCompletenessAssessment.assessed_at <= as_of,
+            )
+            .order_by(EvidenceCompletenessAssessment.assessed_at.asc(), EvidenceCompletenessAssessment.id.asc())
+            .limit(limit + 1)
+            .all()
+        )
+        append_only_history_truncated = append_only_history_truncated or len(completeness_rows) > limit
+        completeness_rows = completeness_rows[:limit]
+        completeness_reviewer_ids = {
+            str(row.assessed_by_caregiver_id) for row in completeness_rows if row.assessed_by_caregiver_id
+        }
+        authorized_completeness_reviewer_ids = set()
+        if completeness_reviewer_ids:
+            authorized_completeness_reviewer_ids = {
+                str(value) for (value,) in db.query(Caregiver.id).filter(
+                    Caregiver.person_id == person_id,
+                    Caregiver.id.in_(completeness_reviewer_ids),
+                ).all()
+            }
+        completeness_evidence_ids = {
+            str(evidence_id)
+            for row in completeness_rows
+            for evidence_id in (row.evidence_ids or [])
+            if evidence_id
+        }
+        authorized_completeness_evidence_ids = set()
+        if completeness_evidence_ids:
+            authorized_completeness_evidence_ids = {
+                str(value) for (value,) in db.query(Evidence.id).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(completeness_evidence_ids),
+                ).all()
+            }
+        completeness_history_status = "available" if completeness_rows else "empty"
+        completeness_history = [{
+            "assessment_id": str(row.id),
+            "policy_id": str(row.policy_id),
+            "policy_version": row.policy_version,
+            "subject_type": row.subject_type,
+            "subject_id": row.subject_id,
+            "assessment_status": row.assessment_status,
+            "required_fields": list(row.required_fields or []),
+            "satisfied_fields": list(row.satisfied_fields or []),
+            "missing_fields": list(row.missing_fields or []),
+            "evidence_ids": [
+                str(evidence_id) for evidence_id in (row.evidence_ids or [])
+                if str(evidence_id) in authorized_completeness_evidence_ids
+            ],
+            "rationale": row.rationale,
+            "assessment_basis": row.assessment_basis,
+            "semantic_sufficiency": row.semantic_sufficiency,
+            "assessed_by_caregiver_id": (
+                str(row.assessed_by_caregiver_id)
+                if row.assessed_by_caregiver_id and str(row.assessed_by_caregiver_id) in authorized_completeness_reviewer_ids else None
+            ),
+            "reviewer_scope_validation": (
+                "same_person_verified"
+                if row.assessed_by_caregiver_id and str(row.assessed_by_caregiver_id) in authorized_completeness_reviewer_ids
+                else "reviewer_not_verified"
+            ),
+            "assessed_at": row.assessed_at.isoformat() if row.assessed_at else None,
+        } for row in completeness_rows]
+
     return {
         "person_id": person_id,
         "requested_as_of": as_of.isoformat(),
@@ -5030,6 +5187,10 @@ def reconstruct_recorded_state_as_of(
             "evidence_reviews_status": evidence_review_history_status,
             "claim_assessments": claim_assessment_history,
             "claim_assessments_status": claim_assessment_history_status,
+            "freshness_assessments": freshness_history,
+            "freshness_assessments_status": freshness_history_status,
+            "completeness_assessments": completeness_history,
+            "completeness_assessments_status": completeness_history_status,
             "truncated": append_only_history_truncated,
         },
         "interpretation_limit": (
