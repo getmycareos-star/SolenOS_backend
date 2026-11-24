@@ -532,3 +532,26 @@ def test_attributed_quote_must_exist_verbatim_in_the_same_source():
     )
     assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
 
+def test_lcr_event_evidence_prefix_resolves_to_persisted_event_type():
+    from app.services.claim_provenance import context_lines_to_source_records
+
+    records = context_lines_to_source_records([
+        'LCR event evidence: {"event_id":"lcr-event-42","title":"Mobility update",'
+        '"description":"Caregiver reported that Mum felt unsteady."}'
+    ])
+    assert records == [{
+        "record_type": "care_event",
+        "record_id": "lcr-event-42",
+        "label": "Care update",
+        "source_text": (
+            'LCR event evidence: {"event_id":"lcr-event-42","title":"Mobility update",'
+            '"description":"Caregiver reported that Mum felt unsteady."}'
+        ),
+        "source_excerpt": (
+            'LCR event evidence: {"event_id":"lcr-event-42","title":"Mobility update",'
+            '"description":"Caregiver reported that Mum felt unsteady."}'
+        ),
+        "record_status": None,
+        "related_evidence_ids": [],
+    }]
+
