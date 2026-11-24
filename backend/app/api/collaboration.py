@@ -8051,6 +8051,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     care_history_extractive_fallback_used = False
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
+    greeting_only = _is_casual_greeting(user_text)
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
@@ -9218,7 +9219,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "If quoting an original source in another language, make clear it is the original wording."
         )
         system_prompt += " " + COMPANION_INTERACTION_INTERPRETATION_CONTRACT
-        if not identity_question:
+        if not identity_question and not greeting_only:
             system_prompt += " " + _care_recipient_identity_guidance(person.name)
             caregiver_guidance = _caregiver_interaction_guidance(user_text)
             if caregiver_guidance:
@@ -9233,7 +9234,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         model_messages = [{"role": "system", "content": system_prompt}]
         # History may resolve a referential follow-up, but assistant messages are
         # never treated as evidence. Standalone questions do not inherit old turns.
-        if retrieval_query.strip() != user_text.strip():
+        if retrieval_query.strip() != user_text.strip() and not greeting_only:
             model_messages.extend(
                 {"role": row.role, "content": (row.content or "")[:180]}
                 for row in reversed(prior_messages[:2])
@@ -9518,6 +9519,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "role": "user",
                 "content": f"Caregiver question: {user_text}",
             })
+        elif greeting_only:
+            # A greeting must not carry care-recipient names, records, or prior
+            # dialogue into a response that may be visible on a shared screen.
+            model_messages.append({
+                "role": "user",
+                "content": f"Caregiver greeting: {user_text}",
+            })
         else:
             # Keep retrieval completeness and source-specific limits in the
             # system role as well as the caregiver data message. The model must
@@ -9542,7 +9550,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     ])
                 ),
             })
-        greeting_only = _is_casual_greeting(user_text)
         has_returning_care_history = bool(
             source_event_ids or source_appointment_ids or source_assertion_ids
             or source_document_analysis_ids or source_evidence_ids or source_lcr_record_refs
