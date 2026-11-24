@@ -3581,3 +3581,10 @@ def test_appointment_preparation_legacy_events_inherit_lcr_correction_currentnes
     assert by_id["not-in-projection"]["correction_lineage_status"] == "failed"
     assert by_id["not-in-projection"]["information_status"] == "event_currentness_unknown"
 
+    partial_context = {"sources": {"events": {"status": "complete"}}}
+    unresolved = appointment_workspace._apply_lcr_event_correction_lineage(
+        [{"source_id": "not-in-projection", "status": "recorded"}],
+        partial_context,
+    )
+    assert unresolved[0]["information_status"] == "event_currentness_unknown"
+
