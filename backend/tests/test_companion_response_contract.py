@@ -146,6 +146,7 @@ def test_companion_output_validation_audit_persists_pass_and_rejection_without_r
             result="passed",
         ).one()
         assert passed.details_json["request_id"] == "companion-request-pass"
+        assert passed.details_json["caregiver_id"] == caregiver_id
         assert passed.details_json["source_references"]["event_ids"] == ["event-1"]
         assert passed_reply not in json.dumps(passed.details_json)
 
