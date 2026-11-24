@@ -123,7 +123,7 @@ def test_shared_system_contract_fits_a_bounded_prompt_budget():
 
 def test_gateway_contract_keeps_core_and_only_selected_specialist():
     messages = [
-        {"role": "system", "content": "Companion: answer the caregiver question."},
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion"},
         {"role": "user", "content": "What changed?"},
     ]
     specialized = apply_specialized_intelligence(messages)
