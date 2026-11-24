@@ -3247,7 +3247,7 @@ def _should_include_evidence_lineage_in_prompt(user_text: str) -> bool:
     audit metadata in the model prompt and can crowd out the care facts themselves.
     """
     return bool(re.search(
-        r"\\b(?:corroborat|independent source|source lineage|same source)\\b",
+        r"\b(?:corroborat|independent source|source lineage|same source)\b",
         user_text or "",
         re.IGNORECASE,
     ))
