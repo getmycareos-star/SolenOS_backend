@@ -9966,6 +9966,38 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
+        # One immutable, request-scoped provenance envelope is reused for the
+        # first generation and every repair attempt. It is defined even when a
+        # deterministic answer later needs a model-assisted format repair.
+        companion_audit_context = {
+            "request_id": companion_request_id,
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "conversation_session_id": str(session.id),
+            "source_event_ids": list(source_event_ids),
+            "source_evidence_ids": list(source_evidence_ids),
+            "source_document_analysis_ids": list(source_document_analysis_ids),
+            "source_appointment_ids": list(source_appointment_ids),
+            "source_assertion_ids": list(source_assertion_ids),
+            "source_lcr_context_ids": list(source_lcr_context_ids),
+            "source_freshness_assessment_ids": list(source_freshness_assessment_ids),
+            "source_refs": [
+                f"{item.get('record_type')}:{item.get('record_id')}"
+                for item in source_lcr_record_refs
+                if isinstance(item, dict) and item.get("record_type") and item.get("record_id")
+            ][:100],
+            "retrieval_coverage": {
+                "status": model_retrieval_coverage.get("retrieval_completeness", "unknown"),
+                "retrieval_projection_complete": bool(
+                    lcr_context_coverage.get("retrieval_projection_complete", False)
+                ),
+                "page_limit_reached": bool(
+                    lcr_context_coverage.get("page_limit_reached", False)
+                    or more_available_source_names
+                ),
+                "context_truncated": bool(context_truncated),
+            },
+        }
         try:
             if identity_direct_answer_used:
                 reply = identity_direct_answer
@@ -10008,35 +10040,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
             else:
                 base, model = _ollama_url()
-                companion_audit_context = {
-                    "request_id": companion_request_id,
-                    "person_id": person_id,
-                    "caregiver_id": caregiver_id,
-                    "conversation_session_id": str(session.id),
-                    "source_event_ids": list(source_event_ids),
-                    "source_evidence_ids": list(source_evidence_ids),
-                    "source_document_analysis_ids": list(source_document_analysis_ids),
-                    "source_appointment_ids": list(source_appointment_ids),
-                    "source_assertion_ids": list(source_assertion_ids),
-                    "source_lcr_context_ids": list(source_lcr_context_ids),
-                    "source_freshness_assessment_ids": list(source_freshness_assessment_ids),
-                    "source_refs": [
-                        f"{item.get('record_type')}:{item.get('record_id')}"
-                        for item in source_lcr_record_refs
-                        if isinstance(item, dict) and item.get("record_type") and item.get("record_id")
-                    ][:100],
-                    "retrieval_coverage": {
-                        "status": model_retrieval_coverage.get("retrieval_completeness", "unknown"),
-                        "retrieval_projection_complete": bool(
-                            lcr_context_coverage.get("retrieval_projection_complete", False)
-                        ),
-                        "page_limit_reached": bool(
-                            lcr_context_coverage.get("page_limit_reached", False)
-                            or more_available_source_names
-                        ),
-                        "context_truncated": bool(context_truncated),
-                    },
-                }
                 reply = await asyncio.to_thread(
                     _run_companion_inference_with_metrics,
                     companion_request_id,
