@@ -222,6 +222,7 @@ def test_companion_retrieval_coverage_keeps_gaps_without_listing_all_available_s
         "retrieval_scan_complete": False,
         "sources": {
             **{f"available_{index}": {"status": "available"} for index in range(30)},
+            "empty_optional": {"status": "empty"},
             "appointments": {
                 "status": "partial",
                 "interpretation_limit": "Some appointment rows could not be loaded.",
@@ -236,7 +237,9 @@ def test_companion_retrieval_coverage_keeps_gaps_without_listing_all_available_s
     summary = collaboration._compact_lcr_retrieval_coverage(context)
 
     assert summary["available_source_count"] == 30
+    assert summary["empty_source_count"] == 1
     assert "available_0" not in summary["non_available_sources"]
+    assert "empty_optional" not in summary["non_available_sources"]
     assert summary["non_available_sources"]["appointments"]["status"] == "partial"
     assert summary["non_available_sources"]["documents"]["status"] == "unavailable_schema"
     assert summary["missing_required_sources"] == ["documents", "professional_contributions"]

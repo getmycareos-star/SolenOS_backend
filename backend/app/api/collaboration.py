@@ -6566,9 +6566,14 @@ def _compact_lcr_retrieval_coverage(shared_lcr_context: dict) -> dict:
         1 for value in sources.values()
         if isinstance(value, dict) and value.get("status") == "available"
     )
+    empty_count = sum(
+        1 for value in sources.values()
+        if isinstance(value, dict) and value.get("status") == "empty"
+    )
+    searchable_statuses = {"available", "empty"}
     non_available = {}
     for name, value in sources.items():
-        if not isinstance(value, dict) or value.get("status") == "available":
+        if not isinstance(value, dict) or value.get("status") in searchable_statuses:
             continue
         non_available[str(name)] = {
             "status": value.get("status") or "unknown",
@@ -6583,6 +6588,7 @@ def _compact_lcr_retrieval_coverage(shared_lcr_context: dict) -> dict:
         "missing_required_sources": missing[:20] if isinstance(missing, list) else [],
         "retrieval_scan_complete": bool(shared_lcr_context.get("retrieval_scan_complete", False)),
         "available_source_count": available_count,
+        "empty_source_count": empty_count,
         "non_available_sources": non_available,
     }
 
