@@ -100,6 +100,25 @@ def test_document_candidate_extraction_activates_document_specialist(monkeypatch
     assert "SOLENOS_WORKFLOW_ID: document_candidate_extraction." in captured["messages"][0]["content"]
 
 
+def test_daily_capture_extraction_activates_daily_capture_workflow_specialist(monkeypatch):
+    captured = {}
+
+    def fake_qwen_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return json.dumps({"observations": [], "open_questions": []})
+
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", fake_qwen_chat)
+    result = qwen_gateway.extract_review_candidates(
+        "Caregiver reported that Mum left most of breakfast untouched.",
+        source_event_id="daily-event",
+        source_evidence_id="daily-evidence",
+        workflow_id="daily_capture",
+    )
+
+    assert result["observations"] == []
+    assert "SOLENOS_WORKFLOW_ID: daily_capture." in captured["messages"][0]["content"]
+
+
 def test_candidate_extraction_rejects_unknown_workflow_before_model_call(monkeypatch):
     monkeypatch.setattr(
         qwen_gateway,
