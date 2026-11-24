@@ -97,9 +97,9 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
     assert "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded" in assembled
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in assembled
     assert "initially focused on the United States" in SOLENOS_IDENTITY_CONSTITUTION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
-    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
-    assert "Version: 2.4" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.5"
+    assert "Version: 2.5" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Version: 2.5" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 
 
 def test_lcr_authority_and_backend_write_boundary_are_in_the_assembled_contract():
@@ -374,3 +374,19 @@ def test_identity_version_tracks_information_stewardship_addition():
     assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
     assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
     assert "INFORMATION STEWARDSHIP AND TRANSPARENCY" in SOLENOS_IDENTITY_CONSTITUTION
+
+
+def test_identity_greeting_contract_is_present_in_full_and_runtime_constitutions():
+    required = (
+        "GREETING",
+        "greeting-only message",
+        "Never invent or assume the caregiver's name",
+        "Do not say you missed them",
+        "Thanks, acknowledgements, and farewells",
+        "If a greeting includes a care question",
+        "Greetings and social replies are not care evidence",
+        "history actually supplied in this authorized request",
+    )
+    for constitution in (SOLENOS_IDENTITY_CONSTITUTION, SOLENOS_RUNTIME_IDENTITY_CONSTITUTION):
+        for phrase in required:
+            assert phrase.casefold() in constitution.casefold(), phrase
