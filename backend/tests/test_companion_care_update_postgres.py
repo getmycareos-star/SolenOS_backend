@@ -472,10 +472,10 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
         assert response.status_code == 200, response.text
         assert captured, "the bounded assistant request must reach the model adapter"
         prompt = captured[0]["messages"]
-        user_message = next(item for item in prompt if item["role"] == "user")["content"]
+        system_message = next(item for item in prompt if item["role"] == "system")["content"]
         coverage_line = next(
-            line for line in user_message.splitlines()
-            if line.startswith("Retrieval coverage: ")
+            line for line in system_message.splitlines()
+            if line.startswith("Canonical LCR retrieval coverage: ")
         )
         # Reproduce the exact preflight transformations used by qwen_chat.
         prepared_prompt = apply_solenos_system_contract(apply_specialized_intelligence(prompt))
