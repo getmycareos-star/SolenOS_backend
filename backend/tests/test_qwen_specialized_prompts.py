@@ -123,6 +123,7 @@ def test_explicit_solenos_workflow_ids_activate_their_specialists():
         "open_loops": ("lcr_retrieval", "caregiver_continuity"),
         "medication_day": ("lcr_retrieval", "medication_continuity"),
         "record_lifecycle": ("lcr_retrieval", "event_lifecycle"),
+        "caregiver_feedback": ("lcr_retrieval", "event_lifecycle"),
         "delta_engine": ("lcr_retrieval", "longitudinal_reasoning"),
         "living_care_record": ("lcr_retrieval", "companion"),
         "handoff": ("lcr_retrieval", "handoff_appointment"),
