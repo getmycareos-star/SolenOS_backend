@@ -4435,3 +4435,78 @@ def test_claim_source_enrichment_discards_unresolved_and_cross_person_context_id
     finally:
         teardown()
 
+
+
+def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_companion(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        headers = {"Authorization": f"Bearer {token}"}
+        other_token, other_person_id, _ = create_session(client)
+        other_headers = {"Authorization": f"Bearer {other_token}"}
+
+        updated = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=headers,
+            json={
+                "preferred_name": "Mary",
+                "timezone": "America/New_York",
+                "locale": "en-US",
+                "date_format": "MM/DD/YYYY",
+                "measurement_system": "us_customary",
+                "communication_style": "concise",
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json() == {
+            "preferred_name": "Mary",
+            "timezone": "America/New_York",
+            "timezone_configured": True,
+            "locale": "en-US",
+            "date_format": "MM/DD/YYYY",
+            "measurement_system": "us_customary",
+            "communication_style": "concise",
+        }
+
+        readback = client.get("/api/v1/caregiver/preferences", headers=headers)
+        assert readback.status_code == 200, readback.text
+        assert readback.json()["preferred_name"] == "Mary"
+        assert readback.json()["timezone"] == "America/New_York"
+
+        other_preferences = client.get("/api/v1/caregiver/preferences", headers=other_headers)
+        assert other_preferences.status_code == 200, other_preferences.text
+        assert other_preferences.json()["preferred_name"] is None
+        assert other_preferences.json()["timezone"] is None
+        assert other_person_id != person_id
+
+        captured = {}
+
+        def fake_qwen(base, model, messages, options=None, audit_context=None):
+            captured["messages"] = messages
+            return "Good morning, Mary. I'm here with your care record."
+
+        monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={"person_id": person_id, "text": "Good morning"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Good morning, Mary. I'm here with your care record."
+        prompt = captured["messages"][0]["content"]
+        assert '"display_name":"Mary"' in prompt
+        assert '"timezone_name":"America/New_York"' in prompt
+        assert '"timezone_status":"configured"' in prompt
+        assert '"locale":"en-US"' in prompt
+        assert '"date_format":"MM/DD/YYYY"' in prompt
+        assert '"measurement_system":"us_customary"' in prompt
+        assert '"communication_style":"concise"' in prompt
+        assert "Do not expose care-recipient details in a greeting-only response" in prompt
+
+        with TestingSessionLocal() as db:
+            stored = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).one()
+            assert stored.preferred_name == "Mary"
+            assert stored.timezone == "America/New_York"
+            assert stored.timezone_configured is True
+    finally:
+        teardown()
