@@ -39,9 +39,15 @@ def test_every_enabled_workflow_receives_the_shared_care_partner_contract():
         system = final[0]["content"]
 
         assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system, workflow
+        assert "# SOLENOS COMPANION — PRODUCT IDENTITY" in system, workflow
+        assert "SolenOS was founded by David Abuchi" in system, workflow
+        assert system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER") < system.index(
+            "# SOLENOS COMPANION — PRODUCT IDENTITY"
+        ), workflow
         assert all(trait.casefold() in system.casefold() for trait in required_characteristics), workflow
         assert "Uncertainty must not become confidence to reassure" in system, workflow
         assert "Never silently create, update, accept, withdraw, or resolve an LCR item" in system, workflow
+        assert "Community functionality is disabled" in system, workflow
 
 
 def test_all_ten_specialists_are_defined_and_have_distinct_responsibilities():
