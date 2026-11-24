@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, inspect
+from sqlalchemy import func, inspect, or_
 from sqlalchemy.orm import Session
 
 from app.models.care import CareEvent, Caregiver, Correction, Evidence
@@ -32,6 +32,14 @@ def _iso(value: datetime | None) -> str | None:
 
 def _table_available(db: Session, table_name: str) -> bool:
     return inspect(db.get_bind()).has_table(table_name)
+
+
+def _is_expired(value: datetime | None, now: datetime) -> bool:
+    if value is None:
+        return False
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= now
 
 
 def _count_by(db: Session, model, column, person_id: str) -> dict[str, int]:
@@ -138,28 +146,25 @@ def build_transparency_evidence(
         coverage["sharing_members"] = "not_authorized_for_member_roster"
 
     if can_view_documents:
-        evidence_count = db.query(func.count(Evidence.id)).filter(Evidence.person_id == person_id).scalar() or 0
-        document_rows = []
         uploads_available = _table_available(db, "evidence_uploads")
         if uploads_available:
+            evidence_count = (
+                db.query(func.count(Evidence.id))
+                .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
+                .filter(Evidence.person_id == person_id)
+                .scalar() or 0
+            )
             document_rows = (
                 db.query(Evidence, EvidenceUpload)
-                .outerjoin(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
+                .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
                 .filter(Evidence.person_id == person_id)
                 .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
                 .limit(MAX_RECENT_ITEMS + 1)
                 .all()
             )
         else:
-            document_rows = [
-                (row, None) for row in (
-                    db.query(Evidence)
-                    .filter(Evidence.person_id == person_id)
-                    .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
-                    .limit(MAX_RECENT_ITEMS + 1)
-                    .all()
-                )
-            ]
+            evidence_count = 0
+            document_rows = []
         has_more = len(document_rows) > MAX_RECENT_ITEMS
         recent_documents = []
         for evidence, upload in document_rows[:MAX_RECENT_ITEMS]:
@@ -174,9 +179,9 @@ def build_transparency_evidence(
                 "mime_type": upload.mime_type if upload else None,
                 "size_bytes": upload.size_bytes if upload else None,
                 "binary_storage_backend": upload.storage_backend if upload else None,
-                "binary_available_in_metadata": bool(upload),
+                "upload_record_available": bool(upload),
             })
-        extraction_counts = _count_by(db, CaptureAnalysis, CaptureAnalysis.extraction_status, person_id)
+        extraction_rows = (\n            db.query(CaptureAnalysis.extraction_status, func.count(CaptureAnalysis.id))\n            .filter(\n                CaptureAnalysis.person_id == person_id,\n                CaptureAnalysis.source_evidence_id.is_not(None),\n            )\n            .group_by(CaptureAnalysis.extraction_status)\n            .all()\n        )\n        extraction_counts = {str(status or "unknown"): int(count) for status, count in extraction_rows}
         items.append({
             "kind": "documents_and_extraction",
             "source_service": "evidence_evidence_uploads_capture_analyses",
@@ -238,7 +243,8 @@ def build_transparency_evidence(
 
     if can_view_lcr and _table_available(db, "audit_log_events"):
         audit_query = db.query(AuditLogEvent).filter(AuditLogEvent.person_id == person_id)
-        audit_count = audit_query.count()
+        if not can_manage_members:
+            audit_query = audit_query.filter(or_(\n                AuditLogEvent.caregiver_id == caregiver_id,\n                AuditLogEvent.actor_id == caregiver_id,\n                AuditLogEvent.actor_id.like("system:%"),\n            ))\n        audit_count = audit_query.count()
         audit_rows = (
             audit_query.order_by(AuditLogEvent.occurred_at.desc(), AuditLogEvent.id.desc())
             .limit(MAX_RECENT_ITEMS + 1)
@@ -258,7 +264,7 @@ def build_transparency_evidence(
             "scope": {"person_id": person_id},
             "observed_at": now.isoformat(),
             "status": "available",
-            "completeness": "recent_bounded_audit_events",
+            "completeness": "recent_bounded_audit_events" if can_manage_members else "current_caregiver_and_system_events_only",
             "details": {
                 "total_event_count": int(audit_count),
                 "recent_events": [{
@@ -300,18 +306,7 @@ def build_transparency_evidence(
             .all()
         )
         has_more_requests = len(requests) > MAX_RECENT_ITEMS
-        export_rows = []
-        if _table_available(db, "privacy_export_artifacts"):
-            export_rows = (
-                db.query(PrivacyExportArtifact)
-                .filter(
-                    PrivacyExportArtifact.person_id == person_id,
-                    PrivacyExportArtifact.caregiver_id == caregiver_id,
-                )
-                .order_by(PrivacyExportArtifact.created_at.desc())
-                .limit(MAX_RECENT_ITEMS)
-                .all()
-            )
+        export_rows = []\n        export_count = 0\n        exports_have_more = False\n        if _table_available(db, "privacy_export_artifacts"):\n            export_query = db.query(PrivacyExportArtifact).filter(\n                PrivacyExportArtifact.person_id == person_id,\n                PrivacyExportArtifact.caregiver_id == caregiver_id,\n            )\n            export_count = export_query.count()\n            export_rows = (\n                export_query.order_by(PrivacyExportArtifact.created_at.desc())\n                .limit(MAX_RECENT_ITEMS + 1)\n                .all()\n            )\n            exports_have_more = len(export_rows) > MAX_RECENT_ITEMS
         items.append({
             "kind": "privacy_data_control_operations",
             "source_service": "data_subject_requests_privacy_export_artifacts",
@@ -335,8 +330,10 @@ def build_transparency_evidence(
                     "created_at": _iso(row.created_at),
                     "expires_at": _iso(row.expires_at),
                     "downloaded_at": _iso(row.downloaded_at),
-                    "status": "expired" if row.expires_at and row.expires_at <= now else "available",
-                } for row in export_rows],
+                    "status": "expired" if _is_expired(row.expires_at, now) else "artifact_present",
+                } for row in export_rows[:MAX_RECENT_ITEMS]],
+                "export_count": int(export_count),
+                "has_more_exports": exports_have_more,
             },
         })
         coverage["privacy_requests"] = "partial" if has_more_requests else "complete_recent_window"
