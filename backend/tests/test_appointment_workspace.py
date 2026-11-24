@@ -3659,3 +3659,165 @@ def test_appointment_brief_includes_old_event_when_its_correction_is_recent(clie
         "The caregiver was unsure whether Mum felt unsteady."
     )
 
+def test_as_of_projection_includes_person_scoped_append_only_review_history(client):
+    from app.models.care import Evidence
+    from app.models.care_continuity import (
+        CareAssertion,
+        EvidenceClaimAssessment,
+        EvidenceReviewRecord,
+    )
+
+    test_client, owner, other = client
+    as_of = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+    before = datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc)
+    after = datetime(2026, 10, 28, 13, 0, tzinfo=timezone.utc)
+    person_id = owner["person"]["id"]
+    caregiver_id = owner["caregiver"]["id"]
+    with TestSessionLocal() as db:
+        evidence = Evidence(
+            id="asof-review-evidence",
+            person_id=person_id,
+            type="note",
+            source_text="Caregiver reported that Mum woke twice overnight.",
+            uploaded_by_caregiver_id=caregiver_id,
+            evidence_status="recorded",
+            source_type="caregiver_report",
+            uploaded_at=before,
+            ingested_at=before,
+        )
+        foreign_evidence = Evidence(
+            id="asof-review-foreign-evidence",
+            person_id=other["person"]["id"],
+            type="note",
+            source_text="Private evidence belonging to another care record.",
+            uploaded_by_caregiver_id=other["caregiver"]["id"],
+            evidence_status="recorded",
+            source_type="caregiver_report",
+            uploaded_at=before,
+            ingested_at=before,
+        )
+        claim = CareAssertion(
+            id="asof-review-claim",
+            person_id=person_id,
+            subject_type="care_recipient",
+            subject_id=person_id,
+            field="sleep",
+            assertion_kind="current_state",
+            asserted_value="Caregiver reported waking twice overnight.",
+            source_label="Caregiver report",
+            source_text="Caregiver reported that Mum woke twice overnight.",
+            evidence_ids=["asof-review-evidence"],
+            assertion_status="reported",
+            epistemic_state="reported",
+            created_by_caregiver_id=caregiver_id,
+            recorded_at=before,
+        )
+        db.add_all([evidence, foreign_evidence, claim])
+        db.flush()
+        db.add_all([
+            EvidenceReviewRecord(
+                id="asof-review-before",
+                person_id=person_id,
+                evidence_id=evidence.id,
+                review_type="reliability",
+                outcome="unverified",
+                rationale="The original author remains unconfirmed.",
+                criteria=[{"criterion": "source attribution", "result": "incomplete"}],
+                policy_version="review-v1",
+                source_attribution_snapshot="{}",
+                reviewed_by_caregiver_id=caregiver_id,
+                created_at=before,
+            ),
+            EvidenceReviewRecord(
+                id="asof-review-after",
+                person_id=person_id,
+                evidence_id=evidence.id,
+                review_type="reliability",
+                outcome="supported",
+                rationale="This review occurred after the requested historical instant.",
+                criteria=[],
+                policy_version="review-v1",
+                source_attribution_snapshot="{}",
+                reviewed_by_caregiver_id=caregiver_id,
+                created_at=after,
+            ),
+            EvidenceReviewRecord(
+                id="asof-review-foreign",
+                person_id=other["person"]["id"],
+                evidence_id=evidence.id,
+                review_type="reliability",
+                outcome="supported",
+                rationale="Cross-person review must not appear.",
+                criteria=[],
+                policy_version="review-v1",
+                source_attribution_snapshot="{}",
+                reviewed_by_caregiver_id=other["caregiver"]["id"],
+                created_at=before,
+            ),
+            EvidenceClaimAssessment(
+                id="asof-claim-assessment-before",
+                person_id=person_id,
+                claim_id=claim.id,
+                claim_version=1,
+                status="unverified",
+                rationale="The caregiver report is retained without independent confirmation.",
+                policy_version="claim-v1",
+                evidence_links=[
+                    {"evidence_id": evidence.id, "relationship": "supports"},
+                    {"evidence_id": foreign_evidence.id, "relationship": "neutral"},
+                ],
+                reviewed_by_caregiver_id=caregiver_id,
+                created_at=before,
+            ),
+            EvidenceClaimAssessment(
+                id="asof-claim-assessment-after",
+                person_id=person_id,
+                claim_id=claim.id,
+                claim_version=2,
+                status="supported",
+                rationale="This assessment occurred after the requested historical instant.",
+                policy_version="claim-v1",
+                evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                reviewed_by_caregiver_id=caregiver_id,
+                created_at=after,
+            ),
+            EvidenceClaimAssessment(
+                id="asof-claim-assessment-foreign",
+                person_id=other["person"]["id"],
+                claim_id=claim.id,
+                claim_version=3,
+                status="supported",
+                rationale="Cross-person assessment must not appear.",
+                policy_version="claim-v1",
+                evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                reviewed_by_caregiver_id=other["caregiver"]["id"],
+                created_at=before,
+            ),
+        ])
+        db.commit()
+
+    response = test_client.get(
+        "/api/v1/care-continuity/state-reconstruction/as-of",
+        headers={"Authorization": f"Bearer {owner['access_token']}"},
+        params={"as_of": as_of.isoformat()},
+    )
+    assert response.status_code == 200, response.text
+    history = response.json()["append_only_history"]
+    assert history["evidence_reviews_status"] == "available"
+    assert [item["review_id"] for item in history["evidence_reviews"]] == ["asof-review-before"]
+    assert history["claim_assessments_status"] == "available"
+    assert [item["assessment_id"] for item in history["claim_assessments"]] == [
+        "asof-claim-assessment-before"
+    ]
+    assert history["claim_assessments"][0]["evidence_links"] == [{
+        "evidence_id": "asof-review-evidence",
+        "relationship": "supports",
+        "scope_note": None,
+        "source_passage": None,
+    }]
+    assert "asof-review-after" not in response.text
+    assert "asof-review-foreign" not in response.text
+    assert "asof-claim-assessment-after" not in response.text
+    assert "asof-claim-assessment-foreign" not in response.text
+    assert "Private evidence belonging to another care record." not in response.text
+
