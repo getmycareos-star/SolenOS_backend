@@ -947,7 +947,7 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
                 else "Use a situation-dependent length; do not omit material safety information to meet a generic word count."
             )
             assert expected_length in prompt, workflow
-            expected_tokens = 64 if workflow == "emergency_readiness" else policy.token_budget
+            expected_tokens = 64 if workflow == "emergency_readiness" else min(policy.token_budget, 384)
             assert captured[-1][1]["options"]["num_predict"] == expected_tokens, workflow
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
@@ -1048,7 +1048,7 @@ def test_qwen_lcr_assist_uses_shared_projection_and_scopes_document_extractions(
         assert coverage["retrieval_projection_complete"] in {True, False}
         assert isinstance(coverage["sources"], dict)
         assert captured, "Qwen must receive the authorized LCR context"
-        prompt = captured[0][0]["content"]
+        prompt = "\n".join(message.get("content", "") for message in captured[0])
         assert "Breakfast intake was lower than usual" in prompt
         assert "Canonical LCR source (assertions;" in prompt
         assert "legacy_optional" in prompt
