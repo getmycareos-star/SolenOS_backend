@@ -1257,6 +1257,7 @@ def test_care_continuity_rejects_links_to_caregiver_deleted_evidence():
         "/api/v1/care-continuity/record-provenance",
         headers=headers,
         json={
+            "care_record_id": record.json()["id"],
             "source_type": "evidence",
             "source_id": deleted_id,
             "author_label": "Caregiver",
