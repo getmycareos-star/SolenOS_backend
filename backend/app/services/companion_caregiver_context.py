@@ -103,6 +103,7 @@ def build_companion_caregiver_context(
     now: datetime | None = None,
     caregiver_profile=None,
     authenticated_account_id: str | None = None,
+    notification_preferences=None,
     active_roles=None,
     active_roles_truncated: bool = False,
     active_responsibilities=None,
@@ -203,6 +204,21 @@ def build_companion_caregiver_context(
         "date_format": _clean(getattr(caregiver, "date_format", None), limit=24),
         "measurement_system": _clean(getattr(caregiver, "measurement_system", None), limit=24),
         "communication_style": _clean(getattr(caregiver, "communication_style", None), limit=24),
+        "notification_preferences": ({
+            "quiet_hours_enabled": bool(getattr(notification_preferences, "quiet_hours_enabled", False)),
+            "quiet_hours_start": _clean(getattr(notification_preferences, "quiet_hours_start", None), limit=5),
+            "quiet_hours_end": _clean(getattr(notification_preferences, "quiet_hours_end", None), limit=5),
+            "delivery_timezone_name": _clean(getattr(notification_preferences, "timezone_name", None), limit=64),
+            "reminders_enabled": bool(getattr(notification_preferences, "reminders_enabled", True)),
+            "configured": True,
+        } if notification_preferences is not None else {
+            "configured": False,
+            "quiet_hours_enabled": False,
+            "quiet_hours_start": None,
+            "quiet_hours_end": None,
+            "delivery_timezone_name": None,
+            "reminders_enabled": True,
+        }),
         "caregiver_profile": {
             "participation_category": _enum_value(getattr(caregiver_profile, "participation_category", None)),
             "involvement_status": _enum_value(getattr(caregiver_profile, "involvement_status", None)),
@@ -278,6 +294,7 @@ def build_companion_prompt_identity_context(
         return result
 
     result["care_recipient_name"] = _clean(care_recipient_name, limit=160)
+    result["notification_preferences"] = context.get("notification_preferences")
     result["caregiver_profile"] = context.get("caregiver_profile")
     result["active_roles"] = context.get("active_roles", [])
     result["active_roles_status"] = context.get("active_roles_status")
