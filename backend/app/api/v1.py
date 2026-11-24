@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from sqlalchemy import inspect, text
+from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List, Optional
