@@ -1217,6 +1217,11 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_event_id=event.id,
             source_evidence_id=evidence.id if evidence is not None else None,
             workflow_id="daily_capture",
+            audit_context={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "request_id": getattr(request.state, "request_id", None),
+            },
         )
         qwen_status = "available"
     except Exception:
