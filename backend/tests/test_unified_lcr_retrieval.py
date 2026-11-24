@@ -917,7 +917,8 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
         with connection.begin():
             connection.execute(Person.__table__.insert(), {"id": "person-local", "name": "Care recipient"})
             connection.execute(Caregiver.__table__.insert(), {
-                "id": "caregiver-local", "name": "Caregiver", "relationship": "family", "person_id": "person-local"
+                "id": "caregiver-local", "name": "Caregiver", "relationship": "family",
+                "person_id": "person-local", "timezone": "Africa/Lagos", "timezone_configured": True,
             })
             connection.execute(CareEvent.__table__.insert(), {
                 "id": "daily-event-local", "person_id": "person-local", "event_type": "daily_observation",
@@ -2689,3 +2690,28 @@ def test_postgres_correction_processing_timestamp_is_searched_separately_from_cr
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_relative_care_history_requires_an_explicit_caregiver_timezone():
+    engine, connection = _sqlite_retrieval_db()
+    try:
+        with connection.begin():
+            connection.execute(Person.__table__.insert(), {"id": "person-no-zone", "name": "Care recipient"})
+            connection.execute(Caregiver.__table__.insert(), {
+                "id": "caregiver-no-zone", "name": "Caregiver",
+                "relationship": "family", "person_id": "person-no-zone",
+                "timezone": "UTC", "timezone_configured": False,
+            })
+        with Session(bind=connection) as db:
+            with pytest.raises(ValueError, match="Set the caregiver's local timezone"):
+                build_unified_lcr_context(
+                    db, "person-no-zone", "caregiver-no-zone", query="What happened yesterday?"
+                )
+            context = build_unified_lcr_context(
+                db, "person-no-zone", "caregiver-no-zone", query="Tell me about sleep"
+            )
+            assert context["retrieval_contract"]["caregiver_timezone_status"] == "not_configured"
+            assert context["retrieval_contract"]["temporal_window"] is None
+    finally:
+        connection.close()
+        engine.dispose()
