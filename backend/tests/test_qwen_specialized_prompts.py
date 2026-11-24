@@ -275,9 +275,14 @@ def test_user_text_cannot_activate_or_change_specialist_routing():
 
 
 def test_internal_api_workflows_are_routed_but_not_classifier_choices():
-    from app.services.qwen_specialized_prompts import WORKFLOW_SPECIALISTS
+    from app.services.qwen_specialized_prompts import (
+        INTERNAL_API_WORKFLOWS,
+        WORKFLOW_SPECIALISTS,
+    )
     from app.services.qwen_workflows import ENABLED_WORKFLOWS
 
+    assert set(WORKFLOW_SPECIALISTS) <= (set(ENABLED_WORKFLOWS) | set(INTERNAL_API_WORKFLOWS))
+    assert set(INTERNAL_API_WORKFLOWS).isdisjoint(ENABLED_WORKFLOWS)
     assert "daily_care_intelligence" not in ENABLED_WORKFLOWS
     assert WORKFLOW_SPECIALISTS["daily_care_intelligence"] == (
         "lcr_retrieval",
