@@ -169,7 +169,7 @@ def build_transparency_evidence(
     )
     can_manage_members = bool(grant.can_manage_members)
 
-    caregiver = db.query(Caregiver).filter(
+    caregiver = db.query(Caregiver.id.label("id"), Caregiver.name.label("name")).filter(
         Caregiver.id == caregiver_id,
         Caregiver.person_id == person_id,
     ).first()
@@ -192,7 +192,11 @@ def build_transparency_evidence(
         },
     }]
 
-    active_session = db.query(AnonymousSession).filter(
+    # Do not load the stored bearer-token hash for a transparency response.
+    active_session = db.query(
+        AnonymousSession.created_at.label("created_at"),
+        AnonymousSession.expires_at.label("expires_at"),
+    ).filter(
         AnonymousSession.id == session_id,
         AnonymousSession.person_id == person_id,
         AnonymousSession.caregiver_id == caregiver_id,
