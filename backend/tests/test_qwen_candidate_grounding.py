@@ -78,6 +78,7 @@ def test_capture_candidates_keep_only_verbatim_source_grounded_observations(monk
     assert len(result["open_questions"]) == 3
     assert captured["kwargs"]["response_format"] == "json"
     assert captured["kwargs"]["options"]["temperature"] == 0
+    assert "SOLENOS_WORKFLOW_ID: care_claim_extraction." in captured["messages"][0]["content"]
 
 
 def test_capture_candidates_fail_closed_on_invalid_json(monkeypatch):
