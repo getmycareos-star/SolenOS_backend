@@ -37,7 +37,7 @@ def test_qwen_context_budget_retries_with_balanced_source_context(monkeypatch):
     ]
     attempts = []
 
-    def fake_qwen_chat(messages, *, options=None):
+    def fake_qwen_chat(messages, *, options=None, audit_context=None):
         prompt = messages[0]["content"]
         attempts.append(prompt)
         if len(prompt) > 600:
@@ -108,7 +108,7 @@ def test_qwen_context_budget_reduces_output_reservation_before_discarding_contex
     ]
     attempts = []
 
-    def fake_qwen_chat(messages, *, options=None):
+    def fake_qwen_chat(messages, *, options=None, audit_context=None):
         attempts.append({
             "prompt": messages[0]["content"],
             "num_predict": options["num_predict"],
@@ -139,7 +139,7 @@ def test_qwen_context_budget_reduces_output_reservation_before_discarding_contex
 def test_qwen_context_budget_never_reduces_safety_response_reservation(monkeypatch):
     attempts = []
 
-    def reject_oversized_prompt(messages, *, options=None):
+    def reject_oversized_prompt(messages, *, options=None, audit_context=None):
         attempts.append(options["num_predict"])
         raise HTTPException(status_code=413, detail="safety response reservation must be preserved")
 
