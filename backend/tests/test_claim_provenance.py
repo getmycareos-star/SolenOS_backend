@@ -840,3 +840,24 @@ def test_reported_epistemic_status_does_not_override_pending_evidence_lifecycle(
     assert reference["source_lifecycle_status"] == "pending_review"
     assert reference["source_state_label"] == "Pending or unreviewed source; not treated as established care information"
     assert unmatched_material_claims(provenance)
+
+
+def test_completed_document_extraction_cannot_override_pending_original_evidence():
+    provenance = build_claim_provenance(
+        "The document reports that Mum missed breakfast.",
+        [{
+            "record_type": "document_extraction",
+            "record_id": "extraction-1",
+            "source_text": "The document reports that Mum missed breakfast.",
+            "record_status": "completed",
+            "related_evidence": [{
+                "record_id": "evidence-1",
+                "record_status": "reported",
+                "source_lifecycle_status": "pending_review",
+            }],
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    assert provenance["claims"][0]["support_status"] == "matched_non_current_only"
+    assert unmatched_material_claims(provenance)
