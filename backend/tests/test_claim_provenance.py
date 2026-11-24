@@ -861,3 +861,20 @@ def test_completed_document_extraction_cannot_override_pending_original_evidence
     )
     assert provenance["claims"][0]["support_status"] == "matched_non_current_only"
     assert unmatched_material_claims(provenance)
+
+
+def test_caregiver_deleted_evidence_cannot_support_a_current_claim():
+    provenance = build_claim_provenance(
+        "Caregiver reported that Mum felt dizzy.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "deleted-evidence",
+            "source_text": "Caregiver reported that Mum felt dizzy.",
+            "record_status": "reported",
+            "source_lifecycle_status": "deleted_by_caregiver",
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    assert provenance["claims"][0]["support_status"] == "matched_historical_only"
+    assert unmatched_material_claims(provenance)
