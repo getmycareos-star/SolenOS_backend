@@ -959,7 +959,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             for message in captured_prompts[-1]
         )
         assert "historical_event" in prompt
-        assert "Caregiver did not observe Mum sleeping poorly." in prompt
+        assert "Caregiver did not observe Mum sleeping poorly." in prompt, prompt
         assert "original wording: Mum slept poorly." in prompt
         assert "correction reason: The original report overstated what was observed." in prompt
         assert "linked to original event: True" in prompt
