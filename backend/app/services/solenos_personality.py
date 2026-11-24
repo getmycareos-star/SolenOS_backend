@@ -211,9 +211,17 @@ def _build_runtime_personality_constitution() -> str:
     ]
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
+        # Give Qwen one high-signal anchor for every acceptance dimension.
+        # The full lists remain canonical in this module and are tested in full;
+        # this compressed kernel preserves context for the caregiver's actual records.
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
             contract["runtime_rule"],
+            "Do: " + contract["observable_behaviors"][0] + ".",
+            "Context: " + contract["required_context"][0] + ".",
+            "Never: " + contract["prohibited_behaviors"][0] + ".",
+            "Fail if: " + contract["violation_conditions"][0] + ".",
+            "Test: " + contract["verification_cases"][0] + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
