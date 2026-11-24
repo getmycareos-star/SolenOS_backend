@@ -4346,3 +4346,47 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
     finally:
         teardown()
 
+def test_claim_source_enrichment_discards_unresolved_and_cross_person_context_ids(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        _, authorized_person_id, _ = create_session(client)
+        _, foreign_person_id, foreign_caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        db.add(CareEvent(
+            id="foreign-person-claim-source",
+            person_id=foreign_person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime.now(timezone.utc),
+            title="Mobility report",
+            description="Caregiver reported that Mum felt unsteady.",
+            evidence_ids=[],
+            created_by_caregiver_id=foreign_caregiver_id,
+            time_provenance="caregiver_reported",
+        ))
+        db.commit()
+        records = [
+            {
+                "record_type": "care_event",
+                "record_id": "foreign-person-claim-source",
+                "source_text": "Caregiver reported that Mum felt unsteady.",
+            },
+            {
+                "record_type": "care_event",
+                "record_id": "missing-person-scoped-row",
+                "source_text": "Caregiver reported that Mum fell.",
+            },
+            {
+                "record_type": "care_record",
+                "record_id": "unverified-context-only-id",
+                "source_text": "Mum's mobility has worsened.",
+            },
+        ]
+        enriched = collaboration._enrich_qwen_claim_source_records(
+            db, authorized_person_id, records
+        )
+        assert enriched == []
+        db.close()
+    finally:
+        teardown()
+
