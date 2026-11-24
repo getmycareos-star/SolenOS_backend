@@ -138,9 +138,9 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
 
 def test_full_and_runtime_identity_versions_are_aligned():
     from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION, SOLENOS_IDENTITY_CONSTITUTION_VERSION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
-    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
-    assert "Version: 2.4" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.5"
+    assert "Version: 2.5" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Version: 2.5" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 
 
 def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_personality():
@@ -186,8 +186,8 @@ def test_personality_precedence_makes_identity_and_traits_invariant_against_spec
 
 
 def test_aggregate_contract_manifest_pins_all_constitution_versions():
-    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.2"
-    assert "Identity constitution: 2.4" in SOLENOS_OPERATING_CONTRACT_MANIFEST
+    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.3"
+    assert "Identity constitution: 2.5" in SOLENOS_OPERATING_CONTRACT_MANIFEST
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.4"
     assert "Personality constitution: 2.4" in SOLENOS_OPERATING_CONTRACT_MANIFEST
     assert "Information stewardship constitution: 1.0" in SOLENOS_OPERATING_CONTRACT_MANIFEST
