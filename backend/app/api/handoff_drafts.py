@@ -2481,6 +2481,7 @@ def _generate_grounded_handoff(
                 timeout=150,
                 response_format=response_schema,
                 options={"temperature": 0, "num_predict": response_length_policy.token_budget},
+                audit_context=audit_context,
             )
             parsed = json.loads(raw)
             items = parsed.get("items") if isinstance(parsed, dict) else None
