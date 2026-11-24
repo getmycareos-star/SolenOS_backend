@@ -2163,8 +2163,8 @@ def test_qwen_support_assist_repairs_overlength_document_explanation(monkeypatch
         assert len(calls) == 2
         assert "Target 100 words; hard maximum 180 words." in calls[0][0][0]["content"]
         assert "Target 100 words; hard maximum 180 words." in calls[1][0][0]["content"]
-        assert calls[0][1]["options"]["num_predict"] == 512
-        assert calls[1][1]["options"]["num_predict"] == 512
+        assert calls[0][1]["options"]["num_predict"] == 384
+        assert calls[1][1]["options"]["num_predict"] == 384
         assert "Revise the draft into a clear, natural, accessible response." in calls[1][0][0]["content"]
         assert response.json()["reply"] == "Please share the document text so I can explain what it says."
         assert response.json()["written_to_lcr"] is False
