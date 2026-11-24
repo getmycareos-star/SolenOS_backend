@@ -6245,9 +6245,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "ai_generated": not response_was_grounding_fallback,
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b") if not response_was_grounding_fallback else None,
         "response_origin": response_origin,
-        "response_mode": "deterministic_grounding_fallback" if response_was_grounding_fallback else "qwen_grounded",
+        "response_mode": "deterministic_low_capacity_support_fallback" if response_was_grounding_fallback else "qwen_grounded",
         "safety_note": (
-            "The answer could not be verified against the saved care information. Nothing was changed in your Care Record."
+            "I couldn't confirm a reliable answer from the saved care information, so I don't want to guess. Nothing was changed in your Care Record."
+            if response_was_grounding_fallback and not is_critical_safety_message(payload.text)
+            else "I couldn't confirm a reliable answer from the saved care information. If someone is in immediate danger or has sudden severe symptoms, call emergency services now. Nothing was changed in your Care Record."
             if response_was_grounding_fallback else None
         ),
         "grounding_status": grounding_status,
