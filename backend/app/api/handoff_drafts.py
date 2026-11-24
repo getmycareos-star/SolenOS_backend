@@ -1592,7 +1592,6 @@ def _care_event_correction_fingerprint_snapshot(db: Session, person_id: str, eve
                 "reason": item.reason,
                 "processing_status": item.processing_status,
                 "processing_attempts": item.processing_attempts,
-                "processing_error": item.processing_error,
                 "processed_at": _iso(item.processed_at),
                 "next_retry_at": _iso(item.next_retry_at),
                 "created_at": _iso(item.created_at),
