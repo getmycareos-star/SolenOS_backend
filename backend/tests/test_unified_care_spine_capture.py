@@ -760,7 +760,7 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
                 db.commit()
         engine.dispose()
 
-def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pending_reports():
+def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pending_reports(monkeypatch):
     """Correction lineage is checked in PostgreSQL before direct Companion history recall."""
     engine = create_engine(_postgres_url(), pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -896,6 +896,62 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             )[0]
             assert aggregate["status"] == "source_correction_requires_review"
             assert aggregate["count"] is None
+
+            # Exercise the authenticated Companion response against the same
+            # PostgreSQL rows. The model receives the accepted correction and
+            # the pending-correction boundary, not an unqualified old event.
+            token = f"companion-lineage-token-{suffix}"
+            db.add_all([
+                CaregiverAccessGrant(
+                    person_id=person_id, caregiver_id=caregiver_id,
+                    role="primary", access_scope="full_record", status="active",
+                    can_manage_members=True, granted_by_caregiver_id=caregiver_id,
+                ),
+                AnonymousSession(
+                    person_id=person_id, caregiver_id=caregiver_id,
+                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                ),
+            ])
+            db.commit()
+
+        captured_prompts = []
+
+        def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms):
+            captured_prompts.append(messages)
+            return "The saved sleep reports include a correction and an unresolved report."
+
+        monkeypatch.setattr(
+            collaboration, "_run_companion_inference_with_metrics",
+            fake_companion_inference,
+        )
+        monkeypatch.setattr(
+            collaboration, "_ollama_url",
+            lambda: ("http://ollama.test", "qwen-test"),
+        )
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/v1/conversation/message",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "person_id": person_id,
+                    "text": "What has been recorded about sleep?",
+                    "client_turn_id": str(uuid.uuid4()),
+                },
+            )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert corrected_event_id in body.get("source_event_ids", [])
+        assert pending_event_id in body.get("source_event_ids", [])
+        assert body["written_to_lcr"] is False
+        prompt = "\\n".join(
+            str(message.get("content") or "")
+            for message in captured_prompts[-1]
+        )
+        assert "historical_event" in prompt
+        assert "Caregiver did not observe Mum sleeping poorly." in prompt
+        assert "event_correction_pending" in prompt
+        assert "Caregiver is unsure whether Mum slept through the night." in prompt
     finally:
         with SessionLocal() as db:
             db.query(CareRecordRelationship).filter(
