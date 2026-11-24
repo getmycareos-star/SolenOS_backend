@@ -400,8 +400,90 @@ def test_questions_and_conditional_guidance_are_not_classified_as_care_assertion
     from app.services.claim_provenance import unmatched_material_claims
 
     provenance = build_claim_provenance(
-        "Has Mum's mobility changed?\\nPlease ask the clinician whether her medication needs review.",
+        "Has Mum's mobility changed?\nPlease ask the clinician whether her medication needs review.",
         [],
     )
     assert unmatched_material_claims(provenance) == []
+
+def test_reported_evidence_requires_the_response_to_preserve_attribution():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    source = {
+        "record_type": "care_evidence",
+        "record_id": "reported-mobility",
+        "source_text": "Sarah reported that Mum felt unsteady.",
+        "record_status": "caregiver_reported",
+        "reported_by": "Sarah",
+    }
+    unqualified = build_claim_provenance("Mum felt unsteady.", [source])
+    assert unqualified["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert len(unmatched_material_claims(unqualified)) == 1
+
+    attributed = build_claim_provenance("Sarah reported that Mum felt unsteady.", [source])
+    assert attributed["claims"][0]["support_status"] == "matched_saved_wording"
+    assert unmatched_material_claims(attributed) == []
+
+
+def test_event_claim_inherits_report_attribution_from_linked_evidence():
+    result = build_claim_provenance(
+        "Mum fell.",
+        [{
+            "record_type": "care_event",
+            "record_id": "reported-event",
+            "source_text": "Mum fell.",
+            "record_status": "recorded",
+            "related_evidence": [{
+                "record_id": "reported-evidence",
+                "record_status": "caregiver_reported",
+                "reported_by": "Sarah",
+            }],
+        }],
+    )
+    assert result["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
+
+def test_shared_lcr_context_source_types_are_mapped_before_enrichment():
+    from app.services.claim_provenance import context_lines_to_source_records
+
+    records = context_lines_to_source_records([
+        "Shared LCR context: " + json.dumps({
+            "source_type": "events",
+            "source_id": "event-source-map",
+            "record": {
+                "id": "event-source-map",
+                "status": "recorded",
+                "time_provenance": "caregiver_reported",
+                "occurred_at": "2026-11-23T12:00:00+00:00",
+            },
+        })
+    ])
+    assert len(records) == 1
+    assert records[0]["record_type"] == "care_event"
+    assert records[0]["record_status"] == "recorded"
+    assert records[0]["source_attribution"] == "caregiver_reported"
+
+
+def test_negation_and_uncertainty_are_not_removed_from_supported_claims():
+    negative = build_claim_provenance(
+        "Sarah reported that Mum did not fall.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "negative-report",
+            "source_text": "Sarah reported that Mum did not fall.",
+            "record_status": "caregiver_reported",
+            "reported_by": "Sarah",
+        }],
+    )
+    uncertain = build_claim_provenance(
+        "Sarah reported that Mum may have fallen.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "uncertain-report",
+            "source_text": "Sarah reported that Mum may have fallen.",
+            "record_status": "caregiver_reported",
+            "reported_by": "Sarah",
+        }],
+    )
+    assert negative["claims"][0]["support_status"] == "matched_saved_wording"
+    assert uncertain["claims"][0]["support_status"] == "matched_saved_wording"
 
