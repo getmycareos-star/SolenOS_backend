@@ -1017,7 +1017,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
 
     def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append(messages)
-        return "I'm ready to help with whatever you'd like to work through."
+        return "Hello, I'm SolenOS Companion. I'm ready to help with whatever you'd like to work through."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -1030,9 +1030,24 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         )
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
-        assert response.json()["reply"] == "I'm ready to help with whatever you'd like to work through."
+        assert response.json()["reply"] == "Hello, I'm SolenOS Companion. I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert calls[0][-1]["content"].startswith("Caregiver question: Hey, how are you?")
+        assert calls[0][-1]["content"].startswith("Caregiver greeting: Hey, how are you?")
+        serialized_prompt = "\\n".join(message["content"] for message in calls[0])
+        assert '"conversation_stage":"first_time"' in serialized_prompt
+        assert "This is the caregiver's first persisted Companion conversation" in serialized_prompt
+
+        returning = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Good morning."},
+        )
+        assert returning.status_code == 200, returning.text
+        assert len(calls) == 2
+        returning_prompt = "\\n".join(message["content"] for message in calls[1])
+        assert '"conversation_stage":"returning"' in returning_prompt
+        assert "without a full reintroduction" in returning_prompt
+        assert "Do not claim to remember any prior conversation content" in returning_prompt
     finally:
         teardown()
 
@@ -1041,8 +1056,8 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
 def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch):
     client = setup_client(monkeypatch)
     outputs = iter([
-        "Hi, I'm SolenOS AI Companion. I'm here to provide support and help with caregiving tasks. Is there anything specific you'd like to discuss or ask about?",
-        "Hello, ready to help.",
+        "Hi, I'm SolenOS Companion. I'm here to provide support and help with caregiving tasks. Is there anything specific you'd like to discuss or ask about?",
+        "Hello, I'm SolenOS Companion. Ready to help.",
     ])
     calls = []
 
@@ -1060,7 +1075,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
             json={"person_id": person_id, "text": "hi"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["reply"] == "Hello, ready to help."
+        assert response.json()["reply"] == "Hello, I'm SolenOS Companion. Ready to help."
         assert response.json()["ai_generated"] is True
         assert len(calls) == 2
         assert "Revise your previous response" in calls[1][0][-1]["content"]
