@@ -1345,8 +1345,10 @@ def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monke
             )
 
         assert result["analysis_id"] == f"doc-stale-retry-replacement-{suffix}"
-        assert "Newer committed extraction." in result["extracted_text"]
-        assert "Late older retry result." not in result["extracted_text"]
+        assert result["extraction_status"] == "available"
+        # The extraction endpoint returns bounded metadata, not the raw source text.
+        # Verify the winning extraction from its persisted PostgreSQL row below.
+        assert "extracted_text" not in result
         with Session() as verify_db:
             superseded = verify_db.query(CaptureAnalysis).filter_by(id=analysis_id).one()
             saved = verify_db.query(CaptureAnalysis).filter_by(
