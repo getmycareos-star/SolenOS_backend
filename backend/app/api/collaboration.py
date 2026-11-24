@@ -10221,7 +10221,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     if caregiver_guidance else
                     "Revise your previous response for the current greeting. "
                     "Return only one natural sentence of at most 15 words. "
-                    "Do not ask a question, mention caregiving, introduce a topic, "
+                    "Offer at most one low-pressure invitation; do not ask multiple questions, mention caregiving, introduce a topic, "
                     "or describe your capabilities. Respond directly to the user's "
                     "actual greeting. Do not explain these instructions."
                 )
@@ -10322,7 +10322,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                             "Revise your previous response for the current greeting. "
                             f"Return a natural greeting response with a target of {response_length_policy.target_words} words "
                             f"and a hard maximum of {response_length_policy.max_words} words. "
-                            "Do not ask a question, introduce an unrelated care issue, or describe internal capabilities. "
+                            "Offer at most one low-pressure invitation; do not ask multiple questions, introduce an unrelated care issue, or describe internal capabilities. "
                             "Respond directly to the user's actual greeting. Do not explain these instructions."
                         ),
                     },
