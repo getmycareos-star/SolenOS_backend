@@ -3183,6 +3183,31 @@ def _humanize_model_context_line(line: str) -> str:
     if freshness_is_policy_only:
         parts.append("interpretation limit: this is a policy review status, not a truth judgment")
 
+    # Corrections are part of the event's source lineage, not optional
+    # metadata. Render the original and corrected wording into the model
+    # context so Companion cannot see a historical event without the reason
+    # it is historical or the caregiver's current correction.
+    corrections = record.get("corrections")
+    if isinstance(corrections, list):
+        for correction in corrections[:8]:
+            if not isinstance(correction, dict):
+                continue
+            correction_parts = []
+            for key, label_text in (
+                ("original_text", "original wording"),
+                ("corrected_text", "corrected wording"),
+                ("reason", "correction reason"),
+                ("processing_status", "correction processing status"),
+                ("linked_to_original", "linked to original event"),
+                ("created_at", "correction recorded at"),
+            ):
+                value = correction.get(key)
+                if value is None or value == "":
+                    continue
+                correction_parts.append(f"{label_text}: {str(value)[:500]}")
+            if correction_parts:
+                parts.append("care-event correction history: " + "; ".join(correction_parts))
+
     # Preserve source qualifiers in the actual Companion prompt. The raw
     # source_context is intentionally not rendered as JSON because its enum
     # values are internal vocabulary and easy to misread without explanation.
