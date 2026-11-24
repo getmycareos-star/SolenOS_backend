@@ -276,6 +276,7 @@ def _build_runtime_personality_constitution() -> str:
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
         f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}",
+        "## PRECEDENCE",
         SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
     ]
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
@@ -284,6 +285,8 @@ def _build_runtime_personality_constitution() -> str:
         lines.append(f"Behaviour: {anchors['observable_behaviors']}")
         lines.append(f"Context: {anchors['required_context']}")
         lines.append(f"Prohibited: {anchors['prohibited_behaviors']}")
+        lines.append(f"Violation: {anchors['violation_conditions']}")
+        lines.append(f"Test: {anchors['verification_cases']}")
     return "\n".join(lines)
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
