@@ -772,6 +772,55 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
                     evidence_ids=[], changed_by_caregiver_id=caregiver_id,
                     changed_at=late_recorded,
                 ),
+                CareStateRevision(
+                    id=f"asof-monday-event-r1-{suffix}", person_id=person_id,
+                    target_type="care_events", target_id=f"asof-mobility-event-{suffix}",
+                    revision_number=1, change_kind="created",
+                    before_state=None,
+                    after_state=json.dumps({
+                        "id": f"asof-mobility-event-{suffix}",
+                        "description": "Caregiver reported that Mum felt unsteady on Monday.",
+                        "occurred_at": "2026-11-02T09:00:00+00:00",
+                        "recorded_at": "2026-11-02T10:00:00+00:00",
+                        "epistemic_status": "caregiver_reported",
+                    }),
+                    evidence_ids=[], changed_by_caregiver_id=caregiver_id,
+                    changed_at=datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc),
+                ),
+                CareStateRevision(
+                    id=f"asof-wednesday-event-r2-{suffix}", person_id=person_id,
+                    target_type="care_events", target_id=f"asof-mobility-event-{suffix}",
+                    revision_number=2, change_kind="updated",
+                    before_state=json.dumps({
+                        "description": "Caregiver reported that Mum felt unsteady on Monday.",
+                        "occurred_at": "2026-11-02T09:00:00+00:00",
+                    }),
+                    after_state=json.dumps({
+                        "id": f"asof-mobility-event-{suffix}",
+                        "description": "Caregiver corrected the observation: Mum felt unsteady on Tuesday.",
+                        "occurred_at": "2026-11-03T09:00:00+00:00",
+                        "recorded_at": "2026-11-04T11:00:00+00:00",
+                        "correction_status": "corrected",
+                    }),
+                    evidence_ids=[], changed_by_caregiver_id=caregiver_id,
+                    changed_at=datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc),
+                ),
+                CareStateRevision(
+                    id=f"asof-friday-document-r1-{suffix}", person_id=person_id,
+                    target_type="capture_analyses", target_id=f"asof-late-document-{suffix}",
+                    revision_number=1, change_kind="created",
+                    before_state=None,
+                    after_state=json.dumps({
+                        "id": f"asof-late-document-{suffix}",
+                        "title": "Uploaded care note",
+                        "text": "The note describes an unsteady episode on Sunday, November 1.",
+                        "occurred_at": "2026-11-01T09:00:00+00:00",
+                        "recorded_at": "2026-11-06T12:00:00+00:00",
+                        "source_type": "document_extraction",
+                    }),
+                    evidence_ids=[], changed_by_caregiver_id=caregiver_id,
+                    changed_at=datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc),
+                ),
             ])
             db.commit()
 
@@ -808,6 +857,42 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
             )
             assert offset_query.status_code == 200, offset_query.text
             assert offset_query.json()["revision_number"] == 1
+
+            # A Monday observation corrected on Wednesday and a Friday-arriving
+            # document describing an earlier Sunday event must remain distinct
+            # across historical cutoffs.
+            tuesday_projection = client.get(
+                "/api/v1/care-continuity/state-reconstruction/as-of",
+                headers=headers,
+                params={"as_of": "2026-11-03T23:59:00+00:00"},
+            )
+            assert tuesday_projection.status_code == 200, tuesday_projection.text
+            tuesday_items = {item["target_id"]: item for item in tuesday_projection.json()["items"]}
+            assert f"asof-mobility-event-{suffix}" in tuesday_items
+            assert f"asof-late-document-{suffix}" not in tuesday_items
+            assert tuesday_items[f"asof-mobility-event-{suffix}"]["after_state"]["occurred_at"] == "2026-11-02T09:00:00+00:00"
+
+            thursday_projection = client.get(
+                "/api/v1/care-continuity/state-reconstruction/as-of",
+                headers=headers,
+                params={"as_of": "2026-11-05T23:59:00+00:00"},
+            )
+            assert thursday_projection.status_code == 200, thursday_projection.text
+            thursday_items = {item["target_id"]: item for item in thursday_projection.json()["items"]}
+            assert thursday_items[f"asof-mobility-event-{suffix}"]["after_state"]["occurred_at"] == "2026-11-03T09:00:00+00:00"
+            assert thursday_items[f"asof-mobility-event-{suffix}"]["after_state"]["correction_status"] == "corrected"
+            assert f"asof-late-document-{suffix}" not in thursday_items
+
+            saturday_projection = client.get(
+                "/api/v1/care-continuity/state-reconstruction/as-of",
+                headers=headers,
+                params={"as_of": "2026-11-07T23:59:00+00:00"},
+            )
+            assert saturday_projection.status_code == 200, saturday_projection.text
+            saturday_items = {item["target_id"]: item for item in saturday_projection.json()["items"]}
+            assert f"asof-late-document-{suffix}" in saturday_items
+            assert saturday_items[f"asof-late-document-{suffix}"]["after_state"]["occurred_at"] == "2026-11-01T09:00:00+00:00"
+            assert saturday_items[f"asof-late-document-{suffix}"]["after_state"]["recorded_at"] == "2026-11-06T12:00:00+00:00"
 
             # The bounded record-wide projection must use the same recorded-time
             # boundary and must not expose another person's revisions.
