@@ -2441,7 +2441,11 @@ def _companion_inference_timeout_seconds() -> float:
 
 
 def _ollama_chat(
-    base: str, model: str, messages: list[dict], options: dict | None = None
+    base: str,
+    model: str,
+    messages: list[dict],
+    options: dict | None = None,
+    audit_context: dict | None = None,
 ) -> str:
     # Companion must not block a caregiver for the much longer background
     # extraction timeout. If the model is slow or unavailable, the route uses
@@ -2450,6 +2454,7 @@ def _ollama_chat(
         messages,
         timeout=_companion_inference_timeout_seconds(),
         options=options,
+        audit_context=audit_context,
     )
 
 
@@ -2459,11 +2464,12 @@ def _run_companion_inference_with_metrics(
     messages: list[dict],
     options: dict,
     retrieval_duration_ms: float,
+    audit_context: dict | None = None,
 ) -> str:
     """Log model-stage duration from the worker, even if the HTTP client disconnects."""
     started = _time.perf_counter()
     try:
-        reply = _ollama_chat("", model, messages, options)
+        reply = _ollama_chat("", model, messages, options, audit_context)
     except BaseException as exc:
         logger.warning(
             "solenos_companion_stage %s",
@@ -9695,6 +9701,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     model_messages,
                     {"temperature": 0.25, "num_predict": response_token_budget},
                     retrieval_duration_ms,
+                    {
+                        "request_id": companion_request_id,
+                        "person_id": person_id,
+                        "caregiver_id": caregiver_id,
+                        "conversation_session_id": str(session.id),
+                        "source_event_ids": source_event_ids,
+                        "source_evidence_ids": source_evidence_ids,
+                        "source_document_analysis_ids": source_document_analysis_ids,
+                        "source_appointment_ids": source_appointment_ids,
+                        "source_assertion_ids": source_assertion_ids,
+                        "source_lcr_context_ids": source_lcr_context_ids,
+                        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+                        "retrieval_coverage": {
+                            "status": model_retrieval_coverage.get("status"),
+                            "retrieval_projection_complete": model_retrieval_coverage.get("retrieval_projection_complete"),
+                            "page_limit_reached": model_retrieval_coverage.get("page_limit_reached"),
+                            "context_truncated": bool(context_truncated),
+                        },
+                    },
                 )
                 logger.info(
                     "solenos_companion_stage %s",
