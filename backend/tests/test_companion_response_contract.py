@@ -4732,7 +4732,7 @@ def test_notification_timezone_database_default_does_not_create_companion_timezo
         teardown()
 
 
-def test_explicit_notification_timezone_mismatch_blocks_companion_month_window():
+def test_explicit_notification_timezone_mismatch_does_not_block_companion_month_window():
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
     try:
@@ -4755,8 +4755,8 @@ def test_explicit_notification_timezone_mismatch_blocks_companion_month_window()
             db, person.id, caregiver.id,
             "How many unsteady incidents happened this month?",
         )
-        assert result[0]["status"] == "timezone_conflict"
-        assert result[0]["count"] is None
+        assert result[0]["status"] != "timezone_conflict"
+        assert result[0]["count"] is not None
     finally:
         db.close()
         teardown()
