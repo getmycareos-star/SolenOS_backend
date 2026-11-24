@@ -439,7 +439,6 @@ def daily_care_history(
     }
 
 
-@router.post("/ask")
 DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS = 2200
 DAILY_CARE_MAX_OUTPUT_TOKENS = 384
 DAILY_CARE_MAX_QUESTION_CHARS = 1200
@@ -558,6 +557,7 @@ def _fit_daily_care_prompt_context(
         },
     )
 
+@router.post("/ask")
 async def ask_daily_care_qwen(
     payload: DailyCareQuestion,
     request: Request,
