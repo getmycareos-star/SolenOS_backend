@@ -75,10 +75,10 @@ permissions:
   statuses: write
 
 # Live model acceptance is sequenced after the complete backend suite.
-# A push event queues a skipped job and replaces any stale pending live run.
+# Let an active inference run finish; a newer pending run replaces stale queued work.
 concurrency:
   group: companion-live-qwen-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   live-qwen-evaluation:
