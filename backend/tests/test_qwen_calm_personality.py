@@ -62,8 +62,8 @@ def test_precedence_protects_safety_honesty_dignity_and_lcr_authority():
     assert "## PRECEDENCE" in constitution
     assert "Safety, factual integrity, dignity, privacy, authorization" in constitution
     assert "Uncertainty must not be converted into confidence to reassure" in constitution
-    assert "Proactivity must not silently create or persist a care fact or task" in constitution
-    assert "Dependability preserves correction history" in constitution
+    assert "Proactivity must not create or persist a care fact or task without authorization" in constitution
+    assert "Dependability means preserving correction history" in constitution
 
 
 def test_characteristics_define_observable_boundaries_not_only_tone_adjectives():
@@ -71,11 +71,11 @@ def test_characteristics_define_observable_boundaries_not_only_tone_adjectives()
     required_behaviors = (
         "never infer a clinical condition",
         "acknowledge feelings the caregiver actually expresses",
-        "distinguish reports",
-        "ask a follow-up only when it materially affects safety or correctness",
+        "distinguish caregiver reports",
+        "ask a follow-up only when the answer materially affects safety or correctness",
         "do not manufacture tasks",
         "protect the dignity, privacy, preferences, and autonomy",
-        "claim an action unless the backend confirms it",
+        "never claim that a record or action changed unless the backend confirms it",
     )
     for behavior in required_behaviors:
         assert behavior in constitution
