@@ -3,7 +3,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services.companion_caregiver_context import build_companion_caregiver_context
+from app.services.companion_caregiver_context import (
+    build_companion_caregiver_context,
+    build_companion_prompt_identity_context,
+)
 
 
 def _caregiver(**overrides):
@@ -262,3 +265,52 @@ def test_context_serializes_only_supplied_caregiver_operational_records_without_
     assert context["active_responsibilities_truncated"] is True
     assert context["assigned_open_loops"][0]["status"] == "waiting"
     assert context["assigned_open_loops_status"] == "available"
+
+
+def test_companion_prompt_identity_binds_authenticated_caregiver_to_named_recipient_and_grant():
+    caregiver = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(),
+        now=datetime(2026, 11, 24, 14, 0, tzinfo=timezone.utc),
+    )
+    identity = build_companion_prompt_identity_context(caregiver, "Margaret Williams")
+    assert identity["identity_context_status"] == "authenticated"
+    assert identity["caregiver_display_name"] == "Mary"
+    assert identity["care_recipient_name"] == "Margaret Williams"
+    assert identity["caregiver_relationship"] == "Daughter"
+    assert identity["caregiver_role"] == "primary"
+    assert identity["access_scope"] == "full_record"
+    assert identity["permitted_capabilities"] == ["view_lcr", "add_evidence"]
+    assert identity["timezone_name"] == "America/Los_Angeles"
+    assert identity["timezone_status"] == "configured"
+
+
+def test_companion_greeting_identity_never_discloses_care_recipient_or_care_permissions():
+    caregiver = build_companion_caregiver_context(_caregiver(), _grant())
+    identity = build_companion_prompt_identity_context(caregiver, "Margaret Williams", greeting_only=True)
+    assert identity["identity_context_status"] == "authenticated_caregiver_only"
+    assert identity["caregiver_display_name"] == "Mary"
+    assert identity["care_recipient_name"] is None
+    assert identity["caregiver_relationship"] is None
+    assert identity["caregiver_role"] is None
+    assert identity["access_scope"] is None
+    assert identity["permitted_capabilities"] == []
+    assert "Margaret Williams" not in str(identity)
+
+
+def test_product_identity_question_receives_no_personal_identity_context():
+    caregiver = build_companion_caregiver_context(_caregiver(), _grant())
+    identity = build_companion_prompt_identity_context(caregiver, "Margaret Williams", identity_question=True)
+    assert identity == {"identity_context_status": "omitted_for_product_identity_question"}
+
+
+def test_unconfigured_timezone_is_explicitly_unknown_in_companion_identity_envelope():
+    caregiver = build_companion_caregiver_context(
+        _caregiver(timezone="UTC", timezone_configured=False),
+        _grant(),
+    )
+    identity = build_companion_prompt_identity_context(caregiver, "Margaret Williams")
+    assert identity["timezone_status"] == "not_configured"
+    assert identity["timezone_name"] is None
+    assert identity["local_date"] is None
+    assert identity["local_time"] is None
