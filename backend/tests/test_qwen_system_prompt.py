@@ -371,8 +371,8 @@ def test_information_stewardship_forbids_unverified_privacy_and_action_claims():
 
 
 def test_identity_version_tracks_information_stewardship_addition():
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
-    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.5"
+    assert "Version: 2.5" in SOLENOS_IDENTITY_CONSTITUTION
     assert "INFORMATION STEWARDSHIP AND TRANSPARENCY" in SOLENOS_IDENTITY_CONSTITUTION
 
 
