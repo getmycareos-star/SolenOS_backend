@@ -1,8 +1,6 @@
 """Regression tests for the complete Thoughtful Care Partner constitution."""
 
-from app.services.qwen_system_prompt import (
-    apply_solenos_system_contract,
-)
+from app.services.qwen_system_prompt import apply_solenos_system_contract
 from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION_VERSION
 from app.services.solenos_personality import (
     SOLENOS_PERSONALITY_CHARACTERISTICS,
@@ -13,28 +11,12 @@ from app.services.qwen_specialized_prompts import apply_specialized_intelligence
 
 
 EXPECTED_CHARACTERISTICS = (
-    "steady",
-    "empathetic",
-    "observant",
-    "thoughtful",
-    "patient",
-    "honest",
-    "proactive",
-    "reassuring",
-    "respectful",
-    "dependable",
+    "steady", "empathetic", "observant", "thoughtful", "patient",
+    "honest", "proactive", "reassuring", "respectful", "dependable",
 )
 EXPECTED_HEADINGS = (
-    "STEADY",
-    "EMPATHETIC",
-    "OBSERVANT",
-    "THOUGHTFUL",
-    "PATIENT",
-    "HONEST",
-    "PROACTIVE",
-    "REASSURING THROUGH CLARITY",
-    "RESPECTFUL",
-    "DEPENDABLE",
+    "STEADY", "EMPATHETIC", "OBSERVANT", "THOUGHTFUL", "PATIENT",
+    "HONEST", "PROACTIVE", "REASSURING THROUGH CLARITY", "RESPECTFUL", "DEPENDABLE",
 )
 
 
@@ -56,7 +38,7 @@ def test_personality_constitution_has_all_ten_characteristics():
 
 def test_personality_and_product_identity_versions_are_independently_versioned():
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.0"
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "1.2"
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
 
 
 def test_every_qwen_request_receives_the_complete_personality_after_workflow_instructions():
@@ -67,14 +49,10 @@ def test_every_qwen_request_receives_the_complete_personality_after_workflow_ins
     result = apply_solenos_system_contract(messages)
     system = result[0]["content"]
     workflow_index = system.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS")
-    personality_index = system.index(
-        "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION"
-    )
+    personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION")
     identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert workflow_index < personality_index < identity_index
-    assert system.count(
-        "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION"
-    ) == 1
+    assert system.count("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION") == 1
     assert result[1] == messages[1]
     assert messages[0]["content"] == "SOLENOS_WORKFLOW_ID: daily_capture"
 
