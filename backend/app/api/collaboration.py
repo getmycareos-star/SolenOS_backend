@@ -7799,6 +7799,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # context before that branch so the common response path is always safe.
     conversation_context_lines: list[str] = []
     low_capacity_support_fallback_used = False
+    identity_direct_answer: str | None = None
+    identity_direct_answer_used = False
 
     conversation_context_lines = []
 
