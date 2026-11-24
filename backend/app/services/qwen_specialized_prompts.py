@@ -312,6 +312,19 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "caregiver_orientation": ("lcr_retrieval", "companion"),
 }
 
+# These workflows are intentionally deterministic or operational and do not
+# need a care-domain specialist prompt. The global authority contract still applies.
+WORKFLOWS_WITHOUT_SPECIALISTS = frozenset({
+    "reminders_notifications",
+    "sharing_export",
+    "roles_access",
+    "account_recovery",
+    "settings_security",
+    "offline_sync",
+    "ai_reliability",
+    "audit_review",
+})
+
 # A classifier is a meta-task. Its prompt contains the names of every workflow,
 # so keyword matching it would incorrectly activate several care specialists.
 META_TASK_MARKERS = ("SOLENOS_META_TASK: workflow_classification",)
