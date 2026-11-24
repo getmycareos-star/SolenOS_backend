@@ -4355,8 +4355,8 @@ def _contains_unsupported_numeric_confidence(text: str) -> bool:
     value = text or ""
     patterns = (
         r"\b\d{1,3}(?:\.\d+)?\s*%\s*(?:confident|confidence|certain|certainty|sure)\b",
-        r"\b(?:confidence|certainty)\s*(?:score|rating|level)?\s*[:=]\s*(?:0?\.\d+|\d{1,3}\s*%)\b",
-        r"\b(?:confidence|certainty)\s*(?:score|rating|level)?\s+(?:of|is|at)\s+(?:0?\.\d+|\d{1,3}\s*%)\b",
+        r"\b(?:confidence|certainty)\s*(?:score|rating|level|field)?\s*(?:(?:[:=])\s*|(?:is|of|at)\s+)?(?:0?\.\d+|\d{1,3}\s*%|\d+(?:\.\d+)?\s*(?:/|out of)\s*10)\b",
+        r"\b(?:i am|i'm|we are|we're)\s+0?\.\d+\s+(?:confident|certain|sure)\b",
         r"\b\d+(?:\.\d+)?\s*(?:/|out of)\s*10\s*(?:confidence|certainty|rating)\b",
     )
     return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
