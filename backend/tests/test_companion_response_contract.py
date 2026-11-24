@@ -4641,7 +4641,7 @@ def test_companion_receives_only_authenticated_caregivers_own_responsibilities_a
 
         def fake_qwen(base, model, messages, options=None, audit_context=None):
             captured["messages"] = messages
-            return "I can help you review the responsibilities and follow-ups saved for you."
+            return "I can help you review those items."
 
         monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
         response = client.post(
