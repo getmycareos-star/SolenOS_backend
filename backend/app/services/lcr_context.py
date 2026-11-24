@@ -1607,11 +1607,10 @@ def build_lcr_context(
                 item["correction_lineage_status"] = "unavailable_schema"
                 item["information_status"], item["interpretation_limit"] = _information_status("events", item)
             sources["events"].update({
+                # The event table scan can still be complete. Correction lineage
+                # is a separate projection guarantee and must not rewrite scan
+                # completeness or pagination facts.
                 "correction_lineage_status": "unavailable_schema",
-                "status": "partial",
-                "candidate_scan_complete": False,
-                "returned_history_complete": False,
-                "error_code": "event_correction_lineage_schema_unavailable",
                 "interpretation_limit": (
                     "Correction history for these events is not available in this database schema. "
                     "The original reports remain visible, but their currentness is unknown."
@@ -1995,6 +1994,7 @@ def build_lcr_context(
                 source.get("candidate_scan_complete") is True
                 and source.get("offset", 0) == 0
                 and source.get("has_more") is False
+                and source.get("correction_lineage_status") not in {"unavailable_schema", "partial", "failed"}
                 for source in sources.values()
                 if source.get("status") in {"available", "empty"}
             )
