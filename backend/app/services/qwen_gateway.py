@@ -397,8 +397,11 @@ def extract_review_candidates(
     *,
     source_event_id: str,
     source_evidence_id: str | None = None,
+    workflow_id: str = "care_claim_extraction",
 ) -> dict:
-    """Return only verbatim-grounded, explicitly review-required candidate observations."""
+    """Return verbatim-grounded review candidates under the correct source workflow."""
+    if workflow_id not in {"care_claim_extraction", "document_candidate_extraction"}:
+        raise ValueError("unsupported_candidate_extraction_workflow")
     bounded_source = (source_text or "").strip()[:12_000]
     if not bounded_source:
         return {"observations": [], "open_questions": []}
@@ -407,7 +410,7 @@ def extract_review_candidates(
         {
             "role": "system",
             "content": (
-                "SOLENOS_WORKFLOW_ID: document_candidate_extraction. "
+                f"SOLENOS_WORKFLOW_ID: {workflow_id}. "
                 "You extract explicitly stated care-relevant statements from source documents, which may be clinician-authored, "
                 "caregiver-authored, or patient-reported. You are not the authority: every output is only a source claim "
                 "pending caregiver review. "
