@@ -104,6 +104,17 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
 
 # These workflows are intentionally deterministic or operational and do not
 # need a care-domain specialist prompt. The global authority contract still applies.
+# These IDs are emitted by API handlers but are intentionally absent from
+# the background classifier's user-selectable workflow catalog.
+INTERNAL_API_WORKFLOWS = frozenset({
+    "daily_care_intelligence",
+    "care_claim_extraction",
+    "care_understanding",
+    "document_candidate_extraction",
+    "companion_care_update",
+    "caregiver_orientation",
+})
+
 WORKFLOWS_WITHOUT_SPECIALISTS = frozenset({
     "reminders_notifications",
     "roles_access",
@@ -127,6 +138,10 @@ if not _enabled_workflows <= (_specialist_workflows | _unclassified_workflows):
     raise RuntimeError("Every enabled Qwen workflow must have exactly one routing decision")
 if not _unclassified_workflows <= _enabled_workflows:
     raise RuntimeError("Specialist-free routing contains a workflow that is not enabled")
+if _enabled_workflows & INTERNAL_API_WORKFLOWS:
+    raise RuntimeError("Internal API workflows must not be classifier choices")
+if not _specialist_workflows <= (_enabled_workflows | INTERNAL_API_WORKFLOWS):
+    raise RuntimeError("Qwen specialist routing contains an unsupported workflow")
 if any(not domains or len(domains) > MAX_SPECIALISTS_PER_REQUEST for domains in WORKFLOW_SPECIALISTS.values()):
     raise RuntimeError("Qwen specialist routing exceeds the configured per-request cap")
 if any(set(domains) - set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values()):
