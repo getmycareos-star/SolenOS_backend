@@ -21,7 +21,9 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
+from app.services import delta_engine
 from app.services.delta_engine import reconcile_event
+from app.services.qwen_gateway import _estimate_prompt_tokens
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
@@ -48,7 +50,7 @@ def override_db():
         db.close()
 
 
-def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget():
+def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(monkeypatch):
     app.dependency_overrides[get_db] = override_db
     source_text = (
         "Caregiver reported that Mary ate half of breakfast this morning."
@@ -81,6 +83,13 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                 ))
                 db.commit()
 
+            qwen_calls = []
+            original_qwen_chat = delta_engine.qwen_chat
+            def capture_qwen_chat(messages, **kwargs):
+                qwen_calls.append((messages, kwargs))
+                return original_qwen_chat(messages, **kwargs)
+            monkeypatch.setattr(delta_engine, "qwen_chat", capture_qwen_chat)
+
             started = time.perf_counter()
             with TestingSessionLocal() as db:
                 result = reconcile_event(
@@ -97,6 +106,31 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                 )
                 db.commit()
             elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            assert qwen_calls, "The Delta model-enrichment path did not invoke the shared Qwen gateway."
+            for messages, kwargs in qwen_calls:
+                options = kwargs.get("options") or {}
+                num_ctx = int(options.get("num_ctx", 4096))
+                num_predict = int(options.get("num_predict", 512))
+                estimate = _estimate_prompt_tokens(messages)
+                input_budget = num_ctx - num_predict - 128
+                assert estimate <= input_budget, {
+                    "estimated_prompt_tokens": estimate,
+                    "input_budget": input_budget,
+                }
+                assembled_prompt = "\\n".join(
+                    str(message.get("content") or "")
+                    for message in messages
+                    if message.get("role") == "system"
+                )
+                for required_contract in (
+                    "Version: 1.1",
+                    "Information stewardship — applies to every workflow",
+                    "NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES",
+                    "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
+                    "# SOLENOS COMPANION — PRODUCT IDENTITY",
+                    "ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES",
+                ):
+                    assert required_contract in assembled_prompt, required_contract
             assert result.get("event_summary", "").strip(), result
             assert result.get("caregiver_summary", "").strip(), result
             assert result.get("clinician_summary", "").strip(), result
