@@ -210,3 +210,20 @@ def test_invalid_timezone_and_invalid_preference_enums_are_rejected_without_pers
         assert current.json()["communication_style"] is None
     finally:
         teardown_client()
+
+
+
+def test_caregiver_preferences_require_a_valid_bearer_session():
+    client = setup_client()
+    try:
+        for headers in ({}, {"Authorization": "Bearer invalid-token"}):
+            read = client.get("/api/v1/caregiver/preferences", headers=headers)
+            assert read.status_code == 401, read.text
+            update = client.patch(
+                "/api/v1/caregiver/preferences",
+                headers=headers,
+                json={"preferred_name": "Unverified"},
+            )
+            assert update.status_code == 401, update.text
+    finally:
+        teardown_client()
