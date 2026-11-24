@@ -250,7 +250,7 @@ def test_qwen_answer_proposes_review_only_lcr_assertion_and_preserves_source(mon
         db.close()
 
     captured = {}
-    def fake_companion(base, model, messages, options=None):
+    def fake_companion(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "The caregiver-reviewed record says sleep was poor last night."
 
@@ -343,7 +343,7 @@ def test_companion_uses_prior_caregiver_messages_across_sessions_as_context_only
 
     captured = {}
 
-    def fake_companion(base, model, messages, options=None):
+    def fake_companion(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "I found your earlier note about walking after lunch."
 
