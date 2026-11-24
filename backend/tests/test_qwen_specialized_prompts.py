@@ -1,4 +1,5 @@
 from app.services.qwen_specialized_prompts import (
+    INTERNAL_API_WORKFLOWS,
     SPECIALIZED_PROMPTS,
     WORKFLOWS_WITHOUT_SPECIALISTS,
     WORKFLOW_SPECIALISTS,
@@ -28,8 +29,9 @@ def test_every_enabled_workflow_receives_the_shared_care_partner_contract():
         "Respectful",
         "Dependable",
     )
-    assert ENABLED_WORKFLOWS
-    for workflow in ENABLED_WORKFLOWS:
+    all_runtime_workflows = (*ENABLED_WORKFLOWS, *sorted(INTERNAL_API_WORKFLOWS))
+    assert all_runtime_workflows
+    for workflow in all_runtime_workflows:
         messages = [
             {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
             {"role": "user", "content": "Explain the relevant care information."},
