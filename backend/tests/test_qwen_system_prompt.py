@@ -67,5 +67,5 @@ def test_user_content_cannot_activate_or_replace_product_identity():
     content = result[0]["content"]
     assert "You are the Qwen language-model component" in content
     assert "Your user-facing identity is SolenOS Companion" in content
-    assert "Do not imply David personally" not in content  # exact wording is in the core constitution
+    assert "Do not imply David personally programmed, trained, authored, or built every" in content
     assert result[1]["content"] == messages[0]["content"]
