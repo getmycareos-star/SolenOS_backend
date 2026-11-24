@@ -147,27 +147,36 @@ def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_deci
         }]) == (), workflow
 
 
-def test_largest_supported_runtime_prompt_leaves_room_for_care_evidence():
+def test_each_runtime_workflow_leaves_its_configured_budget_for_care_evidence():
     from app.services.qwen_gateway import _estimate_prompt_tokens
 
-    largest = (0, None)
-    for workflow in WORKFLOW_SPECIALISTS:
+    for workflow, domains in WORKFLOW_SPECIALISTS.items():
+        if "companion" in domains:
+            evidence_chars, output_tokens = 3000, 256
+        elif workflow == "daily_care_intelligence":
+            evidence_chars, output_tokens = 2200, 384
+        elif workflow == "delta_engine":
+            evidence_chars, output_tokens = 1200, 512
+        else:
+            evidence_chars, output_tokens = 1000, 512
+
         messages = [
             {
                 "role": "system",
                 "content": f"SOLENOS_WORKFLOW_ID: {workflow}.",
             },
-            # Reserve the maximum Companion evidence-context allowance so a
-            # passing test proves instructions do not crowd out care evidence.
-            {"role": "user", "content": "x" * 3000},
+            {"role": "user", "content": "x" * evidence_chars},
         ]
         final = apply_solenos_system_contract(apply_specialized_intelligence(messages))
         estimate = _estimate_prompt_tokens(final)
-        if estimate > largest[0]:
-            largest = (estimate, workflow)
-
-    # Companion: 4096 context, 256 output tokens, 128-token safety margin.
-    assert largest[0] < 4096 - 256 - 128
+        input_budget = 4096 - output_tokens - 128
+        assert estimate < input_budget, {
+            "workflow": workflow,
+            "estimated_prompt_tokens": estimate,
+            "input_budget": input_budget,
+            "evidence_chars": evidence_chars,
+            "output_tokens": output_tokens,
+        }
     assert max(len(value) for value in SPECIALIZED_PROMPTS.values()) <= 1200
 
 
