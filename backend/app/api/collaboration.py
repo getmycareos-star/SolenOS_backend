@@ -71,7 +71,7 @@ from app.services.qwen_gateway import (
     qwen_readiness_status,
     qwen_runtime_status,
 )
-from app.services.unified_lcr_retrieval import build_unified_lcr_context
+from app.services.unified_lcr_retrieval import MAX_CONVERSATION_CONTEXT_ITEMS, build_unified_lcr_context
 from app.services.document_binary_storage import (
     store_document_binary,
     read_document_binary,
