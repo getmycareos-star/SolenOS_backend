@@ -21,6 +21,7 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
 from app.services.unified_lcr_retrieval import _conversation_context
+from app.services.companion_caregiver_context import build_companion_caregiver_context
 from app.services.lcr_context import format_lcr_context_for_prompt
 
 main_module = importlib.import_module("app.main")
@@ -64,28 +65,47 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
-def test_greeting_context_uses_authenticated_caregiver_name_and_saved_local_time():
-    caregiver = SimpleNamespace(name="Mary Johnson", timezone="America/New_York")
-    local_now = datetime(2026, 11, 24, 9, 15, tzinfo=ZoneInfo("America/New_York"))
+def test_greeting_context_uses_authenticated_preferred_name_and_saved_local_time():
+    caregiver = SimpleNamespace(
+        id="caregiver-mary", person_id="person-mum", name="Mary Johnson",
+        preferred_name="Mary", relationship="Daughter", timezone="America/New_York",
+        timezone_configured=True, locale="en-US", date_format="MM/DD/YYYY",
+        measurement_system="us_customary", communication_style="concise",
+    )
+    grant = SimpleNamespace(
+        caregiver_id="caregiver-mary", person_id="person-mum", status="active",
+        revoked_at=None, role="primary", access_scope="full_record",
+        permissions=["view_lcr"],
+    )
+    context = build_companion_caregiver_context(
+        caregiver, grant, now=datetime(2026, 11, 24, 14, 15, tzinfo=timezone.utc)
+    )
 
-    context = collaboration._trusted_companion_greeting_context(caregiver, now=local_now)
-
-    assert 'Authenticated caregiver first name: "Mary"' in context
-    assert "9:15 AM (morning)" in context
-    assert "America/New_York" in context
+    assert context["display_name"] == "Mary"
+    assert context["local_time"] == "9:15 AM"
+    assert context["greeting_period"] == "morning"
+    assert context["timezone_name"] == "America/New_York"
 
 
 def test_greeting_context_does_not_treat_default_utc_as_caregiver_local_time():
-    caregiver = SimpleNamespace(name="Mary Johnson", timezone="UTC")
-
-    context = collaboration._trusted_companion_greeting_context(
-        caregiver,
-        now=datetime(2026, 11, 24, 9, 15, tzinfo=timezone.utc),
+    caregiver = SimpleNamespace(
+        id="caregiver-mary", person_id="person-mum", name="Mary Johnson",
+        preferred_name=None, relationship="Daughter", timezone="UTC",
+        timezone_configured=False,
+    )
+    grant = SimpleNamespace(
+        caregiver_id="caregiver-mary", person_id="person-mum", status="active",
+        revoked_at=None, role="primary", access_scope="full_record",
+        permissions=["view_lcr"],
+    )
+    context = build_companion_caregiver_context(
+        caregiver, grant, now=datetime(2026, 11, 24, 9, 15, tzinfo=timezone.utc)
     )
 
-    assert 'Authenticated caregiver first name: "Mary"' in context
-    assert "local time" not in context.casefold()
-    assert "morning" not in context.casefold()
+    assert context["display_name"] == "Mary Johnson"
+    assert context["timezone_status"] == "not_configured"
+    assert context["local_datetime"] is None
+    assert context["greeting_period"] == "neutral"
 
 
 def test_companion_rejects_fabricated_long_source_quotations():
