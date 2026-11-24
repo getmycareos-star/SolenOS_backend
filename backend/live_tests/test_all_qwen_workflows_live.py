@@ -6,6 +6,7 @@ is isolated in the CI PostgreSQL database.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -220,6 +221,42 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
     ]
     assert not failures, json.dumps(failures, ensure_ascii=False, indent=2)
 
+
+
+
+def test_live_qwen_background_classifier_uses_shared_gateway_contract(monkeypatch):
+    from app.services import qwen_gateway
+    from app.services.qwen_background_worker import _classify_task
+    from app.services.qwen_specialized_prompts import select_specialized_domains
+
+    captured_requests = []
+    original_urlopen = qwen_gateway.urllib.request.urlopen
+
+    def capture_real_ollama_request(request, *args, **kwargs):
+        if str(getattr(request, "full_url", "")).endswith("/api/chat"):
+            captured_requests.append(json.loads(request.data.decode("utf-8")))
+        return original_urlopen(request, *args, **kwargs)
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_real_ollama_request)
+    workflow = asyncio.run(_classify_task(
+        "Please help me organize the information I gave you.",
+        "The caregiver supplied a short care note but did not identify the requested workflow.",
+    ))
+
+    assert workflow in ENABLED_WORKFLOWS
+    assert captured_requests, "background classification did not call the configured Ollama model"
+    actual_messages = captured_requests[-1].get("messages")
+    assert isinstance(actual_messages, list) and actual_messages
+    system_text = "\\n".join(
+        str(message.get("content") or "")
+        for message in actual_messages
+        if message.get("role") == "system"
+    )
+    assert "SOLENOS_META_TASK: workflow_classification" in system_text
+    assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system_text
+    assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system_text
+    assert "INFORMATION STEWARDSHIP AND TRANSPARENCY" in system_text
+    assert select_specialized_domains(actual_messages) == ()
 
 
 def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live_qwen_context):
