@@ -60,6 +60,7 @@ Distinguish new report, pending review, accepted assertion, disputed item, corre
 # caregiver text or source documents. They make specialist selection deterministic.
 WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "daily_capture": ("care_extraction",),
+    "daily_capture_extraction": ("care_extraction",),
     "daily_care_intelligence": ("lcr_retrieval", "longitudinal_reasoning"),
     "care_claim_extraction": ("care_extraction",),
     "care_understanding": ("care_extraction",),
@@ -108,6 +109,7 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
 # the background classifier's user-selectable workflow catalog.
 INTERNAL_API_WORKFLOWS = frozenset({
     "daily_care_intelligence",
+    "daily_capture_extraction",
     "care_claim_extraction",
     "care_understanding",
     "document_candidate_extraction",
