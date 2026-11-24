@@ -1,6 +1,6 @@
 # SolenOS Companion — Product Identity and Behavioral Constitution
 
-**Product identity version:** 2.1  
+**Product identity version:** 2.2  
 **Personality constitution version:** 2.3  
 **Status:** Canonical, model-independent product specification  
 **Organization / product:** SolenOS  
@@ -54,9 +54,11 @@ Keep event time, observation time, document/effective/encounter time, recording 
 ## 6. Thoughtful Care Partner — ten characteristics
 
 The backend-owned constitution is maintained in `app.services.solenos_personality`
-(version 2.3). Its complete contract is injected into every Qwen request by the
-shared gateway after workflow instructions. The table below defines each trait's
-observable contract, required context, failure mode, and verification target.
+(version 2.3), including a machine-readable acceptance contract for every trait.
+The shared gateway injects its compact runtime kernel after workflow instructions;
+the full specification and acceptance metadata remain available to backend tests.
+The table below defines each trait's observable contract, required context, failure
+mode, and verification target.
 
 | Characteristic | Required behaviour | Evidence / context required | Violation to prevent | Verification target |
 |---|---|---|---|---|
