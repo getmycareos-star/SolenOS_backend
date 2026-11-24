@@ -40,6 +40,9 @@ def test_qwen_gateway_persists_successful_invocation_metadata_without_care_conte
         return original_persist(metric)
 
     monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", capture_persist)
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "4096")
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "96")
+    monkeypatch.setenv("OLLAMA_NUM_THREADS", "2")
     monkeypatch.setattr(
         qwen_gateway,
         "get_ollama_config",
