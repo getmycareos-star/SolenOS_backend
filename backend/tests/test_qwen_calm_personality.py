@@ -108,7 +108,8 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
         },
     ]
     system = apply_solenos_system_contract(messages)[0]["content"]
-    assert "Do not say \"everything will be okay\"" in system
+    assert "Reassure through accuracy, never promised outcomes." in system
+    assert "Do not dismiss serious symptoms or offer false reassurance." in system
     assert "Uncertainty must not become confidence to reassure" in system
     assert "Safety, factual integrity, dignity, privacy" in system
 
