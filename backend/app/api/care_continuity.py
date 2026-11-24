@@ -1319,10 +1319,17 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         raise HTTPException(status_code=422, detail="evidence_ids must be a JSON array")
     if evidence_ids:
         evidence = _table(db, "evidence")
+        evidence_conditions = [
+            evidence.c.person_id == person_id,
+            evidence.c.id.in_(evidence_ids),
+        ]
+        if "evidence_status" in evidence.c:
+            evidence_conditions.append(or_(
+                evidence.c.evidence_status.is_(None),
+                func.lower(evidence.c.evidence_status) != "deleted_by_caregiver",
+            ))
         found = db.execute(
-            select(evidence.c.id).where(
-                evidence.c.person_id == person_id, evidence.c.id.in_(evidence_ids)
-            )
+            select(evidence.c.id).where(*evidence_conditions)
         ).scalars().all()
         if set(map(str, found)) != set(map(str, evidence_ids)):
             raise HTTPException(status_code=404, detail="One or more evidence references are outside this care record")
@@ -1397,9 +1404,13 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         linked = _table(db, table_name)
         if "person_id" not in linked.c:
             raise HTTPException(status_code=422, detail=f"{field_name} type is not person-scoped")
-        row = db.execute(
-            select(linked.c.id).where(linked.c.id == target_id, linked.c.person_id == person_id)
-        ).first()
+        linked_conditions = [linked.c.id == target_id, linked.c.person_id == person_id]
+        if table_name == "evidence" and "evidence_status" in linked.c:
+            linked_conditions.append(or_(
+                linked.c.evidence_status.is_(None),
+                func.lower(linked.c.evidence_status) != "deleted_by_caregiver",
+            ))
+        row = db.execute(select(linked.c.id).where(*linked_conditions)).first()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field_name} was not found in this care record")
 
@@ -5566,12 +5577,11 @@ def update_care_continuity_resource(
                 if len(evidence_ids) != len(set(evidence_ids)):
                     raise HTTPException(status_code=422, detail="evidence_ids cannot contain duplicates")
                 if evidence_ids:
-                    found = set(db.execute(
-                        select(Evidence.id).where(
-                            Evidence.person_id == person_id,
+                    found = {
+                        str(value) for (value,) in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
                             Evidence.id.in_(evidence_ids),
-                        )
-                    ).scalars().all())
+                        ).all()
+                    }
                     if found != set(evidence_ids):
                         raise HTTPException(status_code=404, detail="One or more linked evidence records were not found in this care record")
 
@@ -6313,12 +6323,11 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
         if any(not isinstance(item, str) or not item.strip() for item in data["evidence_ids"]):
             raise HTTPException(status_code=422, detail="Every evidence ID must be a non-empty string")
         if data["evidence_ids"]:
-            linked_ids = set(
-                row[0] for row in db.query(Evidence.id).filter(
-                    Evidence.person_id == person_id,
+            linked_ids = {
+                str(value) for (value,) in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
                     Evidence.id.in_(data["evidence_ids"]),
                 ).all()
-            )
+            }
             if linked_ids != set(data["evidence_ids"]):
                 # Do not disclose whether a foreign evidence ID exists.
                 raise HTTPException(
@@ -7325,8 +7334,7 @@ def assess_evidence_completeness(payload: dict[str, Any], request: Request, db: 
     if len(evidence_ids) > 100:
         raise HTTPException(status_code=422, detail="A completeness assessment may link at most 100 evidence items")
     if evidence_ids:
-        rows = db.query(Evidence.id).filter(
-            Evidence.person_id == person_id,
+        rows = _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
             Evidence.id.in_(evidence_ids),
         ).all()
         if len(rows) != len(evidence_ids):
