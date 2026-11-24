@@ -259,16 +259,19 @@ def test_companion_repair_inferences_preserve_the_original_trusted_audit_context
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and node.name == "companion_message"
     )
-    ollama_calls = [
+    ollama_dispatches = [
         node for node in ast.walk(companion)
         if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "_ollama_chat"
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "to_thread"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == "_ollama_chat"
     ]
-    assert len(ollama_calls) >= 4, "Companion repair paths must remain covered by the audit"
+    assert len(ollama_dispatches) >= 4, "Companion repair paths must remain covered by the audit"
     assert all(
-        any(keyword.arg == "audit_context" for keyword in call.keywords)
-        for call in ollama_calls
+        any(keyword.arg == "audit_context" for keyword in dispatch.keywords)
+        for dispatch in ollama_dispatches
     ), "Every Companion repair inference must reuse the authenticated source audit context"
 
     context_assignment = next(
