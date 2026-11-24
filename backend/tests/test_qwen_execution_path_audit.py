@@ -201,6 +201,7 @@ def test_no_non_gateway_ollama_sdk_or_native_inference_endpoint_exists():
 
 def test_gateway_is_the_only_module_that_owns_ollama_runtime_configuration():
     source = GATEWAY_PATH.read_text(encoding="utf-8")
-    assert "OLLAMA_BASE_URL" not in source or "OLLAMA_BASE_URL" in source
+    assert 'os.getenv("OLLAMA_BASE_URL"' in source
+    assert 'os.getenv("OLLAMA_MODEL"' in source
     assert "get_ollama_config" in source
     assert 'base + "/api/chat"' in source
