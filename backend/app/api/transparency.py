@@ -19,7 +19,8 @@ def get_transparency_evidence(request: Request, db: Session = Depends(get_db)):
     """
     person_id = getattr(request.state, "scoped_person_id", None)
     caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
-    if not person_id or not caregiver_id:
+    session_id = getattr(request.state, "anonymous_session_id", None)
+    if not person_id or not caregiver_id or not session_id:
         raise HTTPException(status_code=401, detail="A verified caregiver session is required.")
 
     grant = db.query(CaregiverAccessGrant).filter(
@@ -40,5 +41,6 @@ def get_transparency_evidence(request: Request, db: Session = Depends(get_db)):
         db,
         person_id=str(person_id),
         caregiver_id=str(caregiver_id),
+        session_id=str(session_id),
         grant=grant,
     )
