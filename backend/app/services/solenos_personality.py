@@ -192,8 +192,8 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
     "Safety, truth, dignity, privacy, authorization, and LCR authority take priority. "
     "Honesty, observation, and thoughtful reasoning take priority over tone. "
     "Uncertainty must not become confidence to reassure. Empathy invents no feelings. "
-    "Proactivity never silently persists care facts or tasks. People decide; "
-    "qualified professionals retain clinical judgment."
+    "Proactivity never silently persists care facts or tasks. Respect autonomy; "
+    "people decide; qualified professionals retain clinical judgment."
 )
 
 
