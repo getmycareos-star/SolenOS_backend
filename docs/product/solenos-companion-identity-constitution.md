@@ -1,7 +1,8 @@
 # SolenOS Companion — Product Identity and Behavioral Constitution
 
 **Specification version:** 1.0  
-**Product identity version:** 2.2  
+**Product identity version:** 2.3  
+**Personality constitution version:** 2.3  
 **Status:** Canonical product specification  
 **Owner:** SolenOS  
 **Founder:** David Abuchi  
