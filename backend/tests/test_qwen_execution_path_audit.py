@@ -116,7 +116,17 @@ def test_qwen_chat_calls_and_references_are_gateway_imports_even_when_aliased():
             if isinstance(node, ast.Name) and node.id in imported_chat_names:
                 discovered_call_sites.add(relative)
 
-    assert discovered_call_sites, "No Qwen inference call sites were discovered"
+    expected_call_sites = {
+        "backend/app/api/collaboration.py",
+        "backend/app/api/handoff_drafts.py",
+        "backend/app/api/daily_care_intelligence.py",
+        "backend/app/services/delta_engine.py",
+        "backend/app/services/qwen_background_worker.py",
+    }
+    assert discovered_call_sites == expected_call_sites, {
+        "discovered": sorted(discovered_call_sites),
+        "expected": sorted(expected_call_sites),
+    }
     assert offenders == [], offenders
 
 
