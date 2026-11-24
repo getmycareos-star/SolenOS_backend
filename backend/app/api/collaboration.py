@@ -6244,7 +6244,7 @@ def _record_companion_output_validation(
     request_id: str | None,
     reply: str,
     rejection_reasons: list[str],
-    ai_generated: bool = True,
+    ai_generated: bool,
     source_event_ids: list[str],
     source_evidence_ids: list[str],
     source_document_analysis_ids: list[str],
