@@ -6367,51 +6367,63 @@ def _care_history_recall_context_lines(
         )
 
     evidence_lines: list[str] = []
+    evidence_lookup_complete = True
     if linked_evidence_ids:
-        evidence_rows = (
-            db.query(EvidenceModel)
-            .filter(
-                EvidenceModel.person_id == person_id,
-                EvidenceModel.id.in_(list(dict.fromkeys(linked_evidence_ids))),
-            )
-            .all()
-        )
-        for evidence in evidence_rows:
-            evidence_lines.append(
-                "Original evidence linked to the caregiver care-history report: "
-                + json.dumps({
-                    "source_type": "evidence",
-                    "evidence_id": str(evidence.id),
-                    "record": {
-                        "id": str(evidence.id),
-                        "source_text": evidence.source_text,
-                        "source_type": evidence.source_type,
-                        "evidence_kind": evidence.evidence_kind,
-                        "epistemic_status": evidence.epistemic_status,
-                        "evidence_status": getattr(evidence, "evidence_status", None),
-                        "information_status": evidence_lineage_by_id.get(
-                            str(evidence.id), ("source_evidence", "")
-                        )[0],
-                        "interpretation_limit": evidence_lineage_by_id.get(
-                            str(evidence.id), ("source_evidence", "")
-                        )[1],
-                        "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
-                        "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
-                    },
-                }, ensure_ascii=False, default=str)
-            )
+        try:
+            with db.begin_nested():
+                evidence_rows = (
+                    db.query(EvidenceModel)
+                    .filter(
+                        EvidenceModel.person_id == person_id,
+                        EvidenceModel.id.in_(list(dict.fromkeys(linked_evidence_ids))),
+                    )
+                    .all()
+                )
+            for evidence in evidence_rows:
+                evidence_lines.append(
+                    "Original evidence linked to the caregiver care-history report: "
+                    + json.dumps({
+                        "source_type": "evidence",
+                        "evidence_id": str(evidence.id),
+                        "record": {
+                            "id": str(evidence.id),
+                            "source_text": evidence.source_text,
+                            "source_type": evidence.source_type,
+                            "evidence_kind": evidence.evidence_kind,
+                            "epistemic_status": evidence.epistemic_status,
+                            "evidence_status": getattr(evidence, "evidence_status", None),
+                            "information_status": evidence_lineage_by_id.get(
+                                str(evidence.id), ("source_evidence", "")
+                            )[0],
+                            "interpretation_limit": evidence_lineage_by_id.get(
+                                str(evidence.id), ("source_evidence", "")
+                            )[1],
+                            "occurred_at": evidence.occurred_at.isoformat() if evidence.occurred_at else None,
+                            "reported_at": evidence.reported_at.isoformat() if evidence.reported_at else None,
+                        },
+                    }, ensure_ascii=False, default=str)
+                )
+        except SQLAlchemyError:
+            # Keep the caregiver's original report, but never silently imply
+            # that its linked source material was successfully checked.
+            evidence_lookup_complete = False
+            evidence_lines = []
 
-    status = "available" if correction_lookup_complete else "partial"
+    retrieval_complete = correction_lookup_complete and evidence_lookup_complete
+    limits = []
+    if not correction_lookup_complete:
+        limits.append("Correction history could not be checked for every directly retrieved event.")
+    if not evidence_lookup_complete:
+        limits.append("Linked source evidence could not be retrieved for every directly retrieved event.")
     return {
         "event_lines": event_lines,
         "evidence_lines": evidence_lines,
-        "has_more": has_more or not correction_lookup_complete,
-        "status": status,
+        "has_more": has_more or not retrieval_complete,
+        "status": "available" if retrieval_complete else "partial",
         "correction_lineage_complete": correction_lookup_complete,
-        "interpretation_limit": (
-            None if correction_lookup_complete
-            else "Correction history could not be checked for every directly retrieved event."
-        ),
+        "evidence_lookup_complete": evidence_lookup_complete,
+        "retrieval_complete": retrieval_complete,
+        "interpretation_limit": " ".join(limits) if limits else None,
     }
 
 
