@@ -62,6 +62,10 @@ def test_care_questions_are_not_misclassified_as_product_identity(question):
         ("Are you ChatGPT?", "I'm SolenOS Companion, powered by AI technology within SolenOS."),
         ("Who owns you?", "I'm part of the SolenOS product. I can't make a separate legal ownership claim."),
         ("Can I trust everything you say?", "I can make mistakes or misunderstand information. Check important care details against their source and with a qualified professional when appropriate."),
+        ("Do you remember everything?", "No. I use only information available through the current authorized SolenOS context."),
+        ("Can you make mistakes?", "Yes. I can misunderstand information or make mistakes. Check important care information against its source and with a qualified professional when appropriate."),
+        ("What can you do?", "I help family caregivers understand authorized care information, connect relevant history, recognize evidence-backed changes, identify information gaps, and prepare for conversations with healthcare professionals. What I can do depends on the information and tools available in the current SolenOS workflow."),
+        ("What can't you do?", "I can't diagnose, prescribe, replace professional medical judgment, verify every caregiver report, access records that aren't available or authorized, or independently change the Living Care Record. I can make mistakes, so important care information should be checked against its source."),
     ],
 )
 def test_identity_questions_use_canonical_deterministic_answers(question, expected):
