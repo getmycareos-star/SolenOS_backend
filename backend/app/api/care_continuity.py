@@ -5220,6 +5220,7 @@ def reconstruct_recorded_state_as_of(
             ),
             "assessed_at": row.assessed_at.isoformat() if row.assessed_at else None,
             })
+        completeness_history_status = "available" if completeness_history else "empty"
 
     return {
         "person_id": person_id,
