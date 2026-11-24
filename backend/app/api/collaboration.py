@@ -6054,6 +6054,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 repair_user_text,
                 context_lines,
                 options={"temperature": 0, "num_predict": response_token_budget},
+                allow_output_budget_fallback=not is_critical_safety_message(payload.text),
             )
         )
         shared_context_truncated = shared_context_truncated or repair_context_truncated
