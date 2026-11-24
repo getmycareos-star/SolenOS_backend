@@ -1398,6 +1398,9 @@ def test_companion_identity_is_consistent_without_model_or_patient_context():
             assert body.get("source_event_ids") == [], body
             assert body.get("source_evidence_ids") == [], body
             assert body.get("source_document_analysis_ids") == [], body
+            assert body.get("source_record_refs") == [], body
+            assert body.get("claim_provenance") == [], body
+            assert body.get("care_update_candidates") == [], body
             session_id = body.get("session_id")
             assert session_id and session_id not in seen_sessions, body
             seen_sessions.add(session_id)
