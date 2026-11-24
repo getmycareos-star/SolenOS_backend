@@ -448,3 +448,20 @@ This slice does **not** close the full evidence capability map. Groups A–J and
 - [x] Recompute claim-assessment impact through the complete dependency chain when a source observation is added or corrected.
 - [ ] General semantic entailment across arbitrary paraphrases, topics, and date windows remains out of scope for this bounded implementation. Unsupported statements must stay visibly unsupported until a separately validated rule is added.
 - [ ] Full execution of the backend and frontend test suites remains required before declaring the workstream verified.
+## Direct-main implementation work — 2026-11-24: Companion claim grounding
+
+**State: Implemented, not yet verified.**
+
+- [x] Add a conservative material-care-claim classifier over existing claim provenance; reject unmatched material claims in the Companion response acceptance path.
+- [x] Resolve candidate source records against persisted, same-person event/evidence/document/appointment/handoff rows before they can support claims.
+- [x] Normalize shared LCR source-type names and LCR event/evidence context prefixes before source enrichment.
+- [x] Preserve source attribution, epistemic status, event time, and recording time where available; reject matches that strip explicit attribution, negation, or uncertainty.
+- [x] Support short exact source quotations only when the surrounding response explicitly attributes the quote; distinguish this validation basis in claim provenance.
+- [x] Strengthen Companion and repair instructions to preserve exact source wording and qualifiers for material care facts.
+- [x] Add regression tests for paraphrase rejection, attribution preservation, exact attributed quotes, source-type parsing, and cross-person/unresolved source IDs.
+- [ ] Run test_claim_provenance.py and test_companion_response_contract.py on the exact current backend main SHA and inspect their actual CI results.
+- [ ] Run the complete backend suite and PostgreSQL validation on the exact current backend main SHA.
+- [ ] Run real Qwen inference acceptance and inspect caregiver-visible outputs. The new exact-quote contract is not a semantic entailment engine; unsupported paraphrases fail closed until a deterministic source-bound representation can support them.
+
+This increment does not complete claim-level semantic entailment, full historical reconstruction, evidence freshness, longitudinal change analysis, source-family discovery, authorization/failure coverage, or live-model acceptance. Those remain open under capability groups A–R.
+
