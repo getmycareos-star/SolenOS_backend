@@ -93,15 +93,17 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
         "Version: 2.3",
         "You are AI, not human, not a clinician",
         "SolenOS was founded by David Abuchi",
-        "The LCR is the authoritative application record of accepted care information",
-        "Never silently create, update, accept, withdraw, or resolve LCR items",
         "Never invent care facts",
-        "Never disclose information to unauthorized people",
+        "Never disclose to unauthorized people",
         "Community functionality is disabled",
         "The model is replaceable.",
     )
     for phrase in required:
         assert phrase in identity
+
+    assembled = apply_solenos_system_contract([])[0]["content"]
+    assert "The Living Care Record (LCR) is the application's authoritative record" in assembled
+    assert "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item" in assembled
 
 
 def test_full_and_runtime_identity_versions_are_aligned():
