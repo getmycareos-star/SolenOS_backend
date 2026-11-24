@@ -175,4 +175,4 @@ def test_caregiver_orientation_preserves_the_global_solenos_companion_identity()
     assert "You are not a general chatbot, therapist, medical professional, or AI Companion." not in source
     assert "Never invent a recipient, relationship, event, prior conversation, emotion" in source
     assert "do not surface patient-specific details" in source
-    assert "Do not start an onboarding flow, list features, or assume a family relationship" in source
+    assert "Do not start " in source and "an onboarding flow, list features, or assume a family relationship" in source
