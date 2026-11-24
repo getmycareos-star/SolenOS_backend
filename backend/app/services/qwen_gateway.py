@@ -487,7 +487,8 @@ def extract_review_candidates(
                 "Extract explicit care statements from clinician, caregiver, or patient source text; outputs are "
                 "source claims for caregiver review, not verified findings. "
                 'Return JSON only: {"observations":[{"subject":"string","observation":"string","source_quote":"exact source substring"}],"open_questions":["string"]}. '
-                "Never infer diagnosis, cause, risk, or treatment change; do extract a diagnosis, medication "
+                "Never infer diagnosis, cause, risk, or treatment change. Never turn these statements into a clinical conclusion, " 
+                "recommendation, prescription, or active instruction. Do extract a diagnosis, medication "
                 "discontinuation, dosage transition, or current/discharge discrepancy only as a review-required "
                 "source claim, never as a clinical conclusion, recommendation, prescription, or active instruction. "
                 "Topics: mobility/transfers/falls; intake/appetite; sleep/mood/behaviour; pain/continence/communication; "
