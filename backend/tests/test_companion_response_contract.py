@@ -2632,6 +2632,45 @@ def test_companion_routes_indirect_stroke_signs_to_immediate_safety_response(mon
         teardown()
 
 
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "Everything will be okay.",
+        "There is nothing to worry about.",
+        "It's probably nothing.",
+        "I'm sure she is fine.",
+        "It will all be okay.",
+    ],
+)
+def test_companion_rejects_unsupported_reassurance_even_without_explicit_distress(reply):
+    assert collaboration._caregiver_response_needs_revision(
+        "What might this new change in Mum's condition mean?",
+        reply,
+    )
+
+
+def test_companion_accepts_clear_uncertainty_instead_of_false_comfort():
+    reply = (
+        "I can't determine the cause from this information. Because this is a new change, "
+        "please contact her healthcare professional for guidance."
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "What might this new change in Mum's condition mean?",
+        reply,
+    )
+
+
+def test_companion_emergency_language_remains_direct_not_reassuring():
+    reply = (
+        "This may be an emergency. Contact local emergency services or seek urgent medical help now. "
+        "I cannot assess an emergency through chat."
+    )
+    assert not collaboration._caregiver_response_needs_revision(
+        "Mum's speech suddenly became slurred.",
+        reply,
+    )
+
+
 def test_self_harm_emergency_response_directs_to_immediate_human_support():
     reply, note = collaboration._emergency_response_for_message(
         "I don't want to live anymore."
