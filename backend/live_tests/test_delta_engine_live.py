@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
-from app.services import delta_engine
+from app.services import delta_engine, qwen_gateway
 from app.services.delta_engine import reconcile_event
 from app.services.qwen_gateway import _estimate_prompt_tokens
 
@@ -84,10 +84,17 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(m
                 db.commit()
 
             qwen_calls = []
+            assembled_requests = []
             original_qwen_chat = delta_engine.qwen_chat
+            original_apply_contract = qwen_gateway.apply_solenos_system_contract
+            def capture_contract(messages):
+                assembled = original_apply_contract(messages)
+                assembled_requests.append(assembled)
+                return assembled
             def capture_qwen_chat(messages, **kwargs):
-                qwen_calls.append((messages, kwargs))
+                qwen_calls.append(kwargs)
                 return original_qwen_chat(messages, **kwargs)
+            monkeypatch.setattr(qwen_gateway, "apply_solenos_system_contract", capture_contract)
             monkeypatch.setattr(delta_engine, "qwen_chat", capture_qwen_chat)
 
             started = time.perf_counter()
@@ -106,12 +113,13 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(m
                 )
                 db.commit()
             elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-            assert qwen_calls, "The Delta model-enrichment path did not invoke the shared Qwen gateway."
-            for messages, kwargs in qwen_calls:
+            assert qwen_calls and assembled_requests, "The Delta model-enrichment path did not invoke the shared Qwen gateway."
+            assert len(qwen_calls) == len(assembled_requests)
+            for assembled_messages, kwargs in zip(assembled_requests, qwen_calls):
                 options = kwargs.get("options") or {}
                 num_ctx = int(options.get("num_ctx", 4096))
                 num_predict = int(options.get("num_predict", 512))
-                estimate = _estimate_prompt_tokens(messages)
+                estimate = _estimate_prompt_tokens(assembled_messages)
                 input_budget = num_ctx - num_predict - 128
                 assert estimate <= input_budget, {
                     "estimated_prompt_tokens": estimate,
@@ -119,7 +127,7 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(m
                 }
                 assembled_prompt = "\n".join(
                     str(message.get("content") or "")
-                    for message in messages
+                    for message in assembled_messages
                     if message.get("role") == "system"
                 )
                 for required_contract in (
