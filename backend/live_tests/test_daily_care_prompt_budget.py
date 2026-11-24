@@ -106,6 +106,39 @@ def test_daily_care_rejects_oversized_question_instead_of_silently_truncating():
     assert error.value.detail["code"] == "daily_care_question_context_budget_exceeded"
 
 
+
+def test_daily_care_real_system_and_evidence_fit_qwen_context():
+    from types import SimpleNamespace
+
+    from app.api.daily_care_intelligence import _daily_care_system_prompt
+    from app.services.qwen_gateway import _estimate_prompt_tokens
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_system_prompt import apply_solenos_system_contract
+
+    messages = [
+        {
+            "role": "system",
+            "content": _daily_care_system_prompt(
+                SimpleNamespace(target_words=90, max_words=130)
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps({
+                "question": "What changed?",
+                "retrieved_history": "x" * DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS,
+                "retrieval_metadata": {"selection_truncated": True},
+            }),
+        },
+    ]
+    final = apply_solenos_system_contract(apply_specialized_intelligence(messages))
+    estimate = _estimate_prompt_tokens(final)
+    input_budget = 4096 - DAILY_CARE_MAX_OUTPUT_TOKENS - 128
+    assert estimate < input_budget, {
+        "estimated_prompt_tokens": estimate,
+        "input_budget": input_budget,
+    }
+
 def test_daily_care_output_ceiling_preserves_room_for_retrieved_evidence():
-    assert DAILY_CARE_MAX_OUTPUT_TOKENS == 320
+    assert DAILY_CARE_MAX_OUTPUT_TOKENS == 256
     assert DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS == 1800
