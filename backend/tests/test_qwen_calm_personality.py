@@ -37,7 +37,7 @@ def test_personality_constitution_has_all_ten_characteristics():
 
 
 def test_personality_and_product_identity_versions_are_independently_versioned():
-    assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.2"
+    assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.3"
     assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
 
 
@@ -101,5 +101,5 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
     ]
     system = apply_solenos_system_contract(messages)[0]["content"]
     assert "Do not say \"everything will be okay\"" in system
-    assert "Uncertainty must not be converted into confidence to reassure" in system
+    assert "Uncertainty must not become confidence to reassure" in system
     assert "Safety, factual integrity, dignity, privacy" in system
