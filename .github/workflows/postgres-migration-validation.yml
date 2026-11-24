@@ -1100,7 +1100,7 @@ jobs:
         run: |
           createdb -h localhost -U postgres solenos_companion_review
           python -m alembic upgrade head
-          python -m pytest tests/test_companion_care_update_postgres.py -q
+          python -m pytest tests/test_companion_care_update_postgres.py tests/test_companion_conversation_postgres.py -q
           dropdb -h localhost -U postgres solenos_companion_review
 
       - name: Test populated legacy caregivers table fails closed without data loss
