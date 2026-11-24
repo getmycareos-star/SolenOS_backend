@@ -719,7 +719,17 @@ def build_transparency_evidence(
         ) else "complete_aggregate_and_recent"
 
     if can_view_lcr and _table_available(db, "audit_log_events"):
-        audit_query = db.query(AuditLogEvent).filter(AuditLogEvent.person_id == person_id)
+        audit_query = db.query(
+            AuditLogEvent.id.label("id"),
+            AuditLogEvent.actor_id.label("actor_id"),
+            AuditLogEvent.caregiver_id.label("caregiver_id"),
+            AuditLogEvent.action.label("action"),
+            AuditLogEvent.target_type.label("target_type"),
+            AuditLogEvent.target_id.label("target_id"),
+            AuditLogEvent.outcome.label("outcome"),
+            AuditLogEvent.occurred_at.label("occurred_at"),
+            AuditLogEvent.request_id.label("request_id"),
+        ).filter(AuditLogEvent.person_id == person_id)
         if not can_manage_members:
             audit_query = audit_query.filter(or_(
                 AuditLogEvent.caregiver_id == caregiver_id,
@@ -778,7 +788,15 @@ def build_transparency_evidence(
 
     if _table_available(db, "data_subject_requests"):
         requests = (
-            db.query(DataSubjectRequest)
+            db.query(
+                DataSubjectRequest.id.label("id"),
+                DataSubjectRequest.request_type.label("request_type"),
+                DataSubjectRequest.request_status.label("request_status"),
+                DataSubjectRequest.requested_at.label("requested_at"),
+                DataSubjectRequest.resolved_at.label("resolved_at"),
+                DataSubjectRequest.resolution_code.label("resolution_code"),
+                DataSubjectRequest.request_id.label("request_id"),
+            )
             .filter(
                 DataSubjectRequest.person_id == person_id,
                 DataSubjectRequest.caregiver_id == caregiver_id,
@@ -793,7 +811,16 @@ def build_transparency_evidence(
         exports_have_more = False
         exports_available = _table_available(db, "privacy_export_artifacts")
         if exports_available:
-            export_query = db.query(PrivacyExportArtifact).filter(
+            export_query = db.query(
+                PrivacyExportArtifact.id.label("id"),
+                PrivacyExportArtifact.request_id.label("request_id"),
+                PrivacyExportArtifact.filename.label("filename"),
+                PrivacyExportArtifact.size_bytes.label("size_bytes"),
+                PrivacyExportArtifact.sha256.label("sha256"),
+                PrivacyExportArtifact.expires_at.label("expires_at"),
+                PrivacyExportArtifact.downloaded_at.label("downloaded_at"),
+                PrivacyExportArtifact.created_at.label("created_at"),
+            ).filter(
                 PrivacyExportArtifact.person_id == person_id,
                 PrivacyExportArtifact.caregiver_id == caregiver_id,
             )
