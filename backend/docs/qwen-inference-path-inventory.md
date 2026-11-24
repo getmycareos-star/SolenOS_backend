@@ -13,7 +13,7 @@ Reviewed against backend `main` on 2026-11-24. This is a source-level inventory,
 
 | Source | Entry points / usage | Execution mode |
 | --- | --- | --- |
-| `backend/app/api/collaboration.py` | `_ollama_chat`; Companion inference and bounded-context requests; claim/care-understanding extraction; production evaluation | Synchronous request handlers and `asyncio.to_thread` for bounded Companion work |
+| `backend/app/api/collaboration.py` | `qwen_support_assist`; `companion_message` via bounded-context gateway calls; legacy `_ollama_chat` adapter; claim/care-understanding extraction; production evaluation | Synchronous request handlers and `asyncio.to_thread` for bounded Companion work; every active path enters `qwen_chat` |
 | `backend/app/api/daily_care_intelligence.py` | Daily Care answer generation and schema-repair retry | Async handler offloads synchronous gateway call with `asyncio.to_thread` |
 | `backend/app/api/handoff_drafts.py` | Grounded handoff generation and bounded repair retry | Synchronous request path |
 | `backend/app/services/delta_engine.py` | Delta JSON generation and retry | Synchronous service path |
