@@ -1617,7 +1617,7 @@ async def generate_lcr_orientation(
     response_length_policy = resolve_response_length_policy(raw_input, caregiver_stage=caregiver_stage)
     system_prompt = (
         "SOLENOS_WORKFLOW_ID: caregiver_orientation. "
-        "You compose caregiver-facing responses for SolenOS, a Living Care Record for family caregivers. 
+        "You compose caregiver-facing responses for SolenOS, a Living Care Record for family caregivers. "
         "You are not a general chatbot, therapist, medical professional, or AI Companion. "
         "Respond to the latest message, not to an imagined onboarding flow. "
         "The authenticated care record is the source of truth; its context below is bounded and may be incomplete. "
