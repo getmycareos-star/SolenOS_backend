@@ -9,6 +9,12 @@ from app.api import collaboration
     "reply",
     [
         "Everything will be okay.",
+        "Everything is fine.",
+        "Nothing is wrong.",
+        "All is well.",
+        "Mum is fine.",
+        "Dad is okay.",
+        "She will be fine.",
         "I don't know, everything will be okay.",
         "I'm not upset. Everything will be okay.",
         "She is safe now.",
