@@ -1057,7 +1057,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     policy_version="review-v1",
                     source_attribution_snapshot="{}",
                     reviewed_by_caregiver_id=other_caregiver_id,
-                    created_at=before,
+                    created_at=before + timedelta(minutes=2),
                 ),
                 EvidenceClaimAssessment(
                     id=f"asof-claim-assessment-before-{suffix}",
@@ -1228,7 +1228,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     assessment_basis="linked_source_coverage_only",
                     semantic_sufficiency="not_automatically_verified",
                     assessed_by_caregiver_id=other_caregiver_id,
-                    assessed_at=before,
+                    assessed_at=before + timedelta(minutes=2),
                 ),
             ])
             db.commit()
