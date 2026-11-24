@@ -141,3 +141,49 @@ def test_workflow_instructions_cannot_override_shared_identity_or_safety():
     assert "You are SolenOS Companion" in content
     assert "Never diagnose" in content
     assert "WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" in content
+
+
+def test_qwen_gateway_serializes_the_shared_identity_and_personality(monkeypatch):
+    import json
+    from app.services import qwen_gateway
+
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"message":{"content":"synthetic identity-bound response"}}'
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(
+        qwen_gateway,
+        "get_ollama_config",
+        lambda: ("http://ollama", "qwen3.5:4b", 10.0),
+    )
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("OLLAMA_NUM_CTX", "8192")
+    monkeypatch.setenv("OLLAMA_NUM_PREDICT", "96")
+    monkeypatch.setenv("OLLAMA_STARTUP_RETRY_SECONDS", "0")
+
+    response = qwen_gateway.qwen_chat([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion"},
+        {"role": "user", "content": "Who created you?"},
+    ])
+
+    serialized_system = captured["payload"]["messages"][0]["content"]
+    assert response == "synthetic identity-bound response"
+    assert captured["payload"]["messages"][0]["role"] == "system"
+    assert "SPECIALIST: CAREGIVER COMPANION" in serialized_system
+    assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION in serialized_system
+    assert serialized_system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
+    assert "SolenOS was founded by David Abuchi" in serialized_system
+    assert captured["payload"]["messages"][1]["content"] == "Who created you?"
