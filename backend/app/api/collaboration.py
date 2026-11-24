@@ -7269,7 +7269,7 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bwho is (?:the )?founder of solenos$",
         r"\bwho is your creator$",
         r"\bwho owns you$",
-        r"\bare you (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai)$",
+        r"\bare you (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai)(?: or (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai))?$",
         r"\bdo you (?:remember|know) everything$",
         r"\bcan you make mistakes$",
         r"\bcan i trust everything you say$",
