@@ -17,10 +17,22 @@ def assertion_information_status(
     # A previously verified or inferred assertion that was later withdrawn,
     # rejected, or superseded remains in history but must not read as current.
     if lifecycle in {"rejected", "superseded", "retracted", "withdrawn"}:
-        return (
-            "historical_assertion",
-            "This assertion is no longer current and is not a current fact; retain it only as part of the record history.",
+        lifecycle_limit = (
+            "This assertion is no longer current and is not a current fact; retain it only as part of the record history."
         )
+        if state == "inferred":
+            lifecycle_limit += " Its epistemic status remains inferred and does not make it independently verified."
+        elif state == "reported":
+            lifecycle_limit += " Its source remains a caregiver report, not independent verification."
+        elif state == "observed":
+            lifecycle_limit += " It remains a source-attributed observation, not a current observation."
+        elif state == "conflicting":
+            lifecycle_limit += " The historical conflict remains unresolved; do not select a winner automatically."
+        elif state in {"uncertain", "missing"}:
+            lifecycle_limit += " Its information remains uncertain or missing."
+        elif state == "verified":
+            lifecycle_limit += " Preserve the prior verification history; this does not make the assertion current."
+        return ("historical_assertion", lifecycle_limit)
 
     if state == "inferred":
         return (
