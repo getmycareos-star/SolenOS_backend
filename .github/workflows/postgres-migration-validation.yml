@@ -942,12 +942,14 @@ jobs:
           from sqlalchemy import create_engine
           from sqlalchemy.orm import Session
           from app.models.care import Caregiver, Person
+          from app.models.notifications import CareNotificationPreference
           from app.models.privacy_delivery import AuditLogEvent
 
           engine = create_engine(os.environ["DATABASE_URL"])
           with Session(engine) as db:
               legacy_person = Person(id="timezone-legacy-person", name="Legacy recipient")
               explicit_person = Person(id="timezone-explicit-person", name="Explicit recipient")
+              overwritten_person = Person(id="timezone-overwritten-person", name="Overwritten recipient")
               legacy_caregiver = Caregiver(
                   id="timezone-legacy-caregiver",
                   name="Legacy caregiver",
@@ -964,24 +966,56 @@ jobs:
                   timezone="America/Los_Angeles",
                   timezone_configured=True,
               )
-              db.add_all([legacy_person, explicit_person])
+              overwritten_caregiver = Caregiver(
+                  id="timezone-overwritten-caregiver",
+                  name="Overwritten caregiver",
+                  relationship="Family",
+                  person_id=overwritten_person.id,
+                  timezone="America/New_York",
+                  timezone_configured=True,
+              )
+              db.add_all([legacy_person, explicit_person, overwritten_person])
               db.flush()
-              db.add_all([legacy_caregiver, explicit_caregiver])
+              db.add_all([legacy_caregiver, explicit_caregiver, overwritten_caregiver])
               db.flush()
-              db.add(AuditLogEvent(
-                  actor_id=explicit_caregiver.id,
-                  subject_id=explicit_person.id,
-                  person_id=explicit_person.id,
-                  caregiver_id=explicit_caregiver.id,
-                  action="caregiver.preferences.update",
-                  target_type="caregiver_preferences",
-                  target_id=explicit_caregiver.id,
-                  occurred_at=datetime.now(timezone.utc),
-                  outcome="allowed",
-                  request_id="timezone-authority-migration-test",
-                  policy_version="caregiver-preferences-v1",
-                  record_metadata={"updated_fields": ["timezone"]},
-              ))
+              explicit_time = datetime(2026, 11, 20, tzinfo=timezone.utc)
+              notification_time = datetime(2026, 11, 21, tzinfo=timezone.utc)
+              db.add_all([
+                  AuditLogEvent(
+                      actor_id=explicit_caregiver.id,
+                      subject_id=explicit_person.id,
+                      person_id=explicit_person.id,
+                      caregiver_id=explicit_caregiver.id,
+                      action="caregiver.preferences.update",
+                      target_type="caregiver_preferences",
+                      target_id=explicit_caregiver.id,
+                      occurred_at=explicit_time,
+                      outcome="allowed",
+                      request_id="timezone-authority-migration-test",
+                      policy_version="caregiver-preferences-v1",
+                      record_metadata={"updated_fields": ["timezone"]},
+                  ),
+                  AuditLogEvent(
+                      actor_id=overwritten_caregiver.id,
+                      subject_id=overwritten_person.id,
+                      person_id=overwritten_person.id,
+                      caregiver_id=overwritten_caregiver.id,
+                      action="caregiver.preferences.update",
+                      target_type="caregiver_preferences",
+                      target_id=overwritten_caregiver.id,
+                      occurred_at=explicit_time,
+                      outcome="allowed",
+                      request_id="timezone-overwrite-migration-test",
+                      policy_version="caregiver-preferences-v1",
+                      record_metadata={"updated_fields": ["timezone"]},
+                  ),
+                  CareNotificationPreference(
+                      person_id=overwritten_person.id,
+                      caregiver_id=overwritten_caregiver.id,
+                      timezone_name="America/Chicago",
+                      updated_at=notification_time,
+                  ),
+              ])
               db.commit()
           engine.dispose()
           PY
@@ -996,10 +1030,13 @@ jobs:
           with Session(engine) as db:
               legacy = db.query(Caregiver).filter_by(id="timezone-legacy-caregiver").one()
               explicit = db.query(Caregiver).filter_by(id="timezone-explicit-caregiver").one()
+              overwritten = db.query(Caregiver).filter_by(id="timezone-overwritten-caregiver").one()
               assert legacy.timezone == "UTC", legacy.timezone
               assert legacy.timezone_configured is False
               assert explicit.timezone == "America/Los_Angeles", explicit.timezone
               assert explicit.timezone_configured is True
+              assert overwritten.timezone == "UTC", overwritten.timezone
+              assert overwritten.timezone_configured is False
           engine.dispose()
           print("CAREGIVER_TIMEZONE_PROVENANCE_MIGRATION=PASS")
           PY
