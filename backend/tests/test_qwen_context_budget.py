@@ -30,7 +30,7 @@ def test_qwen_context_budget_retries_with_balanced_source_context(monkeypatch):
         "Canonical source: " + json.dumps({
             "source_type": "evidence",
             "record": {
-                "source_text": "The caregiver's original note says breakfast was left unfinished.",
+                "source_text": "The caregiver's original note says breakfast was left unfinished. " * 6,
                 "information_status": "caregiver_reported",
             },
         }),
