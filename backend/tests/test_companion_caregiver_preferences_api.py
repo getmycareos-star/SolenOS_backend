@@ -9,6 +9,7 @@ from app.core.database import Base, get_db
 from app.main import app
 from app.models.care import Caregiver
 from app.models.notifications import CareNotificationPreference
+from app.models.privacy_delivery import AuditLogEvent
 
 
 engine = create_engine(
@@ -80,6 +81,19 @@ def test_caregiver_preferences_persist_and_are_scoped_to_authenticated_caregiver
         first_read = client.get("/api/v1/caregiver/preferences", headers=first_headers)
         assert first_read.status_code == 200, first_read.text
         assert first_read.json() == saved.json()
+
+        db = TestSession()
+        try:
+            audit = db.query(AuditLogEvent).filter_by(
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                action="caregiver.preferences.update",
+                target_type="caregiver_preferences",
+                target_id=first["caregiver"]["id"],
+            ).one()
+            assert "timezone" in audit.record_metadata["updated_fields"]
+        finally:
+            db.close()
 
         second_read = client.get("/api/v1/caregiver/preferences", headers=second_headers)
         assert second_read.status_code == 200, second_read.text
