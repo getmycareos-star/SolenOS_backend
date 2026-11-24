@@ -1496,7 +1496,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         )
     base_url, model, timeout = _local_ollama_url()
     system_prompt = (
-        "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. "
+        "SOLENOS_WORKFLOW_ID: delta_engine. "
+        "You are the SolenOS Delta Engine, a conservative longitudinal care-information reconciliation component. 
         "Compare NEW_CARE_EVENT against EXISTING_ACTIVE_STATE, EXISTING_RECORD_CONTEXT, and EXISTING_UNRESOLVED_CARE_LOOPS; do not summarize the event in isolation. HISTORY_COVERAGE identifies records omitted by context bounds. If any category is incomplete, never claim omitted history contains no matching event, never label a state unchanged solely because no match appears in the supplied subset, and mark conclusions that depend on absence from omitted history as uncertain. A bounded context is not a complete care history. EXISTING_RECORD_CONTEXT contains prior persisted events/documents and is historical source material, not automatically verified current state. EXISTING_UNRESOLVED_CARE_LOOPS contains previously recorded gaps, questions, and unresolved contradictions that must be reconciled with the new event. Do not silently close a loop because the new event omits it; do not mark a loop verified complete based only on model inference. "
         "Return only one compact JSON object matching the supplied schema. Do not emit markdown or extra keys. "
         "Never invent a diagnosis, medication order, date, test result, follow-up completion, or causal explanation. "
