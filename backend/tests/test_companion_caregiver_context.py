@@ -120,6 +120,23 @@ def test_context_rejects_missing_revoked_cross_record_or_unpermitted_grants(gran
         build_companion_caregiver_context(_caregiver(), grant)
 
 
+def test_context_uses_canonical_member_manager_permission_semantics():
+    context = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(permissions=[], can_manage_members=True),
+    )
+    assert context["caregiver_id"] == "caregiver-mary"
+    assert context["access_scope"] == "full_record"
+
+
+def test_documents_only_grant_cannot_build_companion_care_context():
+    with pytest.raises(ValueError, match="not permitted to view this care record"):
+        build_companion_caregiver_context(
+            _caregiver(),
+            _grant(access_scope="documents_only", permissions=["view_documents"]),
+        )
+
+
 def test_missing_caregiver_name_does_not_invent_a_display_name():
     context = build_companion_caregiver_context(
         _caregiver(name=" ", preferred_name=None),
