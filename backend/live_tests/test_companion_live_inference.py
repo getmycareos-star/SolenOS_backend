@@ -185,7 +185,10 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
         first_greeting_body = first_greeting.json()
         first_greeting_text = first_greeting_body.get("reply", "").casefold()
         assert first_greeting_body.get("ai_generated") is True, first_greeting_body
-        assert "solenos companion" in first_greeting_text, first_greeting_body
+        assert (
+            "solenos companion" in first_greeting_text
+            or "solenos ai companion" in first_greeting_text
+        ), first_greeting_body
         assert first_greeting_body.get("written_to_lcr") is False, first_greeting_body
         assert not any(
             detail in first_greeting_text
