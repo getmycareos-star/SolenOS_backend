@@ -3471,11 +3471,22 @@ def _is_casual_greeting(text: str) -> bool:
     return is_greeting_message(text)
 
 def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
-    """Greeting replies stay within the selected first-time/returning contract."""
+    """Greeting replies allow at most one low-pressure invitation."""
     normalized = (reply or "").casefold()
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
-    asks_a_question = "?" in (reply or "")
-    return not (reply or "").strip() or count_response_words(reply) > max_words or repeats_automatic_question or asks_a_question
+    question_count = (reply or "").count("?")
+    low_pressure_invitation = bool(re.search(
+        r"\b(?:how can i help|what can i help with|what would you like to (?:talk about|work on))\b",
+        normalized,
+    ))
+    disallowed_question = question_count > 0 and not low_pressure_invitation
+    return (
+        not (reply or "").strip()
+        or count_response_words(reply) > max_words
+        or repeats_automatic_question
+        or question_count > 1
+        or disallowed_question
+    )
 
 
 def _greeting_name_missing(reply: str, caregiver_display_name: str | None) -> bool:
@@ -9675,7 +9686,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "\nThe current message is a greeting only. Give a warm, concise response in the caregiver's selected language. "
                 "Use the authenticated display name exactly as supplied when available. "
                 "Use a time-of-day greeting only when the backend supplied a configured greeting_period; otherwise use a neutral greeting. "
-                "Do not ask a question, introduce a care issue, reveal care-recipient details, or claim a record was updated. "
+                "Offer at most one low-pressure invitation, such as how you can help; do not ask multiple questions, launch a care assessment, introduce a care issue, reveal care-recipient details, or claim a record was updated. "
                 "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
         # All ORM data needed for this prompt has been copied into JSON/plain
