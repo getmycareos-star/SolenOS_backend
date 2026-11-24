@@ -62,7 +62,7 @@ def test_shared_contract_preserves_workflow_instructions_and_identity_precedence
     result = apply_solenos_system_contract(messages)
     assert len(result) == 2
     content = result[0]["content"]
-    assert content.startswith(SOLENOS_OPERATING_CONTRACT_MANIFEST + "\\n\\n" + SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip())
+    assert content.startswith(SOLENOS_OPERATING_CONTRACT_MANIFEST + "\n\n" + SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip())
     assert "Return valid JSON only." in content
     assert "Do not paraphrase source quotations." in content
     assert content.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
