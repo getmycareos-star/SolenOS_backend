@@ -149,17 +149,26 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
         return ()
 
     workflow_ids = re.findall(
-        r"solenos_workflow_id\s*:\s*([a-z0-9_]+)",
+        r"solenos_workflow_id\\s*:\\s*([a-z0-9_]+)",
         system_text,
         flags=re.IGNORECASE,
     )
     if workflow_ids:
-        selected: list[str] = []
-        for workflow_id in workflow_ids:
-            for domain in WORKFLOW_SPECIALISTS.get(workflow_id.casefold(), ()):
-                if domain not in selected:
-                    selected.append(domain)
-        return tuple(selected[:MAX_SPECIALISTS_PER_REQUEST])
+        unique_ids = {workflow_id.casefold() for workflow_id in workflow_ids}
+        if len(unique_ids) != 1:
+            raise ValueError("ambiguous_solenos_workflow_metadata")
+        workflow_id = next(iter(unique_ids))
+        if workflow_id in WORKFLOWS_WITHOUT_SPECIALISTS:
+            return ()
+        domains = WORKFLOW_SPECIALISTS.get(workflow_id)
+        if domains is None:
+            raise ValueError(f"unmapped_solenos_workflow:{workflow_id}")
+        if len(domains) > MAX_SPECIALISTS_PER_REQUEST:
+            raise RuntimeError(f"specialist_limit_exceeded:{workflow_id}")
+        unknown_domains = set(domains) - set(SPECIALIZED_PROMPTS)
+        if unknown_domains:
+            raise RuntimeError(f"unknown_specialist_domain:{workflow_id}")
+        return domains
 
     # Compatibility path for existing backend-owned prompts not yet tagged.
     selected = []
