@@ -4479,6 +4479,20 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
         assert other_preferences.json()["timezone"] is None
         assert other_person_id != person_id
 
+        with TestingSessionLocal() as db:
+            db.add(CareEvent(
+                id="private-greeting-care-event",
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2026, 11, 24, 9, 0, tzinfo=timezone.utc),
+                title="PRIVATE_GREETING_SENTINEL: care recipient had a difficult night",
+                description="PRIVATE_GREETING_DETAIL: a sensitive care observation for retrieval only",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
         captured = {}
 
         def fake_qwen(base, model, messages, options=None, audit_context=None):
@@ -4502,6 +4516,8 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
         assert '"measurement_system":"us_customary"' in prompt
         assert '"communication_style":"concise"' in prompt
         assert "Do not expose care-recipient details in a greeting-only response" in prompt
+        assert "PRIVATE_GREETING_SENTINEL" not in prompt
+        assert "PRIVATE_GREETING_DETAIL" not in prompt
 
         with TestingSessionLocal() as db:
             stored = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).one()
