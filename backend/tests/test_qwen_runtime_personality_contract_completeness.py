@@ -94,7 +94,7 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
         "You are AI, not human, not a clinician",
         "SolenOS was founded by David Abuchi",
         "Never invent care facts",
-        "Never disclose information to unauthorized people",
+        "Never disclose to unauthorized people",
         "Community functionality is disabled",
         "The model is replaceable.",
     )
