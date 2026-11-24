@@ -870,7 +870,7 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
             tuesday_items = {item["target_id"]: item for item in tuesday_projection.json()["items"]}
             assert f"asof-mobility-event-{suffix}" in tuesday_items
             assert f"asof-late-document-{suffix}" not in tuesday_items
-            assert tuesday_items[f"asof-mobility-event-{suffix}"]["after_state"]["occurred_at"] == "2026-11-02T09:00:00+00:00"
+            assert tuesday_items[f"asof-mobility-event-{suffix}"]["state"]["occurred_at"] == "2026-11-02T09:00:00+00:00"
 
             thursday_projection = client.get(
                 "/api/v1/care-continuity/state-reconstruction/as-of",
@@ -879,8 +879,8 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
             )
             assert thursday_projection.status_code == 200, thursday_projection.text
             thursday_items = {item["target_id"]: item for item in thursday_projection.json()["items"]}
-            assert thursday_items[f"asof-mobility-event-{suffix}"]["after_state"]["occurred_at"] == "2026-11-03T09:00:00+00:00"
-            assert thursday_items[f"asof-mobility-event-{suffix}"]["after_state"]["correction_status"] == "corrected"
+            assert thursday_items[f"asof-mobility-event-{suffix}"]["state"]["occurred_at"] == "2026-11-03T09:00:00+00:00"
+            assert thursday_items[f"asof-mobility-event-{suffix}"]["state"]["correction_status"] == "corrected"
             assert f"asof-late-document-{suffix}" not in thursday_items
 
             saturday_projection = client.get(
@@ -891,8 +891,8 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
             assert saturday_projection.status_code == 200, saturday_projection.text
             saturday_items = {item["target_id"]: item for item in saturday_projection.json()["items"]}
             assert f"asof-late-document-{suffix}" in saturday_items
-            assert saturday_items[f"asof-late-document-{suffix}"]["after_state"]["occurred_at"] == "2026-11-01T09:00:00+00:00"
-            assert saturday_items[f"asof-late-document-{suffix}"]["after_state"]["recorded_at"] == "2026-11-06T12:00:00+00:00"
+            assert saturday_items[f"asof-late-document-{suffix}"]["state"]["occurred_at"] == "2026-11-01T09:00:00+00:00"
+            assert saturday_items[f"asof-late-document-{suffix}"]["state"]["recorded_at"] == "2026-11-06T12:00:00+00:00"
 
             # The bounded record-wide projection must use the same recorded-time
             # boundary and must not expose another person's revisions.
@@ -1091,7 +1091,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 source_text="The caregiver withdrew the earlier sleep report.",
                 evidence_ids=[evidence.id],
                 assertion_status="withdrawn",
-                epistemic_state="withdrawn",
+                epistemic_state="reported",
                 created_by_caregiver_id=caregiver_id,
                 recorded_at=before + timedelta(minutes=30),
             )
