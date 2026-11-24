@@ -65,6 +65,23 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
     if _LOW_CAPACITY_SIGNAL.search(value) or _STANDALONE_LOW_CAPACITY.fullmatch(value):
         return True
 
+    # Crying alone does not automatically shorten a factual answer. When the
+    # caregiver explicitly reports crying alongside a care recipient's emotional
+    # change, however, the caregiver's own distress must be acknowledged.
+    patient_emotional_context = re.search(
+        r"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+        r"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
+        r".{0,100}\\b(?:sad|withdrawn|frightened|terrified|lonely|upset|distressed|"
+        r"afraid|scared|anxious|panicking)\\b",
+        value,
+    )
+    caregiver_crying = re.search(
+        r"\\b(?:i(?:'ve| have) been crying|i(?:'m| am) crying|i cried)\\b",
+        value,
+    )
+    if patient_emotional_context and caregiver_crying:
+        return True
+
     capacity_terms = r"(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)"
     # A caregiver may explicitly share the care recipient's just-described
     # state without repeating the adjective ("Mum is exhausted, and I am too").
