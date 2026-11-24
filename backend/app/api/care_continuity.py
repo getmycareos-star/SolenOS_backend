@@ -4610,6 +4610,11 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
         raise HTTPException(status_code=422, detail="Current-state assertions require a caregiver-selected review window")
     if previous.get("assertion_status") == "accepted" and previous.get("review_after_days") == review_days and not payload.get("force_review"):
         return previous
+    if not inspect(db.connection()).has_table("care_assertion_revisions"):
+        raise HTTPException(
+            status_code=503,
+            detail="Care-record history is unavailable; this detail was not accepted.",
+        )
 
     current = dict(previous)
     current["assertion_status"] = "accepted"
@@ -4625,23 +4630,22 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
             assertions.c.id == assertion_id,
             assertions.c.person_id == person_id,
         ).values(**values))
-        if inspect(db.connection()).has_table("care_assertion_revisions"):
-            revisions = _table(db, "care_assertion_revisions")
-            latest = db.execute(select(func.max(revisions.c.revision_number)).where(
-                revisions.c.person_id == person_id,
-                revisions.c.assertion_id == assertion_id,
-            )).scalar()
-            db.execute(insert(revisions).values(
-                id=str(uuid.uuid4()),
-                person_id=person_id,
-                assertion_id=assertion_id,
-                revision_number=int(latest or 0) + 1,
-                previous_payload=previous,
-                current_payload=current,
-                revision_reason="Caregiver explicitly reviewed the source-attributed assertion",
-                changed_by_caregiver_id=caregiver_id,
-                changed_at=datetime.now(timezone.utc),
-            ))
+        revisions = _table(db, "care_assertion_revisions")
+        latest = db.execute(select(func.max(revisions.c.revision_number)).where(
+            revisions.c.person_id == person_id,
+            revisions.c.assertion_id == assertion_id,
+        )).scalar()
+        db.execute(insert(revisions).values(
+            id=str(uuid.uuid4()),
+            person_id=person_id,
+            assertion_id=assertion_id,
+            revision_number=int(latest or 0) + 1,
+            previous_payload=previous,
+            current_payload=current,
+            revision_reason="Caregiver explicitly reviewed the source-attributed assertion",
+            changed_by_caregiver_id=caregiver_id,
+            changed_at=datetime.now(timezone.utc),
+        ))
         if defer_document_review_commit:
             updated = db.execute(select(assertions).where(
                 assertions.c.id == assertion_id,
