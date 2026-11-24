@@ -64,6 +64,9 @@ def test_gateway_commits_a_privacy_minimizing_audit_receipt_before_model_inferen
     assert "inference_audit_unavailable" in source
     assert '"system_prompt_sha256"' in source
     assert '"request_context_sha256"' in source
+    assert "audit_context: dict | None = None" in source
+    assert 'person_id=audit_metadata.get("person_id")' in source
+    assert '"source_references"' in source
 
 
 def test_delta_engine_uses_the_shared_gateway_and_its_longitudinal_specialist():
