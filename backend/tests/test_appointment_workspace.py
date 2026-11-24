@@ -3687,7 +3687,6 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
             evidence_status="recorded",
             source_type="caregiver_report",
             uploaded_at=before,
-            ingested_at=before,
         )
         foreign_evidence = Evidence(
             id="asof-review-foreign-evidence",
@@ -3698,7 +3697,6 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
             evidence_status="recorded",
             source_type="caregiver_report",
             uploaded_at=before,
-            ingested_at=before,
         )
         freshness_policy = EvidenceFreshnessPolicy(
             id="asof-freshness-policy",
