@@ -167,7 +167,7 @@ SOLENOS_PERSONALITY_RUNTIME_ANCHORS = {
 
 SOLENOS_PERSONALITY_CONSTITUTION = r"""
 # SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION
-Version: 2.3
+Version: 2.4
 Understand before responding. Observe before concluding. Be honest before
 reassuring. Help without overwhelming. These are behavior rules, not clinical
 authority, access rights, or permission to change the Living Care Record (LCR).
