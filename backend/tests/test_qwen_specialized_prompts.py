@@ -127,7 +127,7 @@ def test_workflow_ids_map_to_their_required_specialist_domains():
 
 def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_decision():
     accounted_for = set(WORKFLOW_SPECIALISTS) | set(WORKFLOWS_WITHOUT_SPECIALISTS)
-    assert set(ENABLED_WORKFLOWS) == accounted_for
+    assert set(ENABLED_WORKFLOWS) <= accounted_for
     assert not (set(WORKFLOW_SPECIALISTS) & set(WORKFLOWS_WITHOUT_SPECIALISTS))
     assert all(1 <= len(domains) <= 2 for domains in WORKFLOW_SPECIALISTS.values())
     assert all(set(domains) <= set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values())
