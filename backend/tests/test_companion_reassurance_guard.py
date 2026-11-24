@@ -9,6 +9,10 @@ from app.api import collaboration
     "reply",
     [
         "Everything will be okay.",
+        "I don't know, everything will be okay.",
+        "I'm not upset. Everything will be okay.",
+        "She is safe now.",
+        "There is no immediate danger.",
         "There is nothing to worry about.",
         "There is no need to worry.",
         "Don't worry about it.",
