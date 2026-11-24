@@ -404,13 +404,28 @@ def build_unified_lcr_context(
     if not person_id or not caregiver_id:
         raise ValueError("Authorized person_id and caregiver_id are required")
 
-    caregiver_timezone = (
-        db.query(Caregiver.timezone)
+    caregiver_settings = (
+        db.query(Caregiver.timezone, Caregiver.timezone_configured)
         .filter(Caregiver.id == str(caregiver_id), Caregiver.person_id == str(person_id))
-        .scalar()
-        or "UTC"
+        .first()
     )
-    temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
+    if caregiver_settings is None:
+        raise ValueError("The authenticated caregiver timezone settings could not be resolved")
+    caregiver_timezone = str(caregiver_settings[0] or "UTC")
+    timezone_configured = bool(caregiver_settings[1])
+    if timezone_configured:
+        try:
+            ZoneInfo(caregiver_timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError("The caregiver timezone is invalid; update it in caregiver preferences before using date-relative history.") from exc
+        temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
+    else:
+        # Probe only to detect date-dependent language. Never use UTC as a
+        # substitute for the caregiver's unknown local calendar.
+        requested_window = _temporal_window(query, timezone_name="UTC")
+        if requested_window is not None:
+            raise ValueError("Set the caregiver's local timezone in preferences before asking for date-relative care history.")
+        temporal_window = None
     context = build_lcr_context(
         db, str(person_id), caregiver_id=str(caregiver_id),
         limit_per_source=limit_per_source, query=query, temporal_window=temporal_window,
@@ -443,5 +458,6 @@ def build_unified_lcr_context(
         "source_offsets": context.get("source_offsets", {}),
         "retrieval_strategy": context.get("retrieval_strategy") or ("person_scoped_full_source_scan" if include_all_history else "person_scoped_lexical_temporal"),
         "temporal_window": temporal_window,
+        "caregiver_timezone_status": "configured" if timezone_configured else "not_configured",
     }
     return context
