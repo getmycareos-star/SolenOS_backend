@@ -39,17 +39,30 @@ def test_companion_automatically_gets_retrieval_discipline():
     assert select_specialized_domains(messages) == ("lcr_retrieval", "companion")
 
 
-def test_specialists_are_selective_and_capped_at_four():
+def test_explicit_workflow_routing_is_capped_and_does_not_depend_on_marker_order():
+    messages = [
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: delta_engine"},
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: medication_day"},
+    ]
+    selected = select_specialized_domains(messages)
+    assert len(selected) == 4
+    assert selected == (
+        "lcr_retrieval",
+        "longitudinal_reasoning",
+        "reconciliation",
+        "medication_continuity",
+    )
+
+
+def test_workflow_classifier_does_not_load_specialists_from_its_workflow_list():
     messages = [{
         "role": "system",
         "content": (
-            "Companion response. Retrieve care history. Extract daily capture. "
-            "Compare longitudinal change. Resolve contradictions. Review documents."
+            "SOLENOS_META_TASK: workflow_classification. "
+            "Choose from daily_capture, medication_day, document, delta_engine, and handoff."
         ),
     }]
-    selected = select_specialized_domains(messages)
-    assert len(selected) == 4
-    assert selected == ("lcr_retrieval", "care_extraction", "longitudinal_reasoning", "reconciliation")
+    assert select_specialized_domains(messages) == ()
 
 
 
@@ -69,6 +82,21 @@ def test_explicit_solenos_workflow_ids_activate_their_specialists():
 def test_no_specialist_is_loaded_for_unclassified_generic_inference():
     messages = [{"role": "user", "content": "Hello, how are you?"}]
     assert apply_specialized_intelligence(messages) == messages
+
+
+def test_workflow_ids_map_to_their_required_specialist_domains():
+    cases = {
+        "daily_capture": ("care_extraction",),
+        "document_candidate_extraction": ("document_intelligence", "care_extraction"),
+        "companion": ("lcr_retrieval", "companion"),
+        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+        "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
+        "handoff": ("lcr_retrieval", "handoff_appointment"),
+        "record_lifecycle": ("lcr_retrieval", "event_lifecycle"),
+    }
+    for workflow, expected in cases.items():
+        messages = [{"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"}]
+        assert select_specialized_domains(messages) == expected
 
 
 def test_gateway_contract_keeps_core_and_only_selected_specialist():
