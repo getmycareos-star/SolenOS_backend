@@ -99,7 +99,15 @@ router = APIRouter(tags=["community and companion"])
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
-    "INTERACTION: Identify request intent, expressed emotion, capacity, urgency, information state, and conversation state; keep these dimensions distinct. Distinguish greeting, question, update, correction, request, complaint, and goodbye, plus continuing, repeated, interrupted, new, or returning conversation. First answer the caregiver’s actual question. Treat a new observation, event, or change as a care update even without an explicit question; connect it to relevant authorized LCR history. Do not collect a second structured care entry in chat; use Daily Care for structured capture. Notice expressed emotion without treating an interpretation as a psychological diagnosis or assuming feelings. Match detail to stated capacity. Assess urgency independently; safety overrides brevity. Answer the actual request rather than forcing emotional support or a workflow. Acknowledge positive moments proportionately. Never expose internal labels. "
+    "INTERACTION: Keep intent, expressed emotion, capacity, urgency, information state, and conversation state distinct; "
+    "do not collapse them into one label. Distinguish greeting/question/update/correction/request/complaint/goodbye and "
+    "new/continuing/repeated/interrupted/returning conversation. First answer the caregiver’s actual question. "
+    "Treat new observations, events, and changes as care updates; connect them to authorized LCR history. "
+    "Never treat chat history as proof. Do not collect a second structured care entry in chat; use Daily Care. "
+    "Notice emotion without treating an interpretation as a psychological diagnosis or assuming feelings. "
+    "An angry caregiver may also be frightened; a sad caregiver may still want a detailed factual answer. "
+    "Match detail to capacity; assess urgency independently; safety overrides brevity. Do not force emotional support "
+    "or a workflow. Acknowledge positive moments without turning them into a crisis. Never expose internal labels. "
 )
 
 
@@ -7894,16 +7902,16 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
     source_limit_instruction = ""
     if isinstance(source_limits, list):
         limits = []
-        for item in source_limits[:20]:
+        for item in source_limits[:12]:
             if not isinstance(item, dict):
                 continue
-            source_name = str(item.get("source_type") or "care information")[:80]
-            status = str(item.get("status") or "unknown")[:40]
-            explanation = str(item.get("interpretation_limit") or "").strip()[:400]
-            if explanation:
-                limits.append(f"{source_name} is {status}: {explanation}")
+            source_name = str(item.get("source_type") or "care information")[:48]
+            status = str(item.get("status") or "unknown")[:24]
+            limits.append(f"{source_name}:{status}")
+        if len(source_limits) > 12:
+            limits.append(f"{len(source_limits) - 12} additional limited sources")
         if limits:
-            source_limit_instruction = " Source availability limits: " + " ".join(limits) + " "
+            source_limit_instruction = " Source limits: " + ";".join(limits) + ". "
     # A projection can be technically complete for the sources that were
     # available while one or more source families were unsearchable or absent.
     # That is not evidence that the care history is empty.
@@ -9298,6 +9306,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "answer_restriction": retrieval_receipt.get("answer_restriction"),
             "context_truncated": context_truncated,
             "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
+            "missing_optional_sources": list(lcr_context_coverage.get("missing_optional_sources") or []),
             "failed_sources": failed_source_names,
             "selected_sources": selected_source_names,
             "more_available_sources": more_available_source_names,
