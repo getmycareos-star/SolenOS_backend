@@ -117,7 +117,7 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget(m
                     "estimated_prompt_tokens": estimate,
                     "input_budget": input_budget,
                 }
-                assembled_prompt = "\\n".join(
+                assembled_prompt = "\n".join(
                     str(message.get("content") or "")
                     for message in messages
                     if message.get("role") == "system"
