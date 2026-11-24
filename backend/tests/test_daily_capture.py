@@ -322,7 +322,7 @@ def test_lcr_groups_observation_extracted_from_same_evidence_under_source_event(
         monkeypatch.setattr(
             care_continuity_api,
             "build_lcr_context",
-            lambda session, person_id, limit_per_source, only_sources=None: {
+            lambda session, person_id, limit_per_source, only_sources=None, caregiver_id=None: {
                 "person_id": person_id,
                 "as_of": "2026-11-03T09:01:00+00:00",
                 "history_coverage": "bounded_subset",
@@ -953,7 +953,7 @@ def test_quick_daily_checkin_is_visible_as_caregiver_report_in_lcr_projection(mo
         monkeypatch.setattr(
             care_continuity_api,
             "build_lcr_context",
-            lambda session, person_id, limit_per_source, only_sources=None: {
+            lambda session, person_id, limit_per_source, only_sources=None, caregiver_id=None: {
                 "person_id": person_id,
                 "as_of": report_time,
                 "history_coverage": "bounded_subset",
@@ -2009,7 +2009,7 @@ def test_legacy_situation_capture_uses_durable_extraction_worker_for_raw_source(
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum slept poorly last night and seemed more unsettled this morning."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [
@@ -2091,7 +2091,7 @@ def test_natural_language_daily_entry_projects_only_source_grounded_observations
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum slept poorly last night and seemed more unsettled this morning."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [
@@ -2248,7 +2248,7 @@ def test_source_grounded_observations_survive_reconciliation_retry_without_dupli
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum ate breakfast this morning."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [{
@@ -2346,7 +2346,7 @@ def test_delta_failure_does_not_fail_persisted_daily_care_capture(monkeypatch):
 
         extraction_calls = {"count": 0}
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             extraction_calls["count"] += 1
             assert source_text == original_report
             return {
@@ -2490,7 +2490,7 @@ def test_daily_capture_delta_retry_budget_is_bounded_without_reextracting(monkey
         original_report = "Mum slept poorly last night."
         extraction_calls = {"count": 0}
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             extraction_calls["count"] += 1
             assert source_text == original_report
             return {
@@ -2569,7 +2569,7 @@ def test_withdrawn_daily_capture_source_cancels_delta_retry(monkeypatch):
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum slept poorly last night."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [{
@@ -2655,7 +2655,7 @@ def test_minimal_absence_report_stays_uncertain_and_source_attributed(monkeypatc
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum seems okay today. Nothing unusual that I noticed."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [
@@ -2829,7 +2829,7 @@ def test_source_hedge_is_not_applied_to_a_separate_observation_clause(monkeypatc
         headers = session_headers("person-daily-test", "caregiver-daily-test")
         original_report = "Mum seemed more unsettled this morning, and ate lunch."
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [
@@ -2924,7 +2924,7 @@ def test_daily_care_scenario_01_preserves_the_day_as_four_source_reports(monkeyp
             ],
         }
 
-        def extract_exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def extract_exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             observations = []
             for observation, _status in candidates_by_report[source_text]:
                 observations.append({
@@ -3175,7 +3175,7 @@ def test_daily_capture_reconciliation_failure_preserves_successful_extraction_re
         finally:
             db.close()
 
-        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None):
+        def exact_source_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id="daily_capture"):
             assert source_text == original_report
             return {
                 "observations": [{
