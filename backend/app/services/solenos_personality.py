@@ -222,6 +222,7 @@ def _build_runtime_personality_constitution() -> str:
             "Required context: " + "; ".join(contract["required_context"]) + ".",
             "Prohibited behaviours: " + "; ".join(contract["prohibited_behaviors"]) + ".",
             "A violation occurs when: " + "; ".join(contract["violation_conditions"]) + ".",
+            "Verification scenarios: " + "; ".join(contract["verification_cases"]) + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
