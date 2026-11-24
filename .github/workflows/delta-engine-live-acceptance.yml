@@ -29,7 +29,7 @@ concurrency:
 
 jobs:
   delta-engine-live-qwen:
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_sha == github.sha }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
