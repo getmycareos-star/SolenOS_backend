@@ -504,6 +504,11 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         assert record.candidates["observations"][0]["corrected_observation"] == "Mum slept poorly last night."
         assert len(record.review_history) == 2
         assert record.review_history[0]["original_candidate"]["observation"] == "Mum slept badly last night."
+        revision_count = db.execute(
+            text("SELECT COUNT(*) FROM care_assertion_revisions WHERE assertion_id = :assertion_id"),
+            {"assertion_id": accepted_body["assertion_id"]},
+        ).scalar_one()
+        assert revision_count >= 1
         assert record.review_history[0]["reviewed_by_caregiver_id"] == session["caregiver"]["id"]
         assertion = db.query(CareAssertion).filter_by(id=accepted_body["assertion_id"]).one()
         assert assertion.source_event_id == body["id"]
@@ -1016,5 +1021,46 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
         assert assertion.created_by_caregiver_id == accepted.json()["caregiver_id"]
         assert assertion.source_event_id == source_event.id
         assert assertion.evidence_ids == [source_evidence.id]
+    finally:
+        db.close()
+
+
+def test_assertion_acceptance_fails_closed_when_revision_history_is_unavailable():
+    client = TestClient(app)
+    session = create_session(client, "Revision unavailable reviewer")
+    assertion_id = str(uuid.uuid4())
+    db = TestSessionLocal()
+    try:
+        assertion = CareAssertion(
+            id=assertion_id,
+            person_id=session["person"]["id"],
+            subject_type="care_recipient",
+            subject_id=session["person"]["id"],
+            field="sleep",
+            asserted_value="Caregiver reported poor sleep last night.",
+            assertion_kind="historical_observation",
+            assertion_status="reported",
+            epistemic_state="reported",
+            source_text="Caregiver reported poor sleep last night.",
+            created_by_caregiver_id=session["caregiver"]["id"],
+        )
+        db.add(assertion)
+        db.commit()
+        db.execute(text("DROP TABLE care_assertion_revisions"))
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.patch(
+        f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"assertion_status": "accepted"},
+    )
+    assert response.status_code == 503, response.text
+
+    db = TestSessionLocal()
+    try:
+        persisted = db.query(CareAssertion).filter_by(id=assertion_id).one()
+        assert persisted.assertion_status == "reported"
     finally:
         db.close()
