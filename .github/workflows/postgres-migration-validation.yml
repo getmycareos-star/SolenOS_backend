@@ -969,6 +969,12 @@ jobs:
         working-directory: backend
         run: python -m pytest tests/test_reminder_assignment_postgres.py -q
 
+      - name: Verify caregiver and notification timezones remain independent on PostgreSQL
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_messy_care_benchmark
+        working-directory: backend
+        run: python -m pytest tests/test_notifications_postgres.py -q
+
       - name: Preserve existing freshness policy and assessment rows during schema reconciliation (partial-schema regression)
         env:
           DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_freshness_existing
