@@ -4300,3 +4300,16 @@ def test_conflict_detector_reads_nested_events_from_shared_lcr_projection():
 
     assert result is not None
     assert "conflict" in result.casefold()
+
+def test_detailed_evidence_lineage_is_only_sent_when_the_caregiver_asks_about_provenance():
+    include = collaboration._should_include_evidence_lineage_in_prompt
+
+    # Ordinary interpretation must not carry a potentially large lineage graph;
+    # source IDs and the full audit receipt remain available outside the prompt.
+    assert include("What might this update mean?") is False
+    assert include("Can you explain where this information came from?") is False
+
+    # Explicit provenance questions still receive the full lineage context.
+    assert include("Can you explain the source lineage?") is True
+    assert include("Are these reports from an independent source?") is True
+    assert include("Was this information corroborated?") is True
