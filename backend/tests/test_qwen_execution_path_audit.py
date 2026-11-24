@@ -239,13 +239,26 @@ def test_every_production_qwen_invocation_has_trusted_audit_context():
         except SyntaxError as exc:
             raise AssertionError(f"Unable to parse {source_path}: {exc}") from exc
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+            if not isinstance(node, ast.Call):
                 continue
-            if node.func.id not in required_calls:
+            if isinstance(node.func, ast.Name) and node.func.id in required_calls:
+                if not any(keyword.arg == "audit_context" for keyword in node.keywords):
+                    offenders.append(
+                        f"{source_path.relative_to(BACKEND_ROOT)}:{node.lineno}:{node.func.id}"
+                    )
                 continue
-            if not any(keyword.arg == "audit_context" for keyword in node.keywords):
+            # asyncio.to_thread receives the inference function as a callback;
+            # checking only direct Call nodes misses these production invocations.
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "to_thread"
+                and node.args
+                and isinstance(node.args[0], ast.Name)
+                and node.args[0].id in required_calls
+                and not any(keyword.arg == "audit_context" for keyword in node.keywords)
+            ):
                 offenders.append(
-                    f"{source_path.relative_to(BACKEND_ROOT)}:{node.lineno}:{node.func.id}"
+                    f"{source_path.relative_to(BACKEND_ROOT)}:{node.lineno}:to_thread({node.args[0].id})"
                 )
     assert offenders == []
 
