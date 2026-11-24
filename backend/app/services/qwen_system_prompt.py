@@ -16,7 +16,7 @@ from app.services.solenos_information_stewardship import (
 # One aggregate contract release pins the separately maintained, model-independent
 # constitutions together. A component version change requires an intentional
 # aggregate release update and regression coverage.
-SOLENOS_OPERATING_CONTRACT_VERSION = "1.2"
+SOLENOS_OPERATING_CONTRACT_VERSION = "1.3"
 SOLENOS_OPERATING_CONTRACT_MANIFEST = (
     f"SOLENOS OPERATING CONTRACT VERSION: {SOLENOS_OPERATING_CONTRACT_VERSION}\n"
     f"Identity constitution: {SOLENOS_IDENTITY_CONSTITUTION_VERSION}\n"
