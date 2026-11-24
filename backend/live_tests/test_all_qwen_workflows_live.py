@@ -354,6 +354,7 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         assert "SOLENOS COMPANION — PRODUCT IDENTITY" in contract
         assert "SolenOS was founded by David Abuchi" in contract
         assert "The model is replaceable." in contract
+        assert "PERSONALITY — STEADY, PATIENT, GROUNDED REASSURANCE" in contract
     assert data.get("authority") == "solenos_care_record_and_caregiver", data
     assert not re.search(
         r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
@@ -417,6 +418,7 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     assert data.get("updates_lcr") is False, data
     assert identity_contracts, "handoff draft generation bypassed the shared identity contract"
     assert all("SolenOS was founded by David Abuchi" in item for item in identity_contracts)
+    assert all("PERSONALITY — STEADY, PATIENT, GROUNDED REASSURANCE" in item for item in identity_contracts)
 
     generation = data.get("generation") or {}
     assert generation.get("provider") == "ollama", generation
