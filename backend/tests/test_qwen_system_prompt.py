@@ -10,6 +10,39 @@ from app.services.solenos_identity import (
 )
 
 
+def test_companion_minimal_first_visit_prompt_fits_production_4096_token_window():
+    from app.api.collaboration import COMPANION_INTERACTION_INTERPRETATION_CONTRACT
+    from app.services.qwen_gateway import _enforce_prompt_context_budget
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+
+    task_prompt = (
+        "SOLENOS_WORKFLOW_ID: companion. "
+        "Answer the caregiver's actual question first in plain, natural language. "
+        "Use only relevant authorized care context; prior assistant replies are not evidence. "
+        "Do not collect a second structured care entry in chat: new care updates remain unsaved and belong in Daily Care; new document content belongs in Documents. "
+        "Ask at most one question, only from caregiver_question_queue, and respect intended_answerer_role. "
+        "Respond to the caregiver in English. "
+        + COMPANION_INTERACTION_INTERPRETATION_CONTRACT
+    )
+    for context in ("", "AUTHORIZED CARE CONTEXT:\nLCR event evidence: caregiver reported that Mum left most of breakfast untouched and said she felt nauseated."):
+        messages = apply_specialized_intelligence([
+            {"role": "system", "content": task_prompt + ("\n\n" + context if context else "")},
+            {"role": "user", "content": "What did I just record?"},
+        ])
+        assembled = apply_solenos_system_contract(messages)
+        _enforce_prompt_context_budget(
+            assembled,
+            num_ctx=4096,
+            num_predict=256,
+        )
+
+
+def test_shared_contract_uses_real_line_separators_not_literal_backslash_sequences():
+    content = apply_solenos_system_contract([])[0]["content"]
+    assert "\\n\\n" not in content
+    assert "\\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" not in content
+
+
 def test_contract_is_injected_without_mutating_caller_messages():
     messages = [{"role": "user", "content": "What changed this week?"}]
     result = apply_solenos_system_contract(messages)
