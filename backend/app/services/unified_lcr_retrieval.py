@@ -393,6 +393,7 @@ def build_unified_lcr_context(
     include_all_history: bool = False,
     source_offsets: dict[str, int] | None = None,
     only_sources: set[str] | None = None,
+    event_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Compose canonical care sources and authorized prior Companion dialogue.
 
@@ -416,6 +417,7 @@ def build_unified_lcr_context(
         include_all_history=include_all_history,
         source_offsets=source_offsets,
         only_sources=only_sources,
+        event_ids=event_ids,
     )
     conversation = _conversation_context(
         db,
