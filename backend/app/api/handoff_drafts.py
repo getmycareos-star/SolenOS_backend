@@ -3007,6 +3007,7 @@ def prepare_handoff_draft(
             evidence_rows = db.query(Evidence).filter(
                 Evidence.person_id == person_id,
                 Evidence.id.in_(referenced_evidence_ids),
+                Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
             ).all()
         except Exception:
             evidence_lookup_failed = True
