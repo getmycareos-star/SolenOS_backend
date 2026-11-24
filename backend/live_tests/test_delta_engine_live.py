@@ -170,6 +170,17 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                     "without caregiver review.",
                     [row.id for row in accepted_assertions],
                 )
+                source_assertions = db.query(CareAssertion).filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.source_event_id == event_id,
+                ).all()
+                assert all(
+                    row.assertion_status != "accepted" and row.epistemic_state != "verified"
+                    for row in source_assertions
+                ), [
+                    {"id": row.id, "status": row.assertion_status, "epistemic_state": row.epistemic_state}
+                    for row in source_assertions
+                ]
 
             assert elapsed_ms <= 150_000, (
                 f"Real Delta Engine reconciliation took {elapsed_ms}ms; "
