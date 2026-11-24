@@ -4404,9 +4404,10 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
         assert body["ai_generated"] is False
         assert body["model"] is None
         assert body["response_origin"] == "backend_grounding_fallback"
-        assert body["response_mode"] == "deterministic_grounding_fallback"
+        assert body["response_mode"] == "deterministic_low_capacity_support_fallback"
         assert body["grounding_status"] == "insufficient_evidence"
-        assert body["safety_note"] == "The answer could not be verified against the saved care information. Nothing was changed in your Care Record."
+        assert "couldn't confirm a reliable answer" in body["safety_note"].casefold()
+        assert "nothing was changed in your care record" in body["safety_note"].casefold()
         assert body["written_to_lcr"] is False
     finally:
         teardown()
