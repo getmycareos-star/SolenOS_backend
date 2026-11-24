@@ -8477,6 +8477,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ).first()
     if authenticated_session is None:
         raise HTTPException(status_code=401, detail="Caregiver session could not be confirmed")
+    # Determine first-time versus returning status from persisted caregiver turns
+    # only. This query is deliberately person- and caregiver-scoped and reads no
+    # message content, so a greeting can remain free of sensitive care history.
+    prior_caregiver_turn = (
+        db.query(ConversationMessage.id)
+        .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+        .filter(
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+            ConversationMessage.role == "user",
+        )
+        .first()
+    )
+    has_prior_conversation = prior_caregiver_turn is not None
     caregiver_context = build_companion_caregiver_context(
         caregiver,
         access_grant,
@@ -8492,6 +8506,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         assigned_open_loops=assigned_open_loops,
         responsibilities_truncated=responsibilities_truncated,
         open_loops_truncated=open_loops_truncated,
+        has_prior_conversation=has_prior_conversation,
     )
 
     client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
@@ -9615,6 +9630,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Permitted capabilities describe the session's existing grant; they do not authorize you to execute actions. "
             "Never infer a name, relationship, role, permission, location, or timezone. "
             "Do not expose care-recipient details in a greeting-only response or personal identity in a product-identity response. "
+            "conversation_stage is derived from prior persisted user turns for this exact caregiver and care record; "
+            "it is not inferred from the current message or a name supplied in chat. "
             "Use local date/time only when timezone_status is configured; if it is not configured or is invalid, "
             "do not guess the time of day or resolve relative dates using an assumed local timezone. "
             "When timezone_status is configured, use only the supplied greeting_period for a time-based greeting; do not state the exact clock time or timezone unless asked. "
@@ -9972,7 +9989,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 ),
             })
         has_returning_care_history = bool(
-            source_event_ids or source_appointment_ids or source_assertion_ids
+            caregiver_context.get("conversation_stage") == "returning"
+            or source_event_ids or source_appointment_ids or source_assertion_ids
             or source_document_analysis_ids or source_evidence_ids or source_lcr_record_refs
             or shared_lcr_lines
         )
@@ -9988,6 +10006,17 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Preserve supported facts, dates, uncertainty, conflicts, and missing-source limitations. Do not pad or speculate."
         )
         if greeting_only:
+            conversation_stage = caregiver_context.get("conversation_stage")
+            if conversation_stage == "first_time":
+                model_messages[0]["content"] += (
+                    "\nThis is the caregiver's first persisted Companion conversation. Briefly introduce yourself as SolenOS Companion, "
+                    "then respond naturally to the greeting. Do not introduce a care assessment or imply that care history exists. "
+                )
+            elif conversation_stage == "returning":
+                model_messages[0]["content"] += (
+                    "\nThis caregiver has used Companion before. Continue naturally without a full reintroduction. "
+                    "Do not claim to remember any prior conversation content; this greeting contains no prior dialogue. "
+                )
             model_messages[0]["content"] += (
                 "\nThe current message is a greeting only. Give a warm, concise response in the caregiver's selected language. "
                 "Use the authenticated display name exactly as supplied when available. "
