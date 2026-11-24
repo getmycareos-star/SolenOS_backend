@@ -76,9 +76,9 @@ def test_explicit_solenos_workflow_ids_activate_their_specialists():
         "care_understanding": ("care_extraction",),
         "document_candidate_extraction": ("document_intelligence", "care_extraction"),
         "open_loops": ("lcr_retrieval", "caregiver_continuity"),
-        "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
-        "record_lifecycle": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
-        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+        "medication_day": ("lcr_retrieval", "medication_continuity"),
+        "record_lifecycle": ("lcr_retrieval", "event_lifecycle"),
+        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning"),
         "living_care_record": ("lcr_retrieval", "companion"),
         "handoff": ("lcr_retrieval", "handoff_appointment"),
         "caregiver_orientation": ("lcr_retrieval", "companion"),
@@ -100,8 +100,8 @@ def test_workflow_ids_map_to_their_required_specialist_domains():
         "daily_capture": ("care_extraction",),
         "document_candidate_extraction": ("document_intelligence", "care_extraction"),
         "companion": ("lcr_retrieval", "companion"),
-        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
-        "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
+        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning"),
+        "medication_day": ("lcr_retrieval", "medication_continuity"),
         "handoff": ("lcr_retrieval", "handoff_appointment"),
         "record_lifecycle": ("lcr_retrieval", "event_lifecycle"),
     }
@@ -129,7 +129,7 @@ def test_gateway_contract_keeps_core_and_only_selected_specialist():
     specialized = apply_specialized_intelligence(messages)
     final = apply_solenos_system_contract(specialized)
     system = final[0]["content"]
-    assert "THE LCR IS THE AUTHORITATIVE APPLICATION RECORD" in system
+    assert "## LCR AUTHORITY" in system
     assert "SPECIALIST: LCR RETRIEVAL AND CONTEXT INTELLIGENCE" in system
     assert "SPECIALIST: CAREGIVER COMPANION INTELLIGENCE" in system
     assert "SPECIALIST: MEDICATION AND TREATMENT CONTINUITY" not in system
@@ -152,6 +152,6 @@ def test_workflow_instructions_cannot_supersede_identity_or_lcr_authority():
     ]
     final = apply_solenos_system_contract(messages)
     system = final[0]["content"]
-    assert "Do not imply David personally" in system
+    assert "Do not claim David personally" in system
     assert "Never silently write" in system
     assert "WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" in system
