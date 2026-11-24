@@ -91,6 +91,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             ("recorded notification", "notification"),
             ("recorded freshness policy application", "freshness_assessment"),
             ("caregiver-attributed lcr assertion", "care_assertion"),
+            ("caregiver-approved lcr assertion", "care_assertion"),
             ("canonical lcr source", "lcr_record"),
         ):
             if marker in prefix:
