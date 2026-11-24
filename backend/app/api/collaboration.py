@@ -4346,6 +4346,22 @@ def _contains_unsupported_record_reference(reply: str, source_text: str) -> bool
     return any(candidate.casefold() not in normalized_source for candidate in candidates)
 
 
+def _contains_unsupported_numeric_confidence(text: str) -> bool:
+    """Reject invented numeric certainty, confidence scores, and quality ratings.
+
+    Clinical measurements and dates are not confidence scores; patterns require
+    explicit confidence/certainty language or an explicit confidence field.
+    """
+    value = text or ""
+    patterns = (
+        r"\b\d{1,3}(?:\.\d+)?\s*%\s*(?:confident|confidence|certain|certainty|sure)\b",
+        r"\b(?:confidence|certainty)\s*(?:score|rating|level)?\s*[:=]\s*(?:0?\.\d+|\d{1,3}\s*%)\b",
+        r"\b(?:confidence|certainty)\s*(?:score|rating|level)?\s+(?:of|is|at)\s+(?:0?\.\d+|\d{1,3}\s*%)\b",
+        r"\b\d+(?:\.\d+)?\s*(?:/|out of)\s*10\s*(?:confidence|certainty|rating)\b",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def _companion_reply_needs_revision(text: str, max_words: int | None = 55) -> bool:
     words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (text or "").casefold(), flags=re.UNICODE)
     if not words or (max_words is not None and count_response_words(text) > max_words):
@@ -6154,6 +6170,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             reasons.append("unrequested_token")
         if _contains_unsupported_reassurance(candidate):
             reasons.append("unsupported_reassurance")
+        if _contains_unsupported_numeric_confidence(candidate):
+            reasons.append("unsupported_numeric_confidence")
         if _contains_fabricated_empathy(candidate):
             reasons.append("fabricated_empathy")
         if _contains_unsupported_care_claim(candidate, source_context):
@@ -6178,6 +6196,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             + response_length_instruction + " "
             "Never expose internal record identifiers, UUIDs, source IDs or opaque keys. "
             "Preserve only claims directly supported by the exact caregiver text or authorized context. For material care facts, preserve the exact wording and attribution; use an explicitly attributed exact source quote instead of an unsupported paraphrase. "
+            "Do not assign numeric confidence scores, percentages, ratings, or certainty estimates; describe uncertainty in plain language. "
             "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
             "unreported clinical outcome into a fact. "
             + appointment_status_guidance
