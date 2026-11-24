@@ -194,12 +194,21 @@ def test_delta_generation_retries_once_after_incomplete_json(monkeypatch):
         return '{"event_summary":"unfinished"' if len(calls) == 1 else json.dumps(payload)
     monkeypatch.setattr(delta_engine, "qwen_chat", fake_qwen)
     result = delta_engine._request_delta_json(
-        [{"role": "system", "content": "Return the Delta object."}], timeout=180
+        [{"role": "system", "content": "Return the Delta object."}],
+        timeout=180,
+        audit_context={
+            "person_id": "person-1",
+            "caregiver_id": "caregiver-1",
+            "source_event_ids": ["event-1"],
+            "source_evidence_ids": ["evidence-1"],
+        },
     )
     assert result == payload
     assert len(calls) == 2
     assert [call["timeout"] for call in calls] == [120, 30]
     assert [call["options"]["num_predict"] for call in calls] == [384, 512]
+    assert calls[0]["audit_context"]["person_id"] == "person-1"
+    assert calls[0]["audit_context"]["source_event_ids"] == ["event-1"]
     assert "previous response was incomplete" in calls[1]["messages"][-1]["content"]
 
 def test_delta_json_parser_rejects_truncated_output_without_persisting():
