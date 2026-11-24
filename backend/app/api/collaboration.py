@@ -6390,7 +6390,9 @@ def _should_use_medication_dose_recall_fallback(
 _CARE_HISTORY_INTENT_PATTERN = re.compile(
     r"\bwhat\s+(?:have|has|did)\s+(?:i|we|you)\s+(?:told\s+(?:you|me|us)|mention(?:ed)?|say|said)\s+about\b|"
     r"\bwhat\s+(?:has|have|did)\s+(?:(?:the\s+)?caregiver|i|we|you)\s+"
-    r"(?:record(?:ed)?|log(?:ged)?|sav(?:e|ed)|not(?:e|ed)|enter(?:ed)?)\b|\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
+    r"(?:record(?:ed)?|log(?:ged)?|sav(?:e|ed)|not(?:e|ed)|enter(?:ed)?)\b|"
+    r"\bwhat\s+(?:has|have|was|were)\s+been\s+(?:record(?:ed)?|log(?:ged)?|sav(?:e|ed)|not(?:e|ed)|enter(?:ed)?)\s+about\b|"
+    r"\bwhat\s+does\s+(?:the\s+)?(?:care\s+)?record\s+say\b|"
     r"\bwhat\s+(?:new\s+)?dose\s+(?:did|was)\s+(?:the\s+)?(?:doctor|clinician|prescriber)\s+"
     r"(?:prescribe|recommend|change|set)\b|"
     r"\bqu[eé]\s+(?:hemos|han|he|hab[eé]is)\s+(?:registrado|anotado|guardado|apuntado)\b|"
