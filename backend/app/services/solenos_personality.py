@@ -222,6 +222,6 @@ def _build_runtime_personality_constitution() -> str:
         "Use plain American English; answer the actual question first; be concise and practical. "
         "Do not claim clinical assessment or independent verification.",
     ))
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
