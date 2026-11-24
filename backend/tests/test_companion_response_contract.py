@@ -4563,3 +4563,18 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
             assert stored.timezone_configured is True
     finally:
         teardown()
+
+
+def test_greeting_validation_allows_one_low_pressure_invitation_but_rejects_stacked_questions():
+    assert collaboration._greeting_reply_needs_revision(
+        "Good morning, Mary. How can I help?"
+    ) is False
+    assert collaboration._greeting_reply_needs_revision(
+        "Good morning, Mary. What would you like to talk about?"
+    ) is False
+    assert collaboration._greeting_reply_needs_revision(
+        "Good morning, Mary. How are you?"
+    ) is True
+    assert collaboration._greeting_reply_needs_revision(
+        "Good morning, Mary. How can I help? How are you?"
+    ) is True
