@@ -4245,3 +4245,39 @@ def test_direct_care_history_event_read_failure_is_not_reported_as_empty_history
     assert result["evidence_lookup_complete"] is False
     assert result["retrieval_complete"] is False
     assert "Care-event history could not be retrieved" in result["interpretation_limit"]
+
+
+def test_conflict_detector_reads_nested_events_from_shared_lcr_projection():
+    occurred_at = datetime(2026, 11, 20, 9, 0, tzinfo=timezone.utc).isoformat()
+    shared_event_lines = [
+        "Shared LCR context (source-attributed; bounded subset): " + json.dumps({
+            "source_type": "events",
+            "source_id": "event-no-fall",
+            "record": {
+                "id": "event-no-fall",
+                "status": "recorded",
+                "title": "Overnight fall report A",
+                "description": "One care report states that no fall was observed overnight.",
+                "occurred_at": occurred_at,
+            },
+        }),
+        "Shared LCR context (source-attributed; bounded subset): " + json.dumps({
+            "source_type": "events",
+            "source_id": "event-fall",
+            "record": {
+                "id": "event-fall",
+                "status": "recorded",
+                "title": "Overnight fall report B",
+                "description": "Another care report states that the person fell overnight.",
+                "occurred_at": occurred_at,
+            },
+        }),
+    ]
+
+    result = collaboration._contradictory_event_evidence_response(
+        "Do the records agree about whether a fall happened overnight?",
+        shared_event_lines,
+    )
+
+    assert result is not None
+    assert "conflict" in result.casefold()
