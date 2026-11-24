@@ -4390,6 +4390,16 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
             r"daniel.{0,100}reported.{0,60}cough|cough.{0,60}reported.{0,100}daniel",
             normalized,
         ))
+        checks["maya_observation_date_attributed"] = bool(re.search(
+            r"maya.{0,120}(?:2026-10-27|october\\s+27,?\\s+2026|27\\s+october\\s+2026)"
+            r"|(?:2026-10-27|october\\s+27,?\\s+2026|27\\s+october\\s+2026).{0,120}maya",
+            normalized,
+        ))
+        checks["daniel_report_date_attributed"] = bool(re.search(
+            r"daniel.{0,120}(?:2026-10-28|october\\s+28,?\\s+2026|28\\s+october\\s+2026)"
+            r"|(?:2026-10-28|october\\s+28,?\\s+2026|28\\s+october\\s+2026).{0,120}daniel",
+            normalized,
+        ))
     elif criterion == "event_chronology":
         event_date = r"(?:2026-10-20|october\s+20,?\s+2026|20\s+october\s+2026)"
         recorded_date = r"(?:2026-10-23|october\s+23,?\s+2026|23\s+october\s+2026)"
