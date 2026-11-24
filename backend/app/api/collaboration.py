@@ -5174,6 +5174,12 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
              {"role": "user", "content": "Original source text:\\n" + source}],
             response_format="json",
             options={"temperature": 0.2, "top_p": 0.9, "num_predict": 1200},
+            audit_context={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "request_id": getattr(request.state, "request_id", None),
+                "source_evidence_ids": [payload.evidence_id],
+            },
         )
         try:
             parsed = json.loads(raw)
@@ -5238,7 +5244,14 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     )
     raw = qwen_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": "Original source text:\\n" + source}],
-        response_format="json", options={"temperature": 0, "num_predict": 1600},
+        response_format="json",
+        options={"temperature": 0, "num_predict": 1600},
+        audit_context={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "request_id": getattr(request.state, "request_id", None),
+            "source_evidence_ids": [payload.evidence_id],
+        },
     )
     try:
         parsed = json.loads(raw)
