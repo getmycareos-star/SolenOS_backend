@@ -7073,7 +7073,7 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 reply.rfind(".", 0, match.start()),
                 reply.rfind("!", 0, match.start()),
                 reply.rfind("?", 0, match.start()),
-                reply.rfind("\\n", 0, match.start()),
+                reply.rfind("\n", 0, match.start()),
             ) + 1
             prefix = reply[sentence_start:match.start()].casefold().strip()
             explicit_limit = re.search(
