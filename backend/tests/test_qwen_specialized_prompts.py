@@ -152,10 +152,15 @@ def test_largest_supported_runtime_prompt_leaves_room_for_care_evidence():
 
     largest = (0, None)
     for workflow in WORKFLOW_SPECIALISTS:
-        messages = [{
-            "role": "system",
-            "content": f"SOLENOS_WORKFLOW_ID: {workflow}.",
-        }]
+        messages = [
+            {
+                "role": "system",
+                "content": f"SOLENOS_WORKFLOW_ID: {workflow}.",
+            },
+            # Reserve the maximum Companion evidence-context allowance so a
+            # passing test proves instructions do not crowd out care evidence.
+            {"role": "user", "content": "x" * 3000},
+        ]
         final = apply_solenos_system_contract(apply_specialized_intelligence(messages))
         estimate = _estimate_prompt_tokens(final)
         if estimate > largest[0]:
