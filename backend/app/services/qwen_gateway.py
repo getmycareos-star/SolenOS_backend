@@ -502,6 +502,7 @@ def extract_review_candidates(
                 "If none are supported, return an empty observations array. Ask at most three short questions. "
                 "Ignore greetings and small talk."
             ),
+        },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
     ]
     # Ollama's native JSON mode avoids fragile prompt-only formatting while
