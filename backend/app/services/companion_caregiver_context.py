@@ -203,3 +203,62 @@ def build_companion_caregiver_context(
         "assigned_open_loops_status": "available" if assigned_open_loops else "no_rows_returned",
         "assigned_open_loops_truncated": bool(open_loops_truncated),
     }
+
+
+def build_companion_prompt_identity_context(
+    caregiver_context: dict,
+    care_recipient_name: str | None,
+    *,
+    greeting_only: bool = False,
+    identity_question: bool = False,
+) -> dict:
+    """Build the minimal, server-authenticated identity envelope sent to Companion.
+
+    Product-identity questions receive no caregiver or care-recipient identity.
+    Greetings may use the authenticated caregiver's preferred name, but never
+    disclose the care recipient's name, relationship-to-recipient, or care roles.
+    Care questions receive the verified caregiver/recipient pairing and the
+    caregiver's actual access scope; the model is informed, not authorised.
+    """
+    if identity_question:
+        return {"identity_context_status": "omitted_for_product_identity_question"}
+
+    context = caregiver_context if isinstance(caregiver_context, dict) else {}
+    result = {
+        "identity_context_status": "authenticated",
+        "caregiver_display_name": context.get("display_name"),
+        "caregiver_relationship": context.get("relationship"),
+        "caregiver_role": context.get("caregiver_role"),
+        "access_scope": context.get("access_scope"),
+        "permitted_capabilities": list(context.get("permissions") or []),
+        "timezone_status": context.get("timezone_status", "not_configured"),
+        "timezone_name": context.get("timezone_name"),
+        "local_date": context.get("local_date"),
+        "local_time": context.get("local_time"),
+        "greeting_period": context.get("greeting_period", "neutral"),
+        "locale": context.get("locale"),
+        "date_format": context.get("date_format"),
+        "measurement_system": context.get("measurement_system"),
+        "communication_style": context.get("communication_style"),
+    }
+    if greeting_only:
+        result["identity_context_status"] = "authenticated_caregiver_only"
+        result["care_recipient_name"] = None
+        result["caregiver_relationship"] = None
+        result["caregiver_role"] = None
+        result["access_scope"] = None
+        result["permitted_capabilities"] = []
+        return result
+
+    result["care_recipient_name"] = _clean(care_recipient_name, limit=160)
+    result["caregiver_profile"] = context.get("caregiver_profile")
+    result["active_roles"] = context.get("active_roles", [])
+    result["active_roles_status"] = context.get("active_roles_status")
+    result["active_roles_truncated"] = bool(context.get("active_roles_truncated", False))
+    result["active_responsibilities"] = context.get("active_responsibilities", [])
+    result["active_responsibilities_status"] = context.get("active_responsibilities_status")
+    result["active_responsibilities_truncated"] = bool(context.get("active_responsibilities_truncated", False))
+    result["assigned_open_loops"] = context.get("assigned_open_loops", [])
+    result["assigned_open_loops_status"] = context.get("assigned_open_loops_status")
+    result["assigned_open_loops_truncated"] = bool(context.get("assigned_open_loops_truncated", False))
+    return result
