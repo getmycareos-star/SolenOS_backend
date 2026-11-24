@@ -665,14 +665,16 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
         caregiver = db.query(Caregiver).filter_by(
             id=session["caregiver"]["id"], person_id=session["person"]["id"],
         ).one()
-        assert caregiver.timezone == "Asia/Tokyo"
-        assert caregiver.timezone_configured is True
+        # Notification delivery timezone must not configure or overwrite the
+        # Companion's separately confirmed caregiver timezone.
+        assert caregiver.timezone == "UTC"
+        assert caregiver.timezone_configured is False
         profile = db.query(CaregiverProfile).filter_by(
             person_id=session["person"]["id"],
             session_caregiver_id=session["caregiver"]["id"],
         ).first()
         if profile is not None:
-            assert profile.timezone == "Asia/Tokyo"
+            assert profile.timezone == "UTC"
         # 02:00 in Tokyo is outside the configured 09:00-18:00 quiet window.
         assert deliver_due_reminders(db=db, now=now) == 1
         assert db.query(CareNotification).filter(
