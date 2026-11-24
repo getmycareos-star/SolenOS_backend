@@ -908,8 +908,9 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             assert aggregate["count"] is None
 
             # Exercise the authenticated Companion response against the same
-            # PostgreSQL rows. The model receives the accepted correction and
-            # the pending-correction boundary, not an unqualified old event.
+            # PostgreSQL rows. This question is intentionally handled by the
+            # deterministic source-quote path: corrected and pending records
+            # must be excluded before any model inference is considered.
             token = f"companion-lineage-token-{suffix}"
             db.add_all([
                 CaregiverAccessGrant(
@@ -954,17 +955,13 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
         assert corrected_event_id in body.get("source_event_ids", [])
         assert pending_event_id in body.get("source_event_ids", [])
         assert body["written_to_lcr"] is False
-        prompt = "\\n".join(
-            str(message.get("content") or "")
-            for message in captured_prompts[-1]
-        )
-        assert "historical_event" in prompt
-        assert "Caregiver did not observe Mum sleeping poorly." in prompt, prompt
-        assert "original wording: Mum slept poorly." in prompt
-        assert "correction reason: The original report overstated what was observed." in prompt
-        assert "linked to original event: True" in prompt
-        assert "event_correction_pending" in prompt
-        assert "Caregiver is unsure whether Mum slept through the night." in prompt
+        assert body["ai_generated"] is False
+        assert body["response_mode"] == "source_quoted_care_history"
+        assert captured_prompts == [], "A source-answerable history question should not call Qwen."
+        reply = body["reply"].casefold()
+        assert "slept well" in reply
+        assert "slept poorly" not in reply
+        assert "slept through the night" not in reply
     finally:
         app.dependency_overrides.pop(get_db, None)
         with SessionLocal() as db:
