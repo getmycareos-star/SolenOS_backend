@@ -222,3 +222,24 @@ def test_gateway_is_the_only_module_that_owns_ollama_runtime_configuration():
     assert 'os.getenv("OLLAMA_MODEL"' in source
     assert "get_ollama_config" in source
     assert 'base + "/api/chat"' in source
+
+def test_every_production_qwen_invocation_has_trusted_audit_context():
+    required_calls = {"qwen_chat", "extract_review_candidates", "extract_companion_care_candidates"}
+    offenders = []
+    for source_path in APP_ROOT.rglob("*.py"):
+        source = source_path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source, filename=str(source_path))
+        except SyntaxError as exc:
+            raise AssertionError(f"Unable to parse {source_path}: {exc}") from exc
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            if node.func.id not in required_calls:
+                continue
+            if not any(keyword.arg == "audit_context" for keyword in node.keywords):
+                offenders.append(
+                    f"{source_path.relative_to(BACKEND_ROOT)}:{node.lineno}:{node.func.id}"
+                )
+    assert offenders == []
+
