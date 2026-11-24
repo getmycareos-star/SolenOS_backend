@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
+from app.models.care_continuity import CareAssertion
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
@@ -160,6 +161,15 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                 ).one()
                 assert original.description == source_text
                 assert original.status == "recorded"
+                accepted_assertions = db.query(CareAssertion).filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.assertion_status == "accepted",
+                ).all()
+                assert accepted_assertions == [], (
+                    "Live Qwen Delta reconciliation must not create accepted LCR assertions 
+                    "without caregiver review.",
+                    [row.id for row in accepted_assertions],
+                )
 
             assert elapsed_ms <= 150_000, (
                 f"Real Delta Engine reconciliation took {elapsed_ms}ms; "
