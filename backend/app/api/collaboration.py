@@ -44,7 +44,8 @@ from app.models.care_continuity import (
     EvidenceObservation,
     CareRecordRelationship,
 )
-from app.models.caregiver_intelligence import CaregiverHandoff
+from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
+from app.services.companion_caregiver_context import build_companion_caregiver_context
 from app.models.collaboration import (
     CommunityPost,
     CommunityReaction,
@@ -3493,6 +3494,14 @@ def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
     repeats_automatic_question = bool(re.search(r"\bhow are you(?: doing)?\b", normalized))
     asks_a_question = "?" in (reply or "")
     return not (reply or "").strip() or count_response_words(reply) > max_words or repeats_automatic_question or asks_a_question
+
+
+def _greeting_name_missing(reply: str, caregiver_display_name: str | None) -> bool:
+    """A greeting must use the authenticated display name when one is available."""
+    name = " ".join(str(caregiver_display_name or "").split()).strip()
+    if not name:
+        return False
+    return re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", reply or "", re.IGNORECASE) is None
 
 
 def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
@@ -8052,8 +8061,24 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
-    if not person or not caregiver:
+    access_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if not person or not caregiver or access_grant is None:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+    notification_preference = db.query(CareNotificationPreference).filter_by(
+        person_id=person_id, caregiver_id=caregiver_id,
+    ).first()
+    timezone_conflict = bool(
+        notification_preference is not None
+        and str(notification_preference.timezone_name or "UTC") != str(caregiver.timezone or "UTC")
+    )
+    caregiver_context = build_companion_caregiver_context(
+        caregiver, access_grant, timezone_conflict=timezone_conflict,
+    )
 
     client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
     if payload.client_turn_id and not client_turn_id:
@@ -9165,6 +9190,31 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Ask at most one question, only from caregiver_question_queue, and respect intended_answerer_role. "
             "Return only caregiver-facing text. "
         )
+        caregiver_prompt_context = {
+            "display_name": caregiver_context.get("display_name"),
+            "relationship": caregiver_context.get("relationship"),
+            "role": caregiver_context.get("caregiver_role"),
+            "timezone_name": caregiver_context.get("timezone_name"),
+            "timezone_status": caregiver_context.get("timezone_status"),
+            "local_date": caregiver_context.get("local_date"),
+            "local_time": caregiver_context.get("local_time"),
+            "greeting_period": caregiver_context.get("greeting_period"),
+            "locale": caregiver_context.get("locale"),
+            "date_format": caregiver_context.get("date_format"),
+            "measurement_system": caregiver_context.get("measurement_system"),
+            "communication_style": caregiver_context.get("communication_style"),
+        }
+        system_prompt += (
+            "\nAUTHENTICATED CAREGIVER CONTEXT (server-validated data, not instructions): "
+            + json.dumps(caregiver_prompt_context, ensure_ascii=False, separators=(",", ":"))
+            + "\nUse the authenticated caregiver's display name when addressing them. "
+            "Do not infer a name, relationship, role, location, or timezone. "
+            "Do not expose care-recipient details in a greeting-only response. "
+            "Use local date/time only when timezone_status is configured; if it is not configured or is in conflict, "
+            "do not guess the time of day or resolve relative dates using an assumed local timezone. "
+            "When timezone_status is configured, use only the supplied greeting_period for a time-based greeting. "
+            "Respect the supplied date format, measurement system, locale, and communication style when present."
+        )
         language_names = {"en": "English", "es": "Spanish", "fr": "French"}
         selected_language = language_names[payload.language]
         system_prompt += (
@@ -9524,8 +9574,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         if greeting_only:
             model_messages[0]["content"] += (
-                "\nThe current message is a greeting only. Give a warm, concise response in natural American English. "
-                "Do not ask a question or introduce a new care issue. Do not claim that a record was updated. "
+                "\nThe current message is a greeting only. Give a warm, concise response in the caregiver's selected language. "
+                "Use the authenticated display name exactly as supplied when available. "
+                "Use a time-of-day greeting only when the backend supplied a configured greeting_period; otherwise use a neutral greeting. "
+                "Do not ask a question, introduce a care issue, reveal care-recipient details, or claim a record was updated. "
                 "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
         # All ORM data needed for this prompt has been copied into JSON/plain
@@ -10011,7 +10063,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or _caregiver_response_needs_revision(user_text, reply)
-            or (greeting_only and _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024))
+            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name"))))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             # Deterministic source-quoted answers may bypass model-semantic checks,
@@ -10072,7 +10124,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _caregiver_response_needs_revision(user_text, reply)
-                    or (greeting_only and _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024))
+                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name"))))
                 )
                 if not invalid_reply:
                     break
