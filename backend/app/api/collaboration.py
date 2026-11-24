@@ -7342,11 +7342,12 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bwhat can you do$",
         r"\bwhat can'?t you do$",
         r"\bwhat information can you see$",
-        r"\bcan you see (?:all )?(?:my|our|the) (?:care )?records$",
-        r"\bcan you read (?:my|the) documents$",
-        r"\bcan you see (?:my|our) (?:previous|past) conversations$",
-        r"\bcan you (?:see|access) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b",
-        r"\bcan you access (?:a )?(?:hospital|pharmacy|doctor|insurance|patient)(?: portal| records)?\b",
+        r"\b(?:can you|do you) (?:see|access|have access to) (?:all )?(?:my|our|the) (?:care |medical )?records$",
+        r"\b(?:can you|do you) (?:read|access|have access to) (?:my|the) documents$",
+        r"\b(?:can you|do you) (?:see|access|have access to) (?:my|our) (?:previous|past) conversations$",
+        r"\bdo you remember (?:my|our) (?:previous|past) conversations$",
+        r"\b(?:can you|do you) (?:see|access|have access to) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b",
+        r"\b(?:can you|do you) (?:access|have access to) (?:a |my )?(?:hospital|pharmacy|doctor|insurance|patient|medical)(?: portal| records)?\b",
         r"\bcan another caregiver see my information$",
         r"\bdo you put everything i say in the lcr$",
         r"\bcan you see information about another care recipient$",
@@ -7418,27 +7419,27 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
             "I can use only information SolenOS has authorized and supplied for this request. "
             "I cannot assume access to the whole LCR, every document, every conversation, or external accounts."
         )
-    if re.search(r"\bcan you see (?:all )?(?:my|our|the) (?:care )?records$", normalized):
+    if re.search(r"\b(?:can you|do you) (?:see|access|have access to) (?:all )?(?:my|our|the) (?:care |medical )?records$", normalized):
         return (
             "No. I can use only records returned within the authorized scope for this request. "
             "I do not have automatic access to every record, document, or conversation."
         )
-    if re.search(r"\bcan you read (?:my|the) documents$", normalized):
+    if re.search(r"\b(?:can you|do you) (?:read|access|have access to) (?:my|the) documents$", normalized):
         return (
             "Only documents or extracted content supplied by the current authorized workflow. "
             "I cannot access every upload by default."
         )
-    if re.search(r"\bcan you see (?:my|our) (?:previous|past) conversations$", normalized):
+    if re.search(r"\b(?:can you|do you) (?:see|access|have access to) (?:my|our) (?:previous|past) conversations$|\bdo you remember (?:my|our) (?:previous|past) conversations$", normalized):
         return (
             "Only conversation context explicitly supplied to this request. "
             "I do not have complete chat history by default."
         )
-    if re.search(r"\bcan you (?:see|access) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b", normalized):
+    if re.search(r"\b(?:can you|do you) (?:see|access|have access to) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b", normalized):
         return (
             "No, not by default. I can use information from those sources only when the current "
             "workflow explicitly provides it and you have authorized it."
         )
-    if re.search(r"\bcan you access (?:a )?(?:hospital|pharmacy|doctor|insurance|patient)(?: portal| records)?\b", normalized):
+    if re.search(r"\b(?:can you|do you) (?:access|have access to) (?:a |my )?(?:hospital|pharmacy|doctor|insurance|patient|medical)(?: portal| records)?\b", normalized):
         return (
             "I do not have access to those portals by default. I can only claim an integration "
             "when trusted configuration and the current workflow confirm it."
