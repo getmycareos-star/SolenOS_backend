@@ -74,7 +74,7 @@ def _revision_changed_fields(before_raw: str | None, after_raw: str | None) -> l
         if not raw:
             return {}
         try:
-            value = __import__("json").loads(raw)
+            value = json.loads(raw)
         except (TypeError, ValueError):
             return {}
         return value if isinstance(value, dict) else {}
@@ -83,6 +83,53 @@ def _revision_changed_fields(before_raw: str | None, after_raw: str | None) -> l
         key for key in set(before) | set(after)
         if before.get(key) != after.get(key)
     )
+
+
+_TRANSPARENCY_VALUE_KEYS = frozenset({
+    "field", "value", "asserted_value", "assertion_kind", "assertion_status",
+    "epistemic_state", "epistemic_status", "observed_at", "recorded_at",
+    "occurred_at", "event_time_text", "title", "description", "status",
+    "source_label", "source_quote", "source_span_start", "source_span_end",
+    "review_status", "decision", "reason", "rationale", "change_kind",
+    "event_type", "target_type", "target_id", "source_event_id",
+    "source_evidence_id", "evidence_ids", "open_questions",
+    "possible_safety_flags", "observations", "proposed_assertions",
+    "proposed_change", "operation", "candidate_index", "confidence",
+})
+
+
+def _bounded_projection(value: Any, *, depth: int = 0) -> Any:
+    if depth > 3:
+        return None
+    if isinstance(value, str):
+        return value[:600]
+    if isinstance(value, dict):
+        return {
+            str(key): _bounded_projection(item, depth=depth + 1)
+            for key, item in list(value.items())[:24]
+            if str(key) in _TRANSPARENCY_VALUE_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_bounded_projection(item, depth=depth + 1) for item in list(value)[:12]]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return str(value)[:300]
+
+
+def _extraction_candidate_summary(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return {"candidate_summary_available": False}
+    if not isinstance(value, dict):
+        return {"candidate_summary_available": False}
+    return {
+        "candidate_summary_available": True,
+        "observations": _bounded_projection(value.get("observations") or []),
+        "open_questions": _bounded_projection(value.get("open_questions") or []),
+        "possible_safety_flags": _bounded_projection(value.get("possible_safety_flags") or []),
+    }
 
 
 def _count_by(db: Session, model, column, person_id: str) -> dict[str, int]:
@@ -226,8 +273,20 @@ def build_transparency_evidence(
             .scalar() or 0
         )
         if uploads_available:
+            # Select upload metadata only. Loading EvidenceUpload as an ORM
+            # entity also loads its binary content column, which this read-only
+            # transparency response must never need.
             document_rows = (
-                db.query(Evidence, EvidenceUpload)
+                db.query(
+                    Evidence,
+                    EvidenceUpload.filename.label("upload_filename"),
+                    EvidenceUpload.mime_type.label("upload_mime_type"),
+                    EvidenceUpload.size_bytes.label("upload_size_bytes"),
+                    EvidenceUpload.sha256.label("upload_sha256"),
+                    EvidenceUpload.storage_backend.label("upload_storage_backend"),
+                    EvidenceUpload.storage_key.label("upload_storage_key"),
+                    EvidenceUpload.created_at.label("upload_created_at"),
+                )
                 .outerjoin(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
                 .filter(Evidence.person_id == person_id, document_filter)
                 .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
@@ -236,7 +295,7 @@ def build_transparency_evidence(
             )
         else:
             document_rows = [
-                (row, None) for row in (
+                (row, None, None, None, None, None, None, None) for row in (
                     db.query(Evidence)
                     .filter(
                         Evidence.person_id == person_id,
@@ -249,11 +308,25 @@ def build_transparency_evidence(
             ]
         has_more = len(document_rows) > MAX_RECENT_ITEMS
         missing_upload_metadata = (
-            sum(1 for _, upload in document_rows[:MAX_RECENT_ITEMS] if upload is None)
+            sum(1 for row in document_rows[:MAX_RECENT_ITEMS] if row[1] is None)
             if uploads_available else None
         )
         recent_documents = []
-        for evidence, upload in document_rows[:MAX_RECENT_ITEMS]:
+        uploader_ids = {
+            str(row[0].uploaded_by_caregiver_id)
+            for row in document_rows[:MAX_RECENT_ITEMS]
+            if row[0].uploaded_by_caregiver_id
+        }
+        uploader_names = {
+            str(row.id): row.name for row in db.query(Caregiver).filter(
+                Caregiver.person_id == person_id,
+                Caregiver.id.in_(uploader_ids),
+            ).all()
+        } if uploader_ids else {}
+        for (
+            evidence, filename, mime_type, size_bytes, sha256,
+            storage_backend, storage_key, upload_created_at,
+        ) in document_rows[:MAX_RECENT_ITEMS]:
             recent_documents.append({
                 "evidence_id": str(evidence.id),
                 "evidence_type": evidence.type,
@@ -261,11 +334,15 @@ def build_transparency_evidence(
                 "evidence_status": evidence.evidence_status,
                 "epistemic_status": evidence.epistemic_status,
                 "uploaded_at": _iso(evidence.uploaded_at),
-                "filename": upload.filename if upload else None,
-                "mime_type": upload.mime_type if upload else None,
-                "size_bytes": upload.size_bytes if upload else None,
-                "binary_storage_backend": upload.storage_backend if upload else None,
-                "upload_record_available": bool(upload),
+                "uploaded_by": uploader_names.get(str(evidence.uploaded_by_caregiver_id), "Another caregiver"),
+                "filename": filename,
+                "mime_type": mime_type,
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+                "binary_storage_backend": storage_backend,
+                "storage_reference_available": bool(storage_key),
+                "upload_record_created_at": _iso(upload_created_at),
+                "upload_record_available": bool(filename or sha256 or size_bytes is not None),
             })
         extraction_rows = (
             db.query(CaptureAnalysis.extraction_status, func.count(CaptureAnalysis.id))
@@ -306,6 +383,7 @@ def build_transparency_evidence(
                     "analysis_id": str(row.id),
                     "source_evidence_id": str(row.source_evidence_id),
                     "extraction_status": row.extraction_status,
+                    "candidate_summary": _extraction_candidate_summary(row.candidates),
                     "created_at": _iso(row.created_at),
                     "updated_at": _iso(row.updated_at),
                 } for row in recent_extractions[:MAX_RECENT_ITEMS]],
@@ -533,6 +611,7 @@ def build_transparency_evidence(
                     "proposal_id": str(row.id),
                     "proposal_type": row.proposal_type,
                     "status": row.status,
+                    "proposed_change": _bounded_projection(row.proposed_change_json),
                     "created_at": _iso(row.created_at),
                     "expires_at": _iso(row.expires_at),
                     "source_event_ids": [str(value) for value in (row.source_event_ids_json or [])],
@@ -544,7 +623,12 @@ def build_transparency_evidence(
                 "recent_assertions": [{
                     "assertion_id": str(row.id),
                     "field": row.field,
+                    "asserted_value": row.asserted_value[:600],
+                    "assertion_kind": row.assertion_kind,
                     "source_label": row.source_label,
+                    "source_text": (row.source_text or "")[:600] or None,
+                    "source_event_id": str(row.source_event_id) if row.source_event_id else None,
+                    "source_proposal_id": str(row.source_proposal_id) if row.source_proposal_id else None,
                     "assertion_status": row.assertion_status,
                     "epistemic_state": row.epistemic_state,
                     "recorded_at": _iso(row.recorded_at),
