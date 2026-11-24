@@ -4321,8 +4321,8 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
         )
         negated = re.compile(r"\b(?:do not|don't|never|avoid|not|cannot|can't|should not|shouldn't|must not|mustn't)\b")
         attributed = re.compile(
-            r"\b(?:reported|reports|said|states|stated|told|historical|discharge summary|"
-            r"medication list|document says|record says)\b"
+            r"\b(?:reported|reports|said|states|stated|was told|were told|instructed|"
+            r"discharge summary says|medication list says|document says|record says)\b[^.!?]{0,60}$"
         )
         for match in instruction.finditer(normalized):
             sentence_start = max(
