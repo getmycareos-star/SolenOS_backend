@@ -624,8 +624,8 @@ def test_daily_care_answer_reports_records_omitted_from_bounded_model_context(mo
     assert response.status_code == 200, response.text
     scope = response.json()["history_scope"]
     assert scope["records_retrieved"] >= 35
-    assert scope["records_sent_to_model"] == 30
-    assert scope["records_omitted_from_model"] >= 5
+    assert 0 < scope["records_sent_to_model"] < 30
+    assert scope["records_omitted_from_model"] == scope["records_retrieved"] - scope["records_sent_to_model"]
     assert scope["selection_truncated"] is True
     assert scope["prompt_context_truncated"] is True
 
@@ -741,3 +741,60 @@ def test_daily_care_gateway_fallback_does_not_swallow_unrelated_http_errors():
 
     for status_code in (400, 401, 403, 404, 409, 413, 429):
         assert _qwen_gateway_failure_payload(status_code, {}) is None
+
+def test_daily_care_reduces_output_reservation_only_after_noncritical_context_rejection(monkeypatch):
+    from fastapi import HTTPException
+
+    client = TestClient(app)
+    session = create_session(client, "Daily Care bounded output caregiver")
+    add_event(session, "Breakfast note", "Caregiver reported that breakfast intake was lower than usual.", "2026-11-20T08:00:00Z")
+    attempts = []
+
+    def fake_qwen(messages, **kwargs):
+        output_tokens = kwargs["options"]["num_predict"]
+        attempts.append(output_tokens)
+        if output_tokens > 128:
+            raise HTTPException(status_code=413, detail="input budget exceeded")
+        return json.dumps({"answer": "The saved report says breakfast intake was lower than usual.", "proposals": []})
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "person_id": session["person"]["id"],
+            "question": "What was recorded about breakfast?",
+            "prepare_lcr_proposals": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert attempts == [256, 128]
+    assert response.json()["written_to_lcr"] is False
+
+
+def test_daily_care_never_reduces_safety_response_reservation_after_context_rejection(monkeypatch):
+    from fastapi import HTTPException
+
+    client = TestClient(app)
+    session = create_session(client, "Daily Care safety output caregiver")
+    add_event(session, "Breathing concern", "Caregiver reported trouble breathing.", "2026-11-20T08:00:00Z")
+    attempts = []
+
+    def reject_prompt(messages, **kwargs):
+        attempts.append(kwargs["options"]["num_predict"])
+        raise HTTPException(status_code=413, detail="input budget exceeded")
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", reject_prompt)
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={
+            "person_id": session["person"]["id"],
+            "question": "Mum is having trouble breathing. What should I do?",
+            "prepare_lcr_proposals": False,
+        },
+    )
+
+    assert response.status_code == 413
+    assert attempts == [256]
