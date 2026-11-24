@@ -40,8 +40,9 @@ def test_companion_minimal_first_visit_prompt_fits_production_4096_token_window(
 
 def test_shared_contract_uses_real_line_separators_not_literal_backslash_sequences():
     content = apply_solenos_system_contract([])[0]["content"]
-    assert "\n\n" not in content
-    assert "\\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" not in content
+    assert "\n\n" in content
+    assert "\\n" not in content
+    assert "\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" not in content
 
 
 def test_contract_is_injected_without_mutating_caller_messages():
