@@ -10008,6 +10008,30 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
             else:
                 base, model = _ollama_url()
+                companion_audit_context = {
+                    "request_id": companion_request_id,
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "conversation_session_id": str(session.id),
+                    "source_event_ids": list(source_event_ids),
+                    "source_evidence_ids": list(source_evidence_ids),
+                    "source_document_analysis_ids": list(source_document_analysis_ids),
+                    "source_appointment_ids": list(source_appointment_ids),
+                    "source_assertion_ids": list(source_assertion_ids),
+                    "source_lcr_context_ids": list(source_lcr_context_ids),
+                    "source_freshness_assessment_ids": list(source_freshness_assessment_ids),
+                    "source_refs": [
+                        f"{item.get('record_type')}:{item.get('record_id')}"
+                        for item in source_lcr_record_refs
+                        if isinstance(item, dict) and item.get("record_type") and item.get("record_id")
+                    ][:100],
+                    "retrieval_coverage": {
+                        "status": model_retrieval_coverage.get("retrieval_completeness"),
+                        "retrieval_projection_complete": model_retrieval_coverage.get("retrieval_projection_complete"),
+                        "page_limit_reached": bool(more_available_source_names),
+                        "context_truncated": bool(context_truncated),
+                    },
+                }
                 reply = await asyncio.to_thread(
                     _run_companion_inference_with_metrics,
                     companion_request_id,
@@ -10015,25 +10039,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     model_messages,
                     {"temperature": 0.25, "num_predict": response_token_budget},
                     retrieval_duration_ms,
-                    {
-                        "request_id": companion_request_id,
-                        "person_id": person_id,
-                        "caregiver_id": caregiver_id,
-                        "conversation_session_id": str(session.id),
-                        "source_event_ids": source_event_ids,
-                        "source_evidence_ids": source_evidence_ids,
-                        "source_document_analysis_ids": source_document_analysis_ids,
-                        "source_appointment_ids": source_appointment_ids,
-                        "source_assertion_ids": source_assertion_ids,
-                        "source_lcr_context_ids": source_lcr_context_ids,
-                        "source_freshness_assessment_ids": source_freshness_assessment_ids,
-                        "retrieval_coverage": {
-                            "status": model_retrieval_coverage.get("status"),
-                            "retrieval_projection_complete": model_retrieval_coverage.get("retrieval_projection_complete"),
-                            "page_limit_reached": model_retrieval_coverage.get("page_limit_reached"),
-                            "context_truncated": bool(context_truncated),
-                        },
-                    },
+                    companion_audit_context,
                 )
                 logger.info(
                     "solenos_companion_stage %s",
@@ -10448,6 +10454,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         model,
                         retry_messages,
                         {"temperature": 0.1, "num_predict": response_token_budget},
+                        audit_context=companion_audit_context,
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -10497,6 +10504,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         model,
                         retry_messages,
                         {"temperature": 0.1, "num_predict": response_token_budget},
+                        audit_context=companion_audit_context,
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -10545,6 +10553,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         model,
                         retry_messages,
                         {"temperature": 0.1, "num_predict": response_token_budget},
+                        audit_context=companion_audit_context,
                     )
                 except Exception as exc:
                     raise HTTPException(
@@ -10701,6 +10710,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         model,
                         retry_messages,
                         {"temperature": 0.1, "num_predict": response_token_budget},
+                        audit_context=companion_audit_context,
                     )
                 except Exception as exc:
                     raise HTTPException(
