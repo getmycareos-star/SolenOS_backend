@@ -7059,11 +7059,11 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     # caregiver explicitly labels their emotion. Critical-safety requests use
     # the deterministic emergency fast path and must never be softened.
     if re.search(
-        r"\\b(?:everything (?:will|is going to) be okay|it will all be okay|"
+        r"\b(?:everything (?:will|is going to) be okay|it will all be okay|"
         r"there(?:'s| is) nothing to worry about|nothing to worry about|"
         r"it(?:'s| is) probably nothing|there is no reason to worry|"
         r"i(?:'m| am) sure (?:he|she|they|it)(?:'s| is) (?:fine|okay)|"
-        r"(?:he|she|they|it) will definitely be fine)\\b",
+        r"(?:he|she|they|it) will definitely be fine)\b",
         lowered,
     ):
         return True
