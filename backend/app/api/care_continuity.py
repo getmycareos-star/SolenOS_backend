@@ -4679,7 +4679,52 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
 
 @router.get("/assertions/{person_id}")
 def list_person_assertions(person_id: str, request: Request, limit: int = 100, db: Session = Depends(get_db)):
-    return _person_scoped_rows("assertions", person_id, request, db, limit)
+    scoped_person_id, _ = _scoped_identity(request, db)
+    if str(person_id) != str(scoped_person_id):
+        raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
+    rows = _person_scoped_rows("assertions", person_id, request, db, limit)
+    if not rows:
+        return rows
+    try:
+        connection = db.connection()
+        if not inspect(connection).has_table("care_assertion_revisions"):
+            for row in rows:
+                row["revision_history_status"] = "unavailable_schema"
+            return rows
+        revisions = _table(db, "care_assertion_revisions")
+        assertion_ids = [str(row["id"]) for row in rows if row.get("id")]
+        revision_rows = db.execute(
+            select(revisions).where(
+                revisions.c.person_id == person_id,
+                revisions.c.assertion_id.in_(assertion_ids),
+            ).order_by(
+                desc(revisions.c.changed_at),
+                desc(revisions.c.revision_number),
+            )
+        ).mappings().all() if assertion_ids else []
+        latest_by_assertion: dict[str, dict[str, Any]] = {}
+        for revision in revision_rows:
+            assertion_id = str(revision["assertion_id"])
+            if assertion_id in latest_by_assertion:
+                continue
+            latest_by_assertion[assertion_id] = {
+                "revision_number": revision.get("revision_number"),
+                "revision_reason": revision.get("revision_reason"),
+                "changed_by_caregiver_id": revision.get("changed_by_caregiver_id"),
+                "changed_at": revision.get("changed_at"),
+                "previous_payload": revision.get("previous_payload"),
+                "current_payload": revision.get("current_payload"),
+            }
+        for row in rows:
+            row["latest_revision"] = latest_by_assertion.get(str(row.get("id") or ""))
+            row["revision_history_status"] = "available"
+        return rows
+    except Exception:
+        logger.exception("Care assertion revision history could not be loaded")
+        for row in rows:
+            row["latest_revision"] = None
+            row["revision_history_status"] = "unavailable"
+        return rows
 
 
 @router.get("/revisions/{person_id}")
