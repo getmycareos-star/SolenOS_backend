@@ -160,7 +160,7 @@ def test_personality_contract_defines_steady_patient_grounded_reassurance():
     assert "Calm must never soften emergency guidance" in content
     assert "never through a promised outcome" in content
     assert content.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < content.index(
-        "SOLENOS COMPANION — PERSONALITY CONSTITUTION"
+        "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION"
     ) < content.index("# SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION")
 
 
