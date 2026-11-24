@@ -81,6 +81,53 @@ def test_enabled_workflow_contract_is_complete():
     assert set(WORKFLOW_REQUESTS) == set(ENABLED_WORKFLOWS)
 
 
+def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared_gateway():
+    from app.api.collaboration import (
+        _production_qwen_answer_checks,
+        _production_qwen_evaluation_cases,
+    )
+    from app.services.qwen_gateway import qwen_chat
+    from app.services.qwen_specialized_prompts import (
+        WORKFLOW_SPECIALISTS,
+        select_specialized_domains,
+    )
+
+    cases = _production_qwen_evaluation_cases()
+    assert len(cases) == 10
+
+    for case in cases:
+        messages = [
+            {"role": "system", "content": case["system"]},
+            {
+                "role": "user",
+                "content": case["context"] + "\n\nQuestion: " + case["question"],
+            },
+        ]
+        workflow_match = re.search(
+            r"SOLENOS_WORKFLOW_ID:\\s*([a-z0-9_]+)",
+            case["system"],
+            flags=re.IGNORECASE,
+        )
+        assert workflow_match, case["criterion"]
+        workflow_id = workflow_match.group(1).casefold()
+        assert workflow_id in WORKFLOW_SPECIALISTS, (case["criterion"], workflow_id)
+        assert select_specialized_domains(messages) == WORKFLOW_SPECIALISTS[workflow_id], case["criterion"]
+
+        answer = qwen_chat(
+            messages,
+            timeout=180.0,
+            options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
+        )
+        checks = _production_qwen_answer_checks(case, answer)
+        assert checks and all(checks.values()), {
+            "criterion": case["criterion"],
+            "workflow": workflow_id,
+            "selected_specialists": select_specialized_domains(messages),
+            "checks": checks,
+            "answer": answer[:1200],
+        }
+
+
 def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live_qwen_context):
     client = live_qwen_context["client"]
     session = live_qwen_context["session"]
