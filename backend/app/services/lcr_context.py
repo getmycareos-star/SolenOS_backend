@@ -1665,7 +1665,7 @@ def build_lcr_context(
                     linked_ids = {
                         str(correction.get("id")) for correction in linked_corrections
                     }
-                    active_correction_statuses = {"pending", "processing", "queued", "retrying"}
+                    active_correction_statuses = {"pending", "processing", "queued", "retrying", "retry_scheduled"}
                     pending_corrections = [
                         correction for correction in all_corrections
                         if str(correction.get("processing_status") or "legacy_unverified").casefold()
