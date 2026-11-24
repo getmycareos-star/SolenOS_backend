@@ -166,7 +166,7 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                     CareAssertion.assertion_status == "accepted",
                 ).all()
                 assert accepted_assertions == [], (
-                    "Live Qwen Delta reconciliation must not create accepted LCR assertions 
+                    "Live Qwen Delta reconciliation must not create accepted LCR assertions "
                     "without caregiver review.",
                     [row.id for row in accepted_assertions],
                 )
