@@ -1143,7 +1143,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 EvidenceFreshnessAssessment(
                     id=f"asof-freshness-foreign-{suffix}",
                     person_id=other_person_id,
-                    evidence_id=evidence.id,
+                    evidence_id=foreign_evidence.id,
                     policy_id=freshness_policy.id,
                     policy_version="freshness-v1",
                     freshness_status="current",
