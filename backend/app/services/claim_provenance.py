@@ -327,8 +327,10 @@ def build_distinct_event_aggregate(
 
 
 _SOURCE_ATTRIBUTION_RE = re.compile(
-    r"\b(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
-    r"[A-Z][A-Za-z'’-]{1,30})\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated)\b",
+    r"\b(?:according to|reported by|observed by|documented by|"
+    r"(?:caregiver|family|patient|professional|clinician)[- ]report|"
+    r"(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
+    r"[A-Z][A-Za-z'’-]{1,30})\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated))\b",
     re.IGNORECASE,
 )
 _CLAIM_ATTRIBUTION_RE = re.compile(
