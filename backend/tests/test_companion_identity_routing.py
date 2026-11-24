@@ -35,6 +35,9 @@ def test_explicit_product_identity_questions_are_classified_without_care_history
         "What did the doctor say at the last appointment?",
         "Can you help me prepare questions for the neurologist?",
         "What should I do about this new behavior?",
+        "What can you do for my mother?",
+        "What are you seeing in Mum's notes?",
+        "Who are you recommending I call?",
     ],
 )
 def test_care_questions_are_not_misclassified_as_product_identity(question):
