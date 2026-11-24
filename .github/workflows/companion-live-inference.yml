@@ -13,6 +13,7 @@ on:
       - "backend/app/services/solenos_personality.py"
       - "backend/tests/test_qwen_system_prompt.py"
       - "backend/tests/test_qwen_specialized_prompts.py"
+      - "backend/tests/test_qwen_gateway_failures.py"
       - "backend/tests/test_qwen_execution_path_audit.py"
       - "backend/tests/test_qwen_calm_personality.py"
       - "backend/app/services/delta_engine.py"
