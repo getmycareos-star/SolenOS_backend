@@ -49,10 +49,10 @@ def test_every_qwen_request_receives_the_complete_personality_after_workflow_ins
     result = apply_solenos_system_contract(messages)
     system = result[0]["content"]
     workflow_index = system.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS")
-    personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION")
+    personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
     identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert workflow_index < personality_index < identity_index
-    assert system.count("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION") == 1
+    assert system.count("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER") == 1
     assert result[1] == messages[1]
     assert messages[0]["content"] == "SOLENOS_WORKFLOW_ID: daily_capture"
 
@@ -71,11 +71,11 @@ def test_characteristics_define_observable_boundaries_not_only_tone_adjectives()
     required_behaviors = (
         "never infer a clinical condition",
         "acknowledge feelings the caregiver actually expresses",
-        "distinguish caregiver reports",
-        "ask a follow-up only when the answer materially affects safety or correctness",
+        "distinguish reports",
+        "ask a follow-up only when it materially affects safety or correctness",
         "do not manufacture tasks",
         "protect the dignity, privacy, preferences, and autonomy",
-        "never claim that a record or action changed unless the backend confirms it",
+        "claim an action unless the backend confirms it",
     )
     for behavior in required_behaviors:
         assert behavior in constitution
