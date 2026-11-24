@@ -947,6 +947,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
         EvidenceCompletenessPolicy,
     )
     import app.api.collaboration as collaboration
+    from app.services.claim_provenance import build_claim_provenance, unmatched_material_claims
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
@@ -1110,6 +1111,18 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 created_by_caregiver_id=other_caregiver_id,
                 recorded_at=before,
             )
+            owner_event = CareEvent(
+                id=f"asof-owner-event-{suffix}",
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=before,
+                title="Mobility report",
+                description="Caregiver reported that Mum felt unsteady near the kitchen.",
+                evidence_ids=[evidence.id],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            )
             foreign_event = CareEvent(
                 id=f"asof-foreign-event-{suffix}",
                 person_id=other_person_id,
@@ -1125,7 +1138,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             db.add_all([
                 evidence, foreign_evidence, freshness_policy, foreign_freshness_policy,
                 completeness_policy, foreign_completeness_policy, claim, claim_v2,
-                foreign_claim, foreign_event,
+                foreign_claim, owner_event, foreign_event,
             ])
             db.flush()
             db.add_all([
@@ -1428,6 +1441,25 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 ],
             )
             assert enriched == []
+            owner_sources = collaboration._enrich_qwen_claim_source_records(
+                db,
+                person_id,
+                [{
+                    "record_type": "care_event",
+                    "record_id": owner_event.id,
+                    "source_text": "Caregiver reported that Mum felt unsteady near the kitchen.",
+                }],
+            )
+            supported = build_claim_provenance(
+                "According to the caregiver: “Mum felt unsteady near the kitchen.”",
+                owner_sources,
+            )
+            assert unmatched_material_claims(supported) == []
+            unsupported = build_claim_provenance(
+                "Mum's mobility has worsened.",
+                owner_sources,
+            )
+            assert unmatched_material_claims(unsupported)
     finally:
         app.dependency_overrides.pop(get_db, None)
         main_module.SessionLocal = original_session_local
