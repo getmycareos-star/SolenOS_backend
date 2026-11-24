@@ -53,6 +53,18 @@ The live Delta acceptance workflow now invokes that opt-in service path directly
 - Repeated explicit workflow markers are rejected as ambiguous, even when the repeated ID is identical. Unknown explicit IDs fail closed.
 - `_estimate_prompt_tokens` is the gateway's preflight estimator. It is a conservative UTF-8 byte heuristic (approximately 3.5 bytes/token plus message framing), **not a model-specific tokenizer**. Budget tests exercise this exact estimator; do not report its output as an exact Qwen token count.
 
+## Durable invocation audit
+
+The shared gateway now uses the existing PostgreSQL-backed `ai_inference_metrics` governance table for a two-stage invocation receipt:
+
+- Before sending a request to Ollama, the gateway commits an `outcome=started` record. If this receipt cannot be persisted, the model request is not sent.
+- After the upstream response or transport failure, the gateway finalizes that same record with success/failure, latency, available token counts, timeout/error classification, and Ollama completion metadata.
+- The record includes the workflow identifier, operating-contract version, system-prompt SHA-256, and request-context SHA-256. It does not persist prompt text, source text, or model response content.
+- If the successful model response cannot be durably finalized, the gateway withholds the answer and returns `inference_audit_unavailable`. A process termination after the start receipt leaves a durable `started` record for operational reconciliation.
+- Context-budget and configuration rejections are recorded as failed preflight outcomes; they are not represented as completed model invocations.
+
+The audit currently does not attach person/caregiver identifiers or individual source-record IDs at the gateway boundary. Those relationships remain in the workflow's existing conversation, output, job, and provenance records. A cross-table correlation contract is still required before claiming one-click reconstruction of every inference's full source lineage.
+
 ## Verification boundary
 
 The AST contract test inventories direct `qwen_chat` imports/callback references, rejects unapproved aliases and native transport bypasses, and checks gateway wrapper delegation. It does not prove live Ollama reachability, real-model behaviour, worker scheduling under production load, or the absence of inference hidden behind future non-Python integrations. Those require live inference and runtime evidence.
