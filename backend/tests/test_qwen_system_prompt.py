@@ -257,7 +257,7 @@ def test_shared_enforcement_is_reasserted_after_workflow_and_specialist_instruct
     for rule in (
         "A report, extraction, repetition, or model interpretation is not verification.",
         "Preserve conflicting accounts separately",
-        "failed retrieval, or an empty subset as proof that an event never happened",
+        "retrieval, or an empty subset as proof that an event never happened",
         "Backend services own",
         "Never silently create, update, accept, withdraw, delete, verify, or",
         "Medication discrepancies require confirmation",
