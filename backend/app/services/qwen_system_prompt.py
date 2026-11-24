@@ -18,10 +18,10 @@ from app.services.solenos_information_stewardship import (
 # aggregate release update and regression coverage.
 SOLENOS_OPERATING_CONTRACT_VERSION = "1.1"
 SOLENOS_OPERATING_CONTRACT_MANIFEST = (
-    f"SOLENOS OPERATING CONTRACT VERSION: {SOLENOS_OPERATING_CONTRACT_VERSION}\\n"
-    f"Identity constitution: {SOLENOS_IDENTITY_CONSTITUTION_VERSION}\\n"
-    f"Personality constitution: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}\\n"
-    f"Information stewardship constitution: {SOLENOS_INFORMATION_STEWARDSHIP_VERSION}\\n"
+    f"SOLENOS OPERATING CONTRACT VERSION: {SOLENOS_OPERATING_CONTRACT_VERSION}\n"
+    f"Identity constitution: {SOLENOS_IDENTITY_CONSTITUTION_VERSION}\n"
+    f"Personality constitution: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}\n"
+    f"Information stewardship constitution: {SOLENOS_INFORMATION_STEWARDSHIP_VERSION}\n"
     "These constitutions are one coordinated contract. Apply them together; "
     "the model name never replaces the SolenOS Companion identity."
 )
