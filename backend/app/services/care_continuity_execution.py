@@ -92,6 +92,7 @@ def execute_care_continuity_reconciliation(
         evidence = db.query(Evidence).filter(
             Evidence.id == evidence_id,
             Evidence.person_id == person_id,
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).first()
         if evidence is None:
             raise CareContinuityExecutionError(
