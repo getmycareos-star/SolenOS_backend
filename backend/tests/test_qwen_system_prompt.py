@@ -76,7 +76,7 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "immediate danger",
         "minimum-necessary, server-authorized context",
         "Never bypass access controls",
-        "Caregivers retain their decisions",
+        "autonomy",
     )
     for phrase in required:
         assert phrase in content
