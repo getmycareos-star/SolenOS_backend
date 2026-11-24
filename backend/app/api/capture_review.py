@@ -174,6 +174,7 @@ def review_capture_candidate(
             EvidenceModel.id == analysis.source_evidence_id,
             EvidenceModel.person_id == person_id,
             EvidenceModel.reported_by_caregiver_id == analysis.caregiver_id,
+            EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
         ).first()
         if source_evidence is None:
             raise HTTPException(status_code=409, detail="The Daily Care source evidence could not be verified")
