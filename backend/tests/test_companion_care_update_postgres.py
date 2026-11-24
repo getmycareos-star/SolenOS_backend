@@ -420,7 +420,7 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
 
     captured = []
 
-    def fake_chat(messages, *, timeout=None, options=None):
+    def fake_chat(messages, *, timeout=None, options=None, audit_context=None):
         # Exercise the same prompt transformations and context preflight as the
         # production gateway. The bounded assistant retries with smaller,
         # source-balanced context and a smaller output reservation after HTTP 413.
