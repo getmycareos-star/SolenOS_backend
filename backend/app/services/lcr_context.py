@@ -1144,6 +1144,7 @@ def build_lcr_context(
     include_all_history: bool = False,
     source_offsets: dict[str, int] | None = None,
     only_sources: set[str] | None = None,
+    event_ids: set[str] | None = None,
 ) -> dict[str, Any]:
     """Return a person-scoped LCR projection with explicit retrieval coverage.
 
@@ -1204,6 +1205,10 @@ def build_lcr_context(
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if source_name == "events" and event_ids is not None:
+            # A source-event interpretation must be anchored to the exact
+            # person-scoped event, not an arbitrary recent event window.
+            statement = statement.where(table.c.id.in_([str(value) for value in event_ids]))
         if source_name == "evidence" and "evidence_status" in table.c:
             # Caregiver deletion is a tombstone, not source material that may
             # continue to appear in Companion context after the document is gone.
