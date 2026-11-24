@@ -94,6 +94,12 @@ def test_qwen_gateway_persists_successful_invocation_metadata_without_care_conte
         assert len(metadata["request_context_sha256"]) == 64
         assert metadata["done"] is True
         assert metadata["done_reason"] == "stop"
+        assert metadata["response_format_kind"] == "none"
+        assert metadata["generation_options"]["num_ctx"] == 4096
+        assert metadata["generation_options"]["num_predict"] == 96
+        assert metadata["timeout_seconds"] == 2.0
+        assert metadata["attempt_count"] == 1
+        assert metadata["transient_http_retry_used"] is False
         serialized = json.dumps(metadata)
         assert "PRIVATE_SYNTHETIC_CARE_TEXT_7c21" not in serialized
         assert "The supplied record has no sleep entry" not in serialized
