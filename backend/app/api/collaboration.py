@@ -7137,7 +7137,9 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
     patterns = (
         r"\b(?:everything (?:will|is going to) be okay|it will all be okay)\b",
         r"\b(?:there(?:'s| is) nothing to worry about|nothing to worry about|"
-        r"there is no reason to worry)\b",
+        r"no need to worry|there is no reason to worry|don't worry)\b",
+        r"\b(?:(?:he|she|they|it|mum|mom|dad|the person) (?:is|are) "
+        r"(?:safe|out of danger)|there (?:is|are) no (?:immediate )?(?:danger|risk))\b",
         r"\b(?:it(?:'s| is) probably nothing|probably nothing serious|"
         r"it doesn't sound serious|it does not sound serious)\b",
         r"\b(?:i(?:'m| am) sure (?:he|she|they|it)(?:'s| is) (?:fine|okay)|"
