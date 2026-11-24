@@ -595,7 +595,7 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
     captured = {}
     monkeypatch.setattr(collaboration_api, "_ollama_url", lambda: ("http://unused", "test-model"))
 
-    def fake_chat(_base, _model, messages, _options, _audit_context=None):
+    def fake_chat(_base, _model, messages, _options, audit_context=None):
         captured["messages"] = messages
         return "The saved document says the follow-up date is not stated."
 
