@@ -16,6 +16,7 @@ on:
       - "backend/tests/test_qwen_gateway_failures.py"
       - "backend/tests/test_qwen_execution_path_audit.py"
       - "backend/tests/test_qwen_calm_personality.py"
+      - "backend/tests/test_qwen_runtime_personality_contract_completeness.py"
       - "backend/app/services/delta_engine.py"
       - "backend/app/services/situation.py"
       - "backend/app/schemas/situation.py"
