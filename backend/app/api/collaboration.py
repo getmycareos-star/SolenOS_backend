@@ -637,6 +637,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
     document_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "document_extraction"]
     appointment_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "appointment"]
     handoff_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "care_handoff"]
+    assertion_ids = [str(item["record_id"]) for item in records if item.get("record_type") == "care_assertion"]
 
     events = {
         str(item.id): item for item in (
@@ -697,6 +698,14 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             ).all() if handoff_ids else []
         )
     }
+    assertions = {
+        str(item.id): item for item in (
+            db.query(CareAssertion).filter(
+                CareAssertion.person_id == person_id,
+                CareAssertion.id.in_(assertion_ids or {"__no_matching_assertion__"}),
+            ).all() if assertion_ids else []
+        )
+    }
     caregiver_ids = set()
     for item in events.values():
         if item.created_by_caregiver_id:
@@ -710,6 +719,10 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
         )
     caregiver_ids.update(str(item.caregiver_id) for item in documents.values() if item.caregiver_id)
     caregiver_ids.update(str(item.created_by_caregiver_id) for item in appointments.values() if item.created_by_caregiver_id)
+    caregiver_ids.update(
+        str(value) for item in assertions.values()
+        for value in (item.created_by_caregiver_id, item.updated_by_caregiver_id) if value
+    )
     caregiver_names = {
         str(item.id): item.name
         for item in db.query(Caregiver).filter(
@@ -827,6 +840,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
         "document_extraction": documents,
         "appointment": appointments,
         "care_handoff": handoffs,
+        "care_assertion": assertions,
     }
     # Context text is not proof of source identity. Only retain records that
     # resolve to a persisted row scoped to this exact person.
@@ -908,6 +922,25 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "source_text": " ".join(part for part in (item.responsibility_type, item.scope or "", item.context or "") if part),
                 "source_excerpt": (item.context or "")[:700],
                 "record_status": "completed" if item.is_completed else "not completed",
+            })
+        elif record.get("record_type") == "care_assertion" and record_id in assertions:
+            item = assertions[record_id]
+            record.update({
+                # The original source passage, not the assertion's interpreted
+                # value, is the only wording eligible to support a claim.
+                "source_text": item.source_text or "",
+                "source_excerpt": (item.source_text or "")[:700],
+                "occurred_at": item.observed_at.isoformat() if item.observed_at else None,
+                "recorded_at": item.recorded_at.isoformat() if item.recorded_at else None,
+                "reported_by": item.source_label,
+                "entered_by": caregiver_names.get(str(item.created_by_caregiver_id or "")),
+                "record_status": item.assertion_status,
+                "epistemic_status": item.epistemic_state,
+                "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
+                "related_evidence": [
+                    summary for evidence_id in (item.evidence_ids or [])
+                    if (summary := evidence_summary(str(evidence_id))) is not None
+                ],
             })
     return records
 
