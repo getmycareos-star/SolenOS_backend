@@ -38,11 +38,28 @@ def test_shared_contract_preserves_workflow_instructions_and_identity_precedence
     assert result[1] == messages[1]
 
 
-def test_qwen_adapter_consumes_model_independent_product_constitutions():
-    assert SOLENOS_RUNTIME_IDENTITY_CONSTITUTION == SOLENOS_IDENTITY_CONSTITUTION
+def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutions():
+    assert SOLENOS_RUNTIME_IDENTITY_CONSTITUTION != SOLENOS_IDENTITY_CONSTITUTION
+    assert SOLENOS_RUNTIME_IDENTITY_CONSTITUTION.startswith(
+        "# SOLENOS COMPANION — PRODUCT IDENTITY"
+    )
+    for phrase in (
+        "SolenOS was founded by David Abuchi",
+        "Do not claim he personally programmed, trained, or built every component",
+        "The model is replaceable",
+        "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded",
+        "Never silently write, overwrite, delete, verify, or resolve a record",
+        "Community functionality is disabled",
+    ):
+        assert phrase in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.startswith(
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER"
     )
+    for heading in (
+        "STEADY", "EMPATHETIC", "OBSERVANT", "THOUGHTFUL", "PATIENT",
+        "HONEST", "PROACTIVE", "REASSURING THROUGH CLARITY", "RESPECTFUL", "DEPENDABLE",
+    ):
+        assert f"## {heading}" in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
     assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
 
 
