@@ -174,3 +174,74 @@ def test_two_caregivers_sharing_one_record_receive_only_their_own_identity():
     assert first["display_name"] == "Mary"
     assert second["display_name"] == "John"
     assert first["caregiver_id"] != second["caregiver_id"]
+
+
+def test_context_serializes_only_supplied_caregiver_operational_records_without_upgrading_status():
+    profile = SimpleNamespace(
+        participation_category=SimpleNamespace(value="family"),
+        involvement_status=SimpleNamespace(value="active"),
+        availability_status=SimpleNamespace(value="available"),
+        is_primary_designated=True,
+    )
+    responsibility = SimpleNamespace(
+        responsibility_type="medication coordination",
+        scope="Review the medication list before appointments",
+        status=SimpleNamespace(value="ambiguous"),
+        acceptance_status=SimpleNamespace(value="unconfirmed"),
+        effective_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        effective_end=None,
+        assignment_source="reported",
+        is_joint=False,
+        schedule_pattern=None,
+        provenance="Caregiver reported this responsibility",
+    )
+    role = SimpleNamespace(
+        role_type=SimpleNamespace(value="primary"),
+        custom_role_name=None,
+        scope="Coordinate family care",
+        effective_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        effective_end=None,
+        assignment_source="caregiver_confirmed",
+        is_current=True,
+    )
+    loop = SimpleNamespace(
+        id="loop-1",
+        loop_type="follow_up",
+        title="Confirm pharmacy refill",
+        description="Check whether the refill is ready",
+        status="waiting",
+        outcome_status="outcome_unknown",
+        owner_role="caregiver",
+        owner_label="Mary",
+        uncertainty="unknown",
+        missing_information=["Pharmacy response"],
+        request_text="Please call the pharmacy",
+        recipient_label="Care recipient",
+        deadline_at=None,
+        deadline_timezone=None,
+        deadline_source=None,
+        priority="normal",
+        priority_reasons=[],
+        deferred_reason=None,
+        review_at=None,
+        consequence_of_delay="moderate",
+        verification_rule="Record the pharmacy response",
+    )
+    context = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(),
+        caregiver_profile=profile,
+        active_roles=[role],
+        active_responsibilities=[responsibility],
+        assigned_open_loops=[loop],
+        responsibilities_truncated=True,
+        open_loops_truncated=False,
+    )
+    assert context["caregiver_profile"]["is_primary_designated"] is True
+    assert context["active_roles"][0]["role_type"] == "primary"
+    assert context["active_responsibilities"][0]["status"] == "ambiguous"
+    assert context["active_responsibilities"][0]["acceptance_status"] == "unconfirmed"
+    assert context["active_responsibilities_status"] == "available"
+    assert context["active_responsibilities_truncated"] is True
+    assert context["assigned_open_loops"][0]["status"] == "waiting"
+    assert context["assigned_open_loops_status"] == "available"
