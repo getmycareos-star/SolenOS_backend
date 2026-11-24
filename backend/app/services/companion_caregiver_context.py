@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.services.caregiver_permissions import caregiver_has_permission
+from app.services.caregiver_permissions import CAREGIVER_PERMISSION_KEYS, caregiver_has_permission
 
 
 def _clean(value, *, limit: int = 120) -> str | None:
@@ -141,6 +141,21 @@ def build_companion_caregiver_context(
     # must never receive care-record context.
     if not caregiver_has_permission(access_grant, "view_lcr"):
         raise ValueError("The authenticated caregiver is not permitted to view this care record")
+    # The model receives effective capabilities, not merely the stored list:
+    # can_manage_members grants every supported full-record permission through
+    # the canonical evaluator, while documents-only remains explicitly bounded.
+    if access_scope == "documents_only":
+        permissions = [
+            permission for permission in sorted(CAREGIVER_PERMISSION_KEYS)
+            if caregiver_has_permission(access_grant, permission)
+        ]
+    elif bool(getattr(access_grant, "can_manage_members", False)):
+        permissions = sorted(CAREGIVER_PERMISSION_KEYS)
+    else:
+        permissions = [
+            permission for permission in permissions
+            if caregiver_has_permission(access_grant, permission)
+        ]
 
     full_name = _clean(getattr(caregiver, "name", None), limit=160)
     preferred_name = _clean(getattr(caregiver, "preferred_name", None), limit=80)
