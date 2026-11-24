@@ -1761,6 +1761,13 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
         if not events:
             return {"status": "empty", "label": "Daily Care observations", "count": 0,
                     "returned_count": 0, "has_more": False, "retrieval_complete": True}, []
+        correction_lineage_by_event = _care_event_correction_fingerprint_snapshots(
+            db, person_id, [str(event.id) for event in events],
+        )
+        correction_lineage_incomplete = any(
+            item.get("status") != "checked"
+            for item in correction_lineage_by_event.values()
+        )
         evidence_ids = sorted({
             str(evidence_id)
             for event in events
@@ -1809,14 +1816,10 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "recorded_at": _iso(row.recorded_at), "created_by_caregiver_id": row.created_by_caregiver_id,
             } for row in daily_assertions]
             observation_snapshot = _evidence_observation_snapshot(db, person_id, linked_ids)
-            correction_lineage = _care_event_correction_fingerprint_snapshot(
-                db, person_id, str(event.id),
+            correction_lineage = correction_lineage_by_event.get(
+                str(event.id),
+                {"status": "unavailable", "corrections": [], "relationships": []},
             )
-            if correction_lineage.get("status") != "checked":
-                statuses["care_events"].update({
-                    "status": "partial",
-                    "reason": "event_correction_fingerprint_unavailable",
-                })
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -1876,10 +1879,15 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "stale_warning": _is_stale(event.occurred_at, now),
             })
         return {
-            "status": "available", "label": "Daily Care observations", "count": len(events),
+            "status": "partial" if correction_lineage_incomplete else "available",
+            "label": "Daily Care observations", "count": len(events),
             "returned_count": len(events), "has_more": daily_has_more,
-            "retrieval_complete": not daily_has_more,
-            "reason": "some_persisted_records_have_no_text" if no_text_count else None,
+            "retrieval_complete": not daily_has_more and not correction_lineage_incomplete,
+            "reason": (
+                "event_correction_fingerprint_unavailable" if correction_lineage_incomplete
+                else "some_persisted_records_have_no_text" if no_text_count
+                else None
+            ),
         }, output
     except Exception:
         logger.exception("Handoff Daily Care source retrieval failed")
