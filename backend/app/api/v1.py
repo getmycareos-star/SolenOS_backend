@@ -1220,7 +1220,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             audit_context={
                 "person_id": person_id,
                 "caregiver_id": caregiver_id,
-                "request_id": getattr(request.state, "request_id", None),
+                "request_id": getattr(getattr(request, "state", None), "request_id", None),
             },
         )
         qwen_status = "available"
