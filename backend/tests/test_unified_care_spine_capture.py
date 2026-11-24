@@ -777,6 +777,14 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
     relationship_id = f"companion-lineage-link-{suffix}"
     aggregate_event_time = datetime.now(timezone.utc) - timedelta(hours=1)
 
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
     try:
         with SessionLocal() as db:
             db.add(Person(id=person_id, name="PostgreSQL Companion lineage recipient"))
@@ -952,6 +960,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
         assert "event_correction_pending" in prompt
         assert "Caregiver is unsure whether Mum slept through the night." in prompt
     finally:
+        app.dependency_overrides.pop(get_db, None)
         with SessionLocal() as db:
             session_ids = [
                 row[0] for row in db.query(ConversationSession.id).filter(
