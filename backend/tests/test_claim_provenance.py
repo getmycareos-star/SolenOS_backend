@@ -652,3 +652,50 @@ def test_document_extraction_context_resolves_capture_analysis_id():
     assert records[0]["record_type"] == "document_extraction"
     assert records[0]["record_id"] == "capture-analysis-42"
 
+
+
+def test_claim_provenance_rejects_exact_wording_from_another_person():
+    result = build_claim_provenance(
+        "Mum felt unsteady near the kitchen.",
+        [{
+            "record_type": "care_event",
+            "record_id": "other-person-event",
+            "person_id": "person-b",
+            "source_text": "Mum felt unsteady near the kitchen.",
+            "record_status": "recorded",
+        }],
+        expected_person_id="person-a",
+    )
+    assert result["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert result["claims"][0]["source_references"] == []
+    assert unmatched_material_claims(result)
+
+
+def test_claim_provenance_rejects_unscoped_source_when_person_is_required():
+    result = build_claim_provenance(
+        "Mum felt unsteady near the kitchen.",
+        [{
+            "record_type": "care_event",
+            "record_id": "unscoped-event",
+            "source_text": "Mum felt unsteady near the kitchen.",
+            "record_status": "recorded",
+        }],
+        expected_person_id="person-a",
+    )
+    assert result["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
+
+def test_claim_provenance_accepts_exact_wording_only_for_expected_person():
+    result = build_claim_provenance(
+        "Mum felt unsteady near the kitchen.",
+        [{
+            "record_type": "care_event",
+            "record_id": "person-a-event",
+            "person_id": "person-a",
+            "source_text": "Mum felt unsteady near the kitchen.",
+            "record_status": "recorded",
+        }],
+        expected_person_id="person-a",
+    )
+    assert result["claims"][0]["support_status"] == "matched_saved_wording"
+    assert result["claims"][0]["source_references"][0]["person_scope_status"] == "matched"
