@@ -28,6 +28,7 @@ def configure_gateway(monkeypatch):
     # Unit tests isolate transport behaviour; PostgreSQL persistence is covered
     # by the dedicated PostgreSQL integration test.
     monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
+    monkeypatch.setattr(qwen_gateway, "_complete_inference_metric", lambda *args, **kwargs: True)
 
 
 def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
