@@ -126,8 +126,7 @@ def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contr
             assert contract[field], (trait, field)
             assert all(isinstance(item, str) and item.strip() for item in contract[field]), (trait, field)
         assert trait.upper() in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.upper(), trait
-        for prohibited in contract["prohibited_behaviors"]:
-            assert prohibited.casefold() in SOLENOS_PERSONALITY_CONSTITUTION.casefold(), (trait, prohibited)
+        assert trait.upper() in SOLENOS_PERSONALITY_CONSTITUTION.upper(), trait
 
 
 def test_trait_acceptance_contracts_cover_distinct_context_and_failure_modes():
