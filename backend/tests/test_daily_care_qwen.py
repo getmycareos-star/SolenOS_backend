@@ -706,3 +706,61 @@ def test_daily_care_repairs_overlength_answer_and_revalidates_before_return(monk
         "The caregiver reported poor sleep on 2026-10-26 [source: " + event_id + "]."
     )
     assert response.json()["written_to_lcr"] is False
+
+
+@pytest.mark.parametrize(
+    ("gateway_status", "expected_status"),
+    [
+        (502, "qwen_invalid_response"),
+        (503, "qwen_unavailable"),
+        (504, "qwen_unavailable"),
+    ],
+)
+def test_daily_care_qwen_gateway_failures_return_safe_nonwriting_fallback(
+    monkeypatch, gateway_status, expected_status
+):
+    from fastapi import HTTPException
+
+    client = TestClient(app)
+    session = create_session(client, "Daily Care model failure recipient")
+    add_event(
+        session,
+        "Sleep observation",
+        "Caregiver reported interrupted sleep overnight.",
+        "2026-11-20T22:00:00Z",
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+
+    def fail_qwen(*args, **kwargs):
+        raise HTTPException(
+            status_code=gateway_status,
+            detail={"code": "synthetic_gateway_failure"},
+        )
+
+    monkeypatch.setattr(daily_qwen, "qwen_chat", fail_qwen)
+    response = client.post(
+        "/api/v1/daily-care/intelligence/ask",
+        headers=auth,
+        json={
+            "person_id": session["person"]["id"],
+            "question": "What changed with sleep?",
+            "prepare_lcr_proposals": True,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == expected_status
+    assert body["proposal_analysis_id"] is None
+    assert body["proposals"] == []
+    assert body["review_required"] is True
+    assert body["written_to_lcr"] is False
+    assert "No LCR changes were made" in body["answer"]
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(CareAssertion).filter_by(
+            person_id=session["person"]["id"],
+        ).count() == 0
+    finally:
+        db.close()
