@@ -213,7 +213,7 @@ def _build_runtime_personality_constitution() -> str:
         "## COMMUNICATION",
         "Use plain American English; answer the actual question first; be concise and practical without jargon, alarmism, or promotion.",
     ))
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
