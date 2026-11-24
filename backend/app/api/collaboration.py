@@ -6211,10 +6211,10 @@ async def _qwen_chat_with_bounded_context(
 ) -> tuple[str, list[str], list[str], bool]:
     """Fit authorized care context before inference without dropping source families unfairly.
 
-    Oversized attempts fail only at the gateway's deterministic preflight, before
-    model inference. Retry with progressively smaller, source-balanced context;
-    return both selected source records (for provenance) and the exact rendered
-    context sent to Qwen (for response grounding).
+    Oversized attempts first reduce source-balanced context. If the fixed SolenOS
+    contract plus workflow instructions still exceed the input budget, retry once
+    with a smaller response reservation. This preserves more care evidence than
+    repeatedly deleting context when the actual excess is the output-token reserve.
     """
     initial_chars = len("\n".join(context_lines))
     candidate_budgets = (
@@ -6227,37 +6227,47 @@ async def _qwen_chat_with_bounded_context(
         if bounded not in budgets:
             budgets.append(bounded)
 
+    try:
+        requested_output_tokens = max(64, int((options or {}).get("num_predict", 96)))
+    except (TypeError, ValueError):
+        requested_output_tokens = 96
+    output_budgets = [requested_output_tokens]
+    if requested_output_tokens > 128:
+        output_budgets.append(128)
+
     last_budget_error: HTTPException | None = None
-    for budget in budgets:
-        selected_raw, selected_rendered, _, truncated = (
-            _fit_model_context_lines_across_sources(context_lines, max_chars=budget)
-        )
-        prompt = prompt_prefix + (
-            "\n".join(selected_rendered)
-            if selected_rendered
-            else "No matching recorded context was found."
-        )
-        if truncated:
-            prompt += (
-                "\n\nContext coverage note: Some authorized records were omitted to fit "
-                "the model input limit. Do not imply a complete review of the care history; "
-                "disclose when relevant information may be missing."
+    for output_tokens in output_budgets:
+        attempt_options = {**(options or {}), "num_predict": output_tokens}
+        for budget in budgets:
+            selected_raw, selected_rendered, _, truncated = (
+                _fit_model_context_lines_across_sources(context_lines, max_chars=budget)
             )
-        try:
-            reply = await asyncio.to_thread(
-                qwen_chat,
-                [
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": user_text},
-                ],
-                options=options,
+            prompt = prompt_prefix + (
+                "\n".join(selected_rendered)
+                if selected_rendered
+                else "No matching recorded context was found."
             )
-        except HTTPException as exc:
-            if exc.status_code != 413:
-                raise
-            last_budget_error = exc
-            continue
-        return reply, selected_raw, selected_rendered, truncated
+            if truncated:
+                prompt += (
+                    "\n\nContext coverage note: Some authorized records were omitted to fit "
+                    "the model input limit. Do not imply a complete review of the care history; "
+                    "disclose when relevant information may be missing."
+                )
+            try:
+                reply = await asyncio.to_thread(
+                    qwen_chat,
+                    [
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": user_text},
+                    ],
+                    options=attempt_options,
+                )
+            except HTTPException as exc:
+                if exc.status_code != 413:
+                    raise
+                last_budget_error = exc
+                continue
+            return reply, selected_raw, selected_rendered, truncated
 
     if last_budget_error is not None:
         raise last_budget_error
@@ -6265,7 +6275,6 @@ async def _qwen_chat_with_bounded_context(
         status_code=503,
         detail="No safe model context could be prepared for this care-record request.",
     )
-
 
 def _care_recipient_identity_guidance(display_name: str | None) -> str:
     """Keep the one-time app naming step authoritative; Companion must not re-ask."""
