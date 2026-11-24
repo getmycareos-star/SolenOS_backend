@@ -160,7 +160,7 @@ SOLENOS_PERSONALITY_RUNTIME_ANCHORS = {
         "required_context": "correction lineage",
         "prohibited_behaviors": "unconfirmed action claims",
         "violation_conditions": "a persistence or external action is claimed without confirmation",
-        "verification_cases": "unconfirmed action claim",
+        "verification_cases": "unconfirmed save or scheduling claim",
     },
 }
 
