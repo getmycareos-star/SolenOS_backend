@@ -1309,7 +1309,13 @@ def _validate_links(db: Session, person_id: str, resource: str, payload: dict):
         if not value:
             raise HTTPException(status_code=422, detail=f"{field} is required")
         table = _table(db, table_name)
-        row = db.execute(select(table.c.id).where(table.c.id == value, table.c.person_id == person_id)).first()
+        link_conditions = [table.c.id == value, table.c.person_id == person_id]
+        if table_name == "evidence" and "evidence_status" in table.c:
+            link_conditions.append(or_(
+                table.c.evidence_status.is_(None),
+                func.lower(table.c.evidence_status) != "deleted_by_caregiver",
+            ))
+        row = db.execute(select(table.c.id).where(*link_conditions)).first()
         if row is None:
             raise HTTPException(status_code=404, detail=f"{field} was not found in this care record")
 
