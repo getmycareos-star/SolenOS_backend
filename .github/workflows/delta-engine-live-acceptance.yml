@@ -22,9 +22,10 @@ on:
 permissions:
   contents: read
 
+# Let an active inference run finish; a newer pending run replaces stale queued work.
 concurrency:
   group: delta-engine-live-qwen-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   delta-engine-live-qwen:
