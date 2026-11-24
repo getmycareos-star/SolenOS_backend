@@ -7258,7 +7258,8 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 r"\b(?:there is|there's) no (?:evidence|information|basis) to "
                 r"(?:say|confirm|show|establish)(?: that)?\s*$",
                 r"\bthere(?:'s| is) not enough (?:evidence|information|basis) to "
-                r"(?:say|confirm|show|establish)(?: that)?\s*$",
+                r"(?:say|confirm|show|establish)(?: that)?"
+                r"(?: (?:he|she|they|it|mum|mom|dad|the person))?\s*$",
             )
             if any(re.search(pattern, prefix) for pattern in explicit_limit_patterns):
                 continue
