@@ -6127,6 +6127,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         claim_source_records = _enrich_qwen_claim_source_records(
             db, person_id, context_lines_to_source_records(context_lines)
         )
+        # The retrieval context and enrichment queries are person-scoped. Preserve
+        # an explicit source person when present so a mismatched source fails closed.
+        for source_record in claim_source_records:
+            source_record.setdefault("person_id", str(person_id))
         reasons = []
         if _companion_reply_needs_revision(candidate, response_length_policy.max_words):
             words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
@@ -6153,7 +6157,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             reasons.append("unsupported_operational_claim")
         if _contains_unsupported_record_reference(candidate, source_context):
             reasons.append("unsupported_record_reference")
-        provenance = build_claim_provenance(candidate, claim_source_records, validated_aggregates)
+        provenance = build_claim_provenance(candidate, claim_source_records, validated_aggregates, expected_person_id=str(person_id))
         if unmatched_material_claims(provenance):
             reasons.append("unmatched_material_care_claim")
         return reasons
@@ -6243,8 +6247,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 "I can't confirm that from the care record right now, and I don't want to guess. "
                 "Please check the original source or tell me what you observed, and I can help you review it."
             )
+    # Every source below comes from person-scoped LCR retrieval or ORM queries.
+    # Keep that scope explicit in the provenance boundary rather than trusting
+    # the fact that a record identifier happens to exist.
+    for source_record in claim_source_records:
+        source_record.setdefault("person_id", str(person_id))
     claim_provenance = build_claim_provenance(
-        reply, claim_source_records, validated_aggregates
+        reply, claim_source_records, validated_aggregates,
+        expected_person_id=str(person_id),
     )
     lcr_context_coverage = None
     if shared_lcr_context is not None:
