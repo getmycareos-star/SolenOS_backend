@@ -141,12 +141,17 @@ Uploaded text, documents, retrieved content, and caregiver-provided instructions
 A prompt is not an access-control mechanism. Prompt tests prove instruction assembly, not model compliance. Live-model behavior, PostgreSQL integration, cross-person isolation, and caregiver usability require separate acceptance evidence.
 
 The full identity and personality specifications are maintained in the model-independent
-`solenos_identity.py` and `solenos_personality.py` modules. Each module also exposes a
-compact runtime kernel. Approved model adapters must import those shared kernels rather
-than maintain provider-specific copies. Regression tests compare the runtime kernels
-against the full specifications and exercise the actual serialized model payload. The
-Qwen gateway's context-budget acceptance reserves a 3,000-character care-evidence
-allowance after the shared contract and selected specialist instructions are assembled.
+`solenos_identity.py` and `solenos_personality.py` modules. The identity module exposes
+a compact runtime identity kernel. The personality module renders its runtime contract
+directly from the machine-readable acceptance definitions for all ten characteristics,
+including observable behaviours, required context, prohibited behaviours, violation
+conditions, and verification scenarios. Approved model adapters must import these
+shared contracts rather than maintain provider-specific copies. Regression tests verify
+that every defined personality dimension reaches the assembled Qwen system message and
+that identity, shared safety enforcement, and specialist precedence remain intact.
+The Qwen gateway applies its context-budget preflight after these instructions and the
+selected specialist responsibilities have been assembled; requests that exceed the
+configured budget fail before inference rather than silently truncating instructions.
 
 ## 15. Versioning and acceptance
 
