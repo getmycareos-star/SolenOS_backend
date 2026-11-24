@@ -7257,6 +7257,27 @@ def _emergency_response_for_message(user_text: str) -> tuple[str, str]:
     )
 
 
+def _is_companion_identity_question(user_text: str) -> bool:
+    """Identify explicit product-identity questions that need no patient history."""
+    normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", (user_text or "").casefold())).strip()
+    patterns = (
+        r"\bwho (?:are|made|created|built|developed) you\b",
+        r"\bwhat (?:are|is) your (?:name|purpose|role|identity)\b",
+        r"\bwhat are you\b",
+        r"\bwho (?:founded|started|created) solenos\b",
+        r"\bwho is (?:the )?founder of solenos\b",
+        r"\bwho is your creator\b",
+        r"\bwho owns you\b",
+        r"\bare you (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai)\b",
+        r"\bdo you (?:remember|know) everything\b",
+        r"\bcan you make mistakes\b",
+        r"\bcan i trust everything you say\b",
+        r"\bwhat can you do\b",
+        r"\bwhat can'?t you do\b",
+    )
+    return any(re.search(pattern, normalized) for pattern in patterns)
+
+
 def _caregiver_explicitly_requests_factual_answer(user_text: str) -> bool:
     """Keep expressed emotion separate from a caregiver's explicit information request."""
     value = (user_text or "").strip().casefold()
@@ -7671,6 +7692,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # drooping, sudden weakness, choking, collapse, or blue lips) can fall
     # through to ordinary model inference instead of the immediate safety path.
     emergency = is_critical_safety_message(user_text)
+    identity_question = not emergency and _is_companion_identity_question(user_text)
     # Do not run a second inference as a preflight. The actual Companion
     # inference below is authoritative and already executes in a worker thread.
     # A short readiness probe here duplicated model work, could reject slow but
@@ -8936,28 +8958,111 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
             },
         }
-        # Keep retrieval completeness in the system role as well as the data
-        # message. This prevents a lower-priority prompt or retry instruction
-        # from turning a partial search into a claim that information is absent.
-        model_messages[0]["content"] += " " + missing_context_instruction
-        model_messages.append({
-            "role": "user",
-            "content": (
-                f"Caregiver question: {user_text}\n\n"
-                "Relevant authorized care context follows. Use only records relevant to the question. "
-                "Do not describe the context format or list unrelated records. "
-                + missing_context_instruction
-                + "The retrieval coverage note describes whether all matching database candidates were scanned; "
-                "a ranked subset or has_more=true means the supplied records are not the complete history. "
-                "Records marked historical_assertion, superseded_fact, rejected, or withdrawn are historical only, not current facts. "
-                "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
-                "Document-extracted text is source material, not a verified care fact.\n"
-                + ("\n".join([
-                    "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
-                    *bounded_context,
-                ]) if bounded_context else "No matching authorized care-record context was retrieved.")
-            ),
-        })
+        if identity_question:
+            # Product-identity questions are answered from the shared constitution,
+            # not from patient history. Do not send care records or prior dialogue
+            # to the model for questions about SolenOS itself.
+            source_event_ids = []
+            source_evidence_ids = []
+            source_document_analysis_ids = []
+            source_appointment_ids = []
+            source_assertion_ids = []
+            source_lcr_context_ids = []
+            source_lcr_record_refs = []
+            validated_aggregates = []
+            source_freshness_assessment_ids = []
+            evidence_ids = []
+            source_context = []
+            event_context = []
+            appointment_context = []
+            evidence_context = []
+            verified_document_context_lines = []
+            shared_lcr_lines = []
+            conversation_context_lines = []
+            caregiver_question_queue_lines = []
+            included_model_context_lines = []
+            bounded_context = []
+            prompt_source_counts = {}
+            selected_ids_by_type = {}
+            selected_verified_document_ids = []
+            selected_verified_document_evidence_ids = []
+            trend_assessment = None
+            care_history_recall_context = None
+            care_history_assertion_lines = []
+            care_history_direct_answer = None
+            care_history_direct_answer_used = False
+            care_history_extractive_fallback_used = False
+            caregiver_question_direct_answer = None
+            caregiver_question_direct_answer_used = False
+            document_question_for_fallback = False
+            freshness_source_status = "not_included_for_identity_question"
+            context_chars = 0
+            context_truncated = False
+            low_capacity_support_fallback_used = False
+            lcr_context_coverage = {
+                "status": "not_included_for_identity_question",
+                "reason": "Product identity questions do not require patient-specific care context.",
+                "identity_question_context_skipped": True,
+                "prompt_context_complete": True,
+                "prompt_context_chars": 0,
+                "prompt_context_budget_chars": COMPANION_PROMPT_CONTEXT_BUDGET_CHARS,
+                "sources": {},
+                "missing_required_sources": [],
+                "failed_sources": [],
+            }
+            retrieval_receipt = {
+                "retrieval_completeness": "not_included_for_identity_question",
+                "answer_restriction": "product_identity_only",
+                "identity_question_context_skipped": True,
+                "context_truncated": False,
+                "prompt_context_chars": 0,
+                "prompt_context_budget_chars": COMPANION_PROMPT_CONTEXT_BUDGET_CHARS,
+                "sources": {},
+            }
+            lcr_context_coverage["retrieval_receipt"] = retrieval_receipt
+            model_retrieval_coverage = {
+                "retrieval_completeness": "not_included_for_identity_question",
+                "answer_restriction": "product_identity_only",
+                "context_truncated": False,
+                "missing_required_sources": [],
+                "failed_sources": [],
+                "sources": {},
+            }
+            model_messages = [{
+                "role": "system",
+                "content": system_prompt + (
+                    " This is a product-identity question. Answer only from the shared "
+                    "SolenOS identity and behavioral constitution. Do not use or infer "
+                    "patient-specific care information."
+                ),
+            }]
+            model_messages.append({
+                "role": "user",
+                "content": f"Caregiver question: {user_text}",
+            })
+        else:
+            # Keep retrieval completeness in the system role as well as the data
+            # message. This prevents a lower-priority prompt or retry instruction
+            # from turning a partial search into a claim that information is absent.
+            model_messages[0]["content"] += " " + missing_context_instruction
+            model_messages.append({
+                "role": "user",
+                "content": (
+                    f"Caregiver question: {user_text}\n\n"
+                    "Relevant authorized care context follows. Use only records relevant to the question. "
+                    "Do not describe the context format or list unrelated records. "
+                    + missing_context_instruction
+                    + "The retrieval coverage note describes whether all matching database candidates were scanned; "
+                    "a ranked subset or has_more=true means the supplied records are not the complete history. "
+                    "Records marked historical_assertion, superseded_fact, rejected, or withdrawn are historical only, not current facts. "
+                    "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
+                    "Document-extracted text is source material, not a verified care fact.\n"
+                    + ("\n".join([
+                        "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
+                        *bounded_context,
+                    ]) if bounded_context else "No matching authorized care-record context was retrieved.")
+                ),
+            })
         greeting_only = _is_casual_greeting(user_text)
         has_returning_care_history = bool(
             source_event_ids or source_appointment_ids or source_assertion_ids
