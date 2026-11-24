@@ -336,3 +336,42 @@ def test_authenticated_account_identity_is_retained_in_backend_context_not_model
     assert identity["caregiver_display_name"] == "Mary"
     assert "authenticated_account_id" not in identity
     assert "account-123" not in str(identity)
+
+
+def test_notification_preferences_are_delivery_only_and_excluded_from_greetings():
+    preferences = SimpleNamespace(
+        quiet_hours_enabled=True,
+        quiet_hours_start="21:00",
+        quiet_hours_end="08:00",
+        timezone_name="America/Chicago",
+        reminders_enabled=False,
+    )
+    context = build_companion_caregiver_context(
+        _caregiver(timezone="America/New_York", timezone_configured=True),
+        _grant(),
+        notification_preferences=preferences,
+        now=datetime(2026, 11, 24, 14, 0, tzinfo=timezone.utc),
+    )
+    assert context["timezone_name"] == "America/New_York"
+    assert context["notification_preferences"] == {
+        "quiet_hours_enabled": True,
+        "quiet_hours_start": "21:00",
+        "quiet_hours_end": "08:00",
+        "delivery_timezone_name": "America/Chicago",
+        "reminders_enabled": False,
+        "configured": True,
+    }
+
+    care_identity = build_companion_prompt_identity_context(context, "Margaret Williams")
+    assert care_identity["notification_preferences"]["delivery_timezone_name"] == "America/Chicago"
+
+    greeting_identity = build_companion_prompt_identity_context(
+        context, "Margaret Williams", greeting_only=True,
+    )
+    assert "notification_preferences" not in greeting_identity
+
+
+def test_missing_notification_preferences_are_explicitly_unconfigured():
+    context = build_companion_caregiver_context(_caregiver(), _grant())
+    assert context["notification_preferences"]["configured"] is False
+    assert context["notification_preferences"]["delivery_timezone_name"] is None
