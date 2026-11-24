@@ -451,7 +451,7 @@ def build_claim_provenance(
     truth. Duplicate records remain separate references and are not counted as
     independent corroboration.
     """
-    historical_statuses = {"corrected", "superseded", "withdrawn", "rejected", "retracted", "expired", "deleted", "archived"}
+    historical_statuses = {"corrected", "superseded", "withdrawn", "rejected", "retracted", "expired", "deleted", "deleted_by_caregiver", "archived"}
     non_current_statuses = {
         "pending", "pending_review", "awaiting_review", "needs_review",
         "draft", "queued", "processing", "failed", "unverified", "unreviewed",
