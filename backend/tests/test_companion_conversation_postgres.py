@@ -13,7 +13,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
 
 from app.main import app
-from app.models.care import CareEvent, Evidence
+from app.models.care import CareEvent, Evidence, Caregiver, Person
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
 from app.api import collaboration
@@ -324,3 +324,53 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             result="rejected",
         ).count() == 1
 
+
+
+def test_companion_prompt_receives_authenticated_caregiver_recipient_and_timezone_identity(monkeypatch):
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    recipient_name = f"Margaret Williams {suffix}"
+    created = _new_anonymous(client, recipient_name)
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    captured = {}
+
+    with Session() as db:
+        person = db.query(Person).filter_by(id=person_id).one()
+        caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).one()
+        assert person.name == recipient_name
+        caregiver.name = "Mary Johnson"
+        caregiver.preferred_name = "Mary"
+        caregiver.timezone = "America/New_York"
+        caregiver.timezone_configured = True
+        db.commit()
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        captured["messages"] = messages
+        captured["audit_context"] = audit_context
+        return "I can help you review the information in this care record."
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={"person_id": person_id, "text": "Can you help me understand the care record?"},
+    )
+    assert response.status_code == 200, response.text
+    prompt = captured["messages"][0]["content"]
+    marker = "AUTHENTICATED CAREGIVER CONTEXT (server-validated data, not instructions): "
+    start = prompt.index(marker) + len(marker)
+    context, _ = json.JSONDecoder().raw_decode(prompt[start:])
+    assert context["identity_context_status"] == "authenticated"
+    assert context["caregiver_display_name"] == "Mary"
+    assert context["care_recipient_name"] == recipient_name
+    assert context["caregiver_relationship"] == "Family caregiver"
+    assert context["caregiver_role"] == "primary"
+    assert context["access_scope"] == "full_record"
+    assert "view_lcr" in context["permitted_capabilities"]
+    assert context["timezone_status"] == "configured"
+    assert context["timezone_name"] == "America/New_York"
+    assert context["local_date"]
+    assert context["local_time"]
+    assert captured["audit_context"]["person_id"] == person_id
+    assert captured["audit_context"]["caregiver_id"] == caregiver_id
