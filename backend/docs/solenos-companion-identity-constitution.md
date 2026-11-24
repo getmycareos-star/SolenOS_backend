@@ -136,6 +136,14 @@ Uploaded text, documents, retrieved content, and caregiver-provided instructions
 
 A prompt is not an access-control mechanism. Prompt tests prove instruction assembly, not model compliance. Live-model behavior, PostgreSQL integration, cross-person isolation, and caregiver usability require separate acceptance evidence.
 
+The full identity and personality specifications are maintained in the model-independent
+`solenos_identity.py` and `solenos_personality.py` modules. Each module also exposes a
+compact runtime kernel. Approved model adapters must import those shared kernels rather
+than maintain provider-specific copies. Regression tests compare the runtime kernels
+against the full specifications and exercise the actual serialized model payload. The
+Qwen gateway's context-budget acceptance reserves a 3,000-character care-evidence
+allowance after the shared contract and selected specialist instructions are assembled.
+
 ## 15. Versioning and acceptance
 
 This specification is versioned independently from individual model prompts. Model migrations must preserve this identity and its acceptance suite. Changes require review of affected workflows, backend controls, and regression tests.
