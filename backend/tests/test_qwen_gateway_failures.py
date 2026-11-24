@@ -459,6 +459,42 @@ def test_qwen_gateway_ignores_invalid_quality_overrides(monkeypatch):
     assert captured["options"]["temperature"] == 0.2
 
 
+def test_actual_qwen_transport_receives_global_and_workflow_specialist_contract(monkeypatch):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(request, **kwargs):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(json.dumps({"message": {"content": "Grounded response."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+    answer = qwen_gateway.qwen_chat([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: medication_day. Report only supplied medication facts."},
+        {"role": "user", "content": "The supplied list is historical."},
+    ])
+
+    assert answer == "Grounded response."
+    system = captured["payload"]["messages"][0]["content"]
+    assert "GLOBAL AI OPERATING CONTRACT" in system
+    assert "SPECIALIST: MEDICATION AND TREATMENT CONTINUITY" in system
+    assert "SPECIALIST: LCR RETRIEVAL AND CONTEXT INTELLIGENCE" in system
+    assert "SPECIALIST: CAREGIVER COMPANION" not in system
+
+
+def test_actual_qwen_transport_rejects_unmapped_workflow_before_network_call(monkeypatch):
+    configure_gateway(monkeypatch)
+
+    def unexpected_request(*args, **kwargs):
+        raise AssertionError("unmapped workflow must not reach Ollama")
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", unexpected_request)
+    with pytest.raises(ValueError, match="unmapped_solenos_workflow"):
+        qwen_gateway.qwen_chat([
+            {"role": "system", "content": "SOLENOS_WORKFLOW_ID: future_workflow"},
+            {"role": "user", "content": "Hello."},
+        ])
+
+
 def test_qwen_gateway_rejects_oversized_prompt_before_network_call(monkeypatch):
     configure_gateway(monkeypatch)
 
