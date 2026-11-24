@@ -108,10 +108,11 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
         },
     ]
     system = apply_solenos_system_contract(messages)[0]["content"]
-    assert "Reassure through accuracy, never promised outcomes." in system
-    assert "Do not dismiss serious symptoms or offer false reassurance." in system
-    assert "Uncertainty must not become confidence to reassure" in system
-    assert "Safety, factual integrity, dignity, privacy" in system
+    normalized_system = " ".join(system.split())
+    assert "Reassure through accuracy, never promised outcomes." in normalized_system
+    assert "Do not dismiss serious symptoms or offer false reassurance." in normalized_system
+    assert "Uncertainty must not become confidence to reassure" in normalized_system
+    assert "Safety, factual integrity, dignity, privacy" in normalized_system
 
 
 def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contract():
