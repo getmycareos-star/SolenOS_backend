@@ -114,6 +114,33 @@ def test_candidate_extraction_rejects_unknown_workflow_before_model_call(monkeyp
         )
 
 
+def test_capture_candidates_reject_oversized_source_without_truncating(monkeypatch):
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("oversized source must not invoke Qwen")),
+    )
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.extract_review_candidates(
+            "care evidence " * 1000,
+            source_event_id="event-too-large",
+        )
+    assert error.value.status_code == 413
+    assert error.value.detail["code"] == "candidate_source_exceeds_limit"
+
+
+def test_companion_update_rejects_oversized_message_without_truncating(monkeypatch):
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("oversized message must not invoke Qwen")),
+    )
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.extract_companion_care_candidates("care information " * 300)
+    assert error.value.status_code == 413
+    assert error.value.detail["code"] == "companion_update_source_exceeds_limit"
+
+
 def test_capture_candidates_fail_closed_on_invalid_json(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: "not-json")
 
