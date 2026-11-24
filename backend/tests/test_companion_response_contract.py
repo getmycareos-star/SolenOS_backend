@@ -4408,6 +4408,9 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
         assert body["grounding_status"] == "insufficient_evidence"
         assert "couldn't confirm a reliable answer" in body["safety_note"].casefold()
         assert "nothing was changed in your care record" in body["safety_note"].casefold()
+        assert body["source_event_ids"] == []
+        assert body["source_evidence_ids"] == []
+        assert body["source_document_analysis_ids"] == []
         assert body["written_to_lcr"] is False
     finally:
         teardown()
