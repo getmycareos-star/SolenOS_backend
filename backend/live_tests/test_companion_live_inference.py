@@ -177,6 +177,36 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen PostgreSQL evaluator")
         other = _create_session(client, "Independent identity-isolation evaluator")
+
+        # First-time and returning greetings must use backend-derived stage,
+        # remain free of patient details, and never create LCR assertions.
+        first_greeting = _ask(client, caregiver, "Hello.")
+        assert first_greeting.status_code == 200, first_greeting.text
+        first_greeting_body = first_greeting.json()
+        first_greeting_text = first_greeting_body.get("reply", "").casefold()
+        assert first_greeting_body.get("ai_generated") is True, first_greeting_body
+        assert "solenos companion" in first_greeting_text, first_greeting_body
+        assert first_greeting_body.get("written_to_lcr") is False, first_greeting_body
+        assert not any(
+            detail in first_greeting_text
+            for detail in ("sleep", "waking", "restless", "breakfast", "nauseated", "medication")
+        ), first_greeting_body
+
+        returning_greeting = _ask(client, caregiver, "Good morning.")
+        assert returning_greeting.status_code == 200, returning_greeting.text
+        returning_greeting_body = returning_greeting.json()
+        returning_greeting_text = returning_greeting_body.get("reply", "").casefold()
+        assert returning_greeting_body.get("ai_generated") is True, returning_greeting_body
+        assert returning_greeting_body.get("written_to_lcr") is False, returning_greeting_body
+        assert not any(
+            claim in returning_greeting_text
+            for claim in ("i remember you", "last time we", "as we discussed", "you told me before")
+        ), returning_greeting_body
+        assert not any(
+            detail in returning_greeting_text
+            for detail in ("sleep", "waking", "restless", "breakfast", "nauseated", "medication")
+        ), returning_greeting_body
+
         event_id = _record_daily_care(
             client,
             caregiver,
