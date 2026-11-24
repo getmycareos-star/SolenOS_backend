@@ -163,7 +163,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
     # and subsequent LCR retrieval all run against PostgreSQL.
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
-    monkeypatch.setattr(care_updates, "extract_companion_care_candidates", lambda source: {"observations": []})
+    monkeypatch.setattr(care_updates, "extract_companion_care_candidates", lambda source, **kwargs: {"observations": []})
     client = TestClient(app)
 
     def review(session, proposal_id, payload):
