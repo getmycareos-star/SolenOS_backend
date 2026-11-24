@@ -62,10 +62,9 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
     assert "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded" in assembled
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in assembled
     assert "initially focused on the United States" in SOLENOS_IDENTITY_CONSTITUTION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.2"
-    assert "Version: 2.2" in SOLENOS_IDENTITY_CONSTITUTION
-    assert "Version: 2.2" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
-    assert "Version: 2.2" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.3"
+    assert "Version: 2.3" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Version: 2.3" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 
 
 def test_lcr_authority_and_backend_write_boundary_are_in_the_assembled_contract():
