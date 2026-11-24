@@ -19,6 +19,11 @@ Reviewed against backend `main` on 2026-11-24. This is a source-level inventory,
 | `backend/app/services/delta_engine.py` | Delta JSON generation and retry | Synchronous service path |
 | `backend/app/services/qwen_background_worker.py` | Workflow classification; asynchronous background job processing | Background worker uses `asyncio.to_thread`; worker loop is started by application lifespan when enabled |
 
+## Disabled / excluded source paths
+
+- `backend/app/api/collaboration.py::community_experience` still contains a legacy `qwen_chat` call in source, but Community is intentionally disabled: application middleware returns 404 for `/api/v1/community` before route execution and the Community router is not an active registered route. This is not an active inference path. Keep it excluded; do not re-enable it as part of Qwen integration.
+- No direct Ollama client (`ollama.Client`, `ollama.chat`) or alternate `/api/generate` transport was found in backend application source. Native transport is confined to the gateway.
+
 ## Gateway extraction consumers
 
 | Source | Gateway entry point | Purpose |
@@ -35,6 +40,13 @@ Reviewed against backend `main` on 2026-11-24. This is a source-level inventory,
 - Specialist prompts define task responsibilities only. The shared evidence/safety/authority enforcement, personality constitution, and product identity are reasserted after task instructions.
 - Background classification is a meta-task and deliberately receives no care specialist.
 - Extraction and generation remain proposals. Backend review, authorization, reconciliation, and persistence own all authoritative LCR transitions.
+
+## Routing and context-budget implementation details
+
+- The current runtime specialist cap is **two** specialists per request, not four. The cap is enforced by `MAX_SPECIALISTS_PER_REQUEST`; the enabled-workflow map currently assigns no workflow more than two.
+- Workflow routing is checked at module initialization: specialist-routed workflows and explicitly specialist-free workflows must form an exact, non-overlapping partition of `ENABLED_WORKFLOWS`; stale IDs, undefined specialists, empty mappings, and over-cap mappings fail application initialization.
+- Repeated explicit workflow markers are rejected as ambiguous, even when the repeated ID is identical. Unknown explicit IDs fail closed.
+- `_estimate_prompt_tokens` is the gateway's preflight estimator. It is a conservative UTF-8 byte heuristic (approximately 3.5 bytes/token plus message framing), **not a model-specific tokenizer**. Budget tests exercise this exact estimator; do not report its output as an exact Qwen token count.
 
 ## Verification boundary
 
