@@ -9930,7 +9930,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
         if identity_direct_answer_used:
             verdict = "passed"
-            safety_note = "This answer comes from the versioned SolenOS product identity; no patient care record was used."
+            safety_note = "This answer is about SolenOS, not the person's care record."
             ai_generated = False
         elif unsupported_trend:
             verdict = "blocked"
