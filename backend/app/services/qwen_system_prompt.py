@@ -3,8 +3,6 @@
 This is operational instruction, not a claim that the model is sentient or conscious.
 """
 
-from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
-from app.services.solenos_personality import SOLENOS_PERSONALITY_CONSTITUTION
 
 # Full constitutions remain versioned source documents in their own modules.
 # Runtime inference uses compact operational kernels so care evidence is not crowded
