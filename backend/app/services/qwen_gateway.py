@@ -206,10 +206,39 @@ def _inference_audit_metadata(messages: list[dict], audit_context: dict | None =
             metadata["source_refs"] = clean_refs
     coverage = trusted_context.get("retrieval_coverage")
     if isinstance(coverage, dict):
-        allowed_coverage = ("status", "retrieval_projection_complete", "page_limit_reached", "context_truncated")
-        metadata["retrieval_coverage"] = {
-            key: coverage[key] for key in allowed_coverage if key in coverage
-        }
+        coverage_metadata = {}
+        for key in ("status", "answer_restriction"):
+            value = coverage.get(key)
+            if isinstance(value, str) and value.strip():
+                coverage_metadata[key] = value.strip()[:80]
+        for key in (
+            "retrieval_scan_complete",
+            "retrieval_projection_complete",
+            "page_limit_reached",
+            "context_truncated",
+            "prompt_context_complete",
+        ):
+            value = coverage.get(key)
+            if isinstance(value, bool):
+                coverage_metadata[key] = value
+        for key in (
+            "missing_required_sources",
+            "missing_optional_sources",
+            "failed_sources",
+            "more_available_sources",
+            "selection_truncated_sources",
+        ):
+            values = coverage.get(key)
+            if isinstance(values, (list, tuple)):
+                clean_values = list(dict.fromkeys(
+                    value.strip()[:80]
+                    for value in values
+                    if isinstance(value, str) and value.strip()
+                ))[:30]
+                if clean_values:
+                    coverage_metadata[key] = clean_values
+        if coverage_metadata:
+            metadata["retrieval_coverage"] = coverage_metadata
     return metadata
 
 
