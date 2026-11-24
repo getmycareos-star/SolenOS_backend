@@ -2403,7 +2403,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
     messages = [
         {"role": "system", "content": (
             "SOLENOS_WORKFLOW_ID: handoff. "
-            "You draft a care briefing using ONLY the supplied Living Care Record (LCR) source records. 
+            "You draft a care briefing using ONLY the supplied Living Care Record (LCR) source records. "
             "The LCR records supplied in this request are the sole authority. Do not use model memory, "
             "general medical knowledge, assumptions, or prior conversation. "
             + f"Response length target: {response_length_policy.target_words} words; hard maximum: {response_length_policy.max_words}. Preserve uncertainty and all material source distinctions. "
