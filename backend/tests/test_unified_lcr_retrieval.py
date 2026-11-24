@@ -2556,3 +2556,80 @@ def test_companion_discloses_incomplete_lcr_retrieval_without_claiming_empty_his
         complete, prompt_context_truncated=True
     )
     assert truncated_notice is not None
+
+
+def test_postgres_document_recorded_date_is_distinct_from_assertion_recorded_at():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        now = datetime(2026, 11, 24, 12, 0, tzinfo=UTC)
+        with Session(bind=connection) as db:
+            person = Person(id="document-date-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="document-date-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add_all([
+                CareAssertion(
+                    id="assertion-document-date-in-window",
+                    person_id=person.id,
+                    subject_type="person",
+                    subject_id=person.id,
+                    field="mobility",
+                    assertion_kind="document_reviewed_observation",
+                    asserted_value="The report described reduced mobility.",
+                    source_label="Caregiver-reviewed historical document",
+                    source_text="Recorded on 2024-04-12: reduced mobility.",
+                    source_context={"document_candidate": {"recorded_date": "2024-04-12"}},
+                    event_time_text=None,
+                    evidence_ids=[],
+                    assertion_status="accepted",
+                    epistemic_state="reported",
+                    observed_at=None,
+                    created_by_caregiver_id=caregiver.id,
+                    recorded_at=now,
+                ),
+                CareAssertion(
+                    id="assertion-document-date-outside-window",
+                    person_id=person.id,
+                    subject_type="person",
+                    subject_id=person.id,
+                    field="mobility",
+                    assertion_kind="document_reviewed_observation",
+                    asserted_value="A different report described reduced mobility.",
+                    source_label="Caregiver-reviewed later document",
+                    source_text="Recorded on 2025-04-12: reduced mobility.",
+                    source_context={"document_candidate": {"recorded_date": "2025-04-12"}},
+                    event_time_text=None,
+                    evidence_ids=[],
+                    assertion_status="accepted",
+                    epistemic_state="reported",
+                    observed_at=None,
+                    created_by_caregiver_id=caregiver.id,
+                    recorded_at=now,
+                ),
+            ])
+            db.commit()
+            context = build_lcr_context(
+                db,
+                person.id,
+                caregiver_id=caregiver.id,
+                temporal_window={
+                    "start": "2024-04-01T00:00:00+00:00",
+                    "end": "2024-04-30T23:59:59+00:00",
+                    "basis": "explicit_user_temporal_expression",
+                },
+                limit_per_source=20,
+            )
+        assertion_ids = {
+            item["id"] for item in context["sources"]["assertions"]["items"]
+        }
+        assert "assertion-document-date-in-window" in assertion_ids
+        assert "assertion-document-date-outside-window" not in assertion_ids
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)

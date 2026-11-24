@@ -1307,6 +1307,23 @@ def build_lcr_context(
                     and_(column >= start_value, column <= end_value)
                     for column in temporal_columns
                 ]
+                if source_name == "assertions" and "source_context" in table.c:
+                    # Caregiver-approved document assertions preserve the
+                    # document's own recorded date separately from the event
+                    # date and the date SolenOS recorded the assertion. Search
+                    # that source date too, but do not treat an unreviewed
+                    # extraction candidate as an accepted LCR assertion.
+                    document_recorded_date = (
+                        table.c.source_context["document_candidate"]["recorded_date"].as_string()
+                    )
+                    document_date = start_value.date().isoformat()
+                    document_end_date = end_value.date().isoformat()
+                    temporal_predicates.append(
+                        and_(
+                            document_recorded_date >= document_date,
+                            document_recorded_date <= document_end_date,
+                        )
+                    )
                 if source_name == "document_extractions" and "source_evidence_id" in table.c:
                     # The extraction job timestamp describes when SolenOS read
                     # the document, not when the care event or document itself
