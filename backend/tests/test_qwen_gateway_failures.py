@@ -25,6 +25,9 @@ class FakeResponse:
 
 def configure_gateway(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "get_ollama_config", lambda: ("http://ollama.internal", "qwen-test", 2.0))
+    # Unit tests isolate transport behaviour; PostgreSQL persistence is covered
+    # by the dedicated PostgreSQL integration test.
+    monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
 
 
 def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
@@ -264,6 +267,7 @@ def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
 
 
 def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monkeypatch):
+    monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
     captured = {}
     monkeypatch.setattr(
         qwen_gateway,
@@ -284,6 +288,7 @@ def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monke
 
 
 def test_qwen35_gateway_rejects_thinking_only_response(monkeypatch):
+    monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
     monkeypatch.setattr(
         qwen_gateway,
         "get_ollama_config",
