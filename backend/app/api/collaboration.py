@@ -5138,7 +5138,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             events_query = events_query.filter(
                 CareEvent.occurred_at >= datetime.now(timezone.utc) - timedelta(days=14)
             )
-        event_limit = 20 if payload.workflow == "two_week_review" else 8
+        event_limit = 1 if anchored_event is not None else (20 if payload.workflow == "two_week_review" else 8)
         events = events_query.order_by(CareEvent.occurred_at.desc()).limit(event_limit).all()
         if anchored_event is not None:
             events = [anchored_event] + [event for event in events if str(event.id) != str(anchored_event.id)]
@@ -5149,7 +5149,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             try:
                 event_projection = build_lcr_context(
                     db, person_id, caregiver_id=caregiver_id,
-                    limit_per_source=40, include_all_history=True,
+                    limit_per_source=1 if anchored_event is not None else 40,
+                    include_all_history=anchored_event is None,
+                    only_sources={"events"} if anchored_event is not None else None,
+                    event_ids={str(anchored_event.id)} if anchored_event is not None else None,
                 )
                 event_source = (
                     event_projection.get("sources", {}).get("events", {})
@@ -5299,7 +5302,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "returning_caregiver", "appointment", "after_appointment", "handoff",
         "professional_summary", "open_loops", "two_week_review", "care_coordination", "sharing_export", "care_transition", "incident_follow_through", "emergency_readiness", "care_coverage_gap", "care_instruction_change_tracker", "critical_information_completeness", "personal_preferences_distress_context", "caregiver_strain_support", "document_validity_renewal",
     }
-    if payload.workflow in appointment_workflows:
+    if payload.workflow in appointment_workflows and anchored_event is None:
         appointments_query = db.query(Appointment).filter(Appointment.person_id == person_id)
         if payload.appointment_id:
             appointments_query = appointments_query.filter(Appointment.id == payload.appointment_id)
@@ -5344,7 +5347,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_evidence_ids.append(str(row.id))
 
     document_query_text = (payload.text or "").casefold()
-    document_context_requested = payload.workflow in appointment_workflows or _is_document_question(payload.text)
+    document_context_requested = (
+        anchored_event is None
+        and (payload.workflow in appointment_workflows or _is_document_question(payload.text))
+    )
     if document_context_requested and can_view_documents:
         source_document_status = "empty"
         try:
@@ -5418,20 +5424,39 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     shared_context_truncated = False
     shared_lcr_workflows = (event_workflows | appointment_workflows) - {"medication_day"}
     if payload.workflow in shared_lcr_workflows:
+        focused_event_assist = anchored_event is not None and payload.workflow == "living_care_record"
         full_history_workflows = {
             "living_care_record", "care_history_search", "returning_caregiver",
             "professional_summary", "handoff", "after_appointment",
             "two_week_review", "decision_outcome", "care_situation_change", "delta_engine",
         }
+        focused_event_sources = {
+            "living_record", "events", "evidence", "evidence_observations",
+            "evidence_freshness_assessments", "facts", "assertions", "corrections",
+            "conflicts", "contradictions", "uncertainties", "uncertainty_assessments",
+            "open_questions",
+        }
+        focused_event_query = (
+            f"{anchored_event.title or ''} {anchored_event.description or ''}".strip()[:1000]
+            if focused_event_assist else None
+        )
         shared_lcr_context = _build_unified_lcr_context_or_422(
             db,
             person_id,
             caregiver_id,
-            limit_per_source=50,
-            query=None if payload.workflow == "living_care_record" else (payload.text or "")[:1000],
-            include_all_history=payload.workflow in full_history_workflows,
+            limit_per_source=3 if focused_event_assist else 50,
+            query=(
+                focused_event_query
+                if focused_event_assist
+                else None if payload.workflow == "living_care_record"
+                else (payload.text or "")[:1000]
+            ),
+            include_all_history=payload.workflow in full_history_workflows and not focused_event_assist,
+            conversation_limit=1 if focused_event_assist else MAX_CONVERSATION_CONTEXT_ITEMS,
+            only_sources=focused_event_sources if focused_event_assist else None,
         )
-        shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
+        if not focused_event_assist:
+            shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
         context_lines.append(
             "Canonical LCR retrieval coverage: "
             + json.dumps({
@@ -5465,15 +5490,24 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             }, ensure_ascii=False, default=str)
         )
         canonical_sources = (
-            "living_record", "evidence_observations", "facts", "assertions",
-            "decisions", "decision_outcomes", "timeline", "uncertainties",
-            "uncertainty_assessments", "missing_information", "open_questions",
-            "caregiver_question_queue", "open_loop_records", "information_gaps", "follow_up_links",
-            "reconciliations", "conflicts", "provenance", "caregiver_observations",
-            "caregiver_contexts", "caregiver_perspectives", "corrections",
+            (
+                "living_record", "events", "evidence", "evidence_observations",
+                "facts", "assertions", "corrections", "conflicts", "contradictions",
+                "uncertainties", "uncertainty_assessments", "open_questions",
+            )
+            if focused_event_assist else (
+                "living_record", "evidence_observations", "facts", "assertions",
+                "decisions", "decision_outcomes", "timeline", "uncertainties",
+                "uncertainty_assessments", "missing_information", "open_questions",
+                "caregiver_question_queue", "open_loop_records", "information_gaps", "follow_up_links",
+                "reconciliations", "conflicts", "provenance", "caregiver_observations",
+                "caregiver_contexts", "caregiver_perspectives", "corrections",
+            )
         )
         shared_items_added = 0
         shared_chars_added = 0
+        max_shared_items = 18 if focused_event_assist else 200
+        max_shared_chars = 7000 if focused_event_assist else 16000
         for source_name in canonical_sources:
             source = shared_lcr_context.get("sources", {}).get(source_name, {})
             for item in source.get("items", []):
@@ -5482,7 +5516,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     f"information_status={item.get('information_status', 'unknown')}): "
                     + json.dumps(item, ensure_ascii=False, default=str)
                 )
-                if shared_items_added >= 200 or shared_chars_added + len(line) > 16000:
+                if shared_items_added >= max_shared_items or shared_chars_added + len(line) > max_shared_chars:
                     shared_context_truncated = True
                     break
                 context_lines.append(line)
@@ -5531,7 +5565,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "two_week_review", "decision_outcome", "critical_information_completeness",
         "document_validity_renewal", "emergency_readiness", "care_transition",
     }
-    if payload.workflow in freshness_workflows:
+    if payload.workflow in freshness_workflows and anchored_event is None:
         freshness_schema_available = (
             inspect(db.get_bind()).has_table("evidence_freshness_assessments")
             and inspect(db.get_bind()).has_table("evidence_freshness_policies")
