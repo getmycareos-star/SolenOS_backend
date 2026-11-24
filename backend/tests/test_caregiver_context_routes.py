@@ -1248,7 +1248,7 @@ def test_care_continuity_rejects_links_to_caregiver_deleted_evidence():
         json={
             "fact_id": fact.json()["id"],
             "evidence_id": deleted_id,
-            "evidence_role": "supporting",
+            "evidence_role": "supports",
         },
     )
     assert fact_link.status_code == 404, fact_link.text
