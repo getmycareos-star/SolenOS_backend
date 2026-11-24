@@ -7296,6 +7296,8 @@ def _is_companion_identity_question(user_text: str) -> bool:
 
 def _companion_identity_direct_answer(user_text: str) -> str | None:
     """Return canonical product-identity answers without invoking a language model."""
+    if not _is_companion_identity_question(user_text):
+        return None
     normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", (user_text or "").casefold())).strip()
     if re.search(r"\bwho (?:are|made|created|built|developed) you$", normalized):
         if re.search(r"\bwho are you$", normalized):
