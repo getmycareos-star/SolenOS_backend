@@ -697,7 +697,11 @@ async def ask_daily_care_qwen(
             options={"temperature": 0, "num_predict": daily_token_budget},
         )
         parsed = json.loads(raw)
-        if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not isinstance(parsed.get("proposals"), list):
+        if (
+            not isinstance(parsed, dict)
+            or not isinstance(parsed.get("answer"), str)
+            or not isinstance(parsed.get("proposals"), list)
+        ):
             raise ValueError("invalid qwen response schema")
         if response_exceeds_hard_maximum(parsed["answer"], response_length_policy):
             repair_messages = [
@@ -708,26 +712,27 @@ async def ask_daily_care_qwen(
                     f"and remain at or below {response_length_policy.max_words} words. Preserve every supported fact, "
                     "source ID, date, conflict, uncertainty, and missing-history qualification. Do not truncate a sentence "
                     "or remove a material safety detail. Keep the proposals array and exact JSON schema valid. Return JSON only."
-                   except HTTPException as exc:
+                )},
+            ]
+            raw = await __import__("asyncio").to_thread(
+                qwen_chat,
+                repair_messages,
+                response_format=schema,
+                options={"temperature": 0, "num_predict": daily_token_budget},
+            )
+            parsed = json.loads(raw)
+            if (
+                not isinstance(parsed, dict)
+                or not isinstance(parsed.get("answer"), str)
+                or not isinstance(parsed.get("proposals"), list)
+            ):
+                raise ValueError("invalid repaired qwen response schema")
+            if response_exceeds_hard_maximum(parsed["answer"], response_length_policy):
+                raise ValueError("Qwen answer exceeded the selected caregiver response-length contract after repair")
+    except HTTPException as exc:
         fallback = _qwen_gateway_failure_payload(exc.status_code, history_scope)
         if fallback is not None:
             return fallback
-        raise
- # but never create a proposal from an absent or malformed answer.
-            failure_status = "qwen_invalid_response" if exc.status_code == 502 else "qwen_unavailable"
-            return {
-                "status": failure_status,
-                "answer": (
-                    "Daily Care records remain available, but the AI could not return a usable answer. "
-                    "No LCR changes were made. Try again later."
-                ),
-                "source_records": [],
-                "proposal_analysis_id": None,
-                "proposals": [],
-                "history_scope": history_scope,
-                "review_required": True,
-                "written_to_lcr": False,
-            }
         raise
     except (ValueError, TypeError, json.JSONDecodeError):
         return {
