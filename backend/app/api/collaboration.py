@@ -5615,8 +5615,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 "schema_status": shared_lcr_context.get("schema_status"),
                 "history_coverage": shared_lcr_context.get("history_coverage"),
                 "missing_required_sources": shared_lcr_context.get("missing_required_sources", []),
-                "missing_optional_sources": shared_lcr_context.get("missing_optional_sources", []),
                 "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
+                "failed_sources": [
+                    name for name, source in shared_lcr_context.get("sources", {}).items()
+                    if source.get("status") in {
+                        "failed", "unsearchable", "unavailable_schema", "unavailable_scope"
+                    }
+                ][:20],
                 "source_limits": [
                     {
                         "source_type": name,
@@ -5624,13 +5629,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                         "interpretation_limit": source.get("interpretation_limit"),
                     }
                     for name, source in shared_lcr_context.get("sources", {}).items()
-                    if source.get("status") in {"failed", "partial", "unsearchable"}
+                    if source.get("status") in {
+                        "failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"
+                    }
                     and source.get("interpretation_limit")
                 ][:20],
                 "sources": {
                     name: {
                         "status": source.get("status"),
-                        "candidate_count": source.get("candidate_count"),
                         "returned_count": source.get("returned_count", 0),
                         "candidate_scan_complete": source.get("candidate_scan_complete", False),
                         "has_more": source.get("has_more", False),
@@ -5638,7 +5644,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                     }
                     for name, source in shared_lcr_context.get("sources", {}).items()
                 },
-                "retrieval_contract": shared_lcr_context.get("retrieval_contract", {}),
             }, ensure_ascii=False, default=str)
         )
         canonical_sources = (
