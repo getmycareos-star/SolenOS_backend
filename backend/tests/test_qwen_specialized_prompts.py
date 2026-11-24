@@ -120,6 +120,21 @@ def test_workflow_classifier_does_not_load_specialists_from_its_workflow_list():
     assert select_specialized_domains(messages) == ()
 
 
+def test_meta_task_marker_cannot_suppress_explicit_workflow_routing():
+    import pytest
+
+    messages = [{
+        "role": "system",
+        "content": (
+            "SOLENOS_META_TASK: workflow_classification. "
+            "SOLENOS_WORKFLOW_ID: medication_day. "
+            "Classify the caregiver request."
+        ),
+    }]
+    with pytest.raises(ValueError, match="ambiguous_meta_task_and_workflow_metadata"):
+        select_specialized_domains(messages)
+
+
 
 def test_explicit_solenos_workflow_ids_activate_their_specialists():
     cases = {
