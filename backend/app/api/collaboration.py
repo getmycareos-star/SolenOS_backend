@@ -10026,9 +10026,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         if isinstance(item, dict) and item.get("record_type") and item.get("record_id")
                     ][:100],
                     "retrieval_coverage": {
-                        "status": model_retrieval_coverage.get("retrieval_completeness"),
-                        "retrieval_projection_complete": model_retrieval_coverage.get("retrieval_projection_complete"),
-                        "page_limit_reached": bool(more_available_source_names),
+                        "status": model_retrieval_coverage.get("retrieval_completeness", "unknown"),
+                        "retrieval_projection_complete": bool(
+                            lcr_context_coverage.get("retrieval_projection_complete", False)
+                        ),
+                        "page_limit_reached": bool(
+                            lcr_context_coverage.get("page_limit_reached", False)
+                            or more_available_source_names
+                        ),
                         "context_truncated": bool(context_truncated),
                     },
                 }
