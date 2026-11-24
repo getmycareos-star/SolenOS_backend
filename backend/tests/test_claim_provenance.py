@@ -487,3 +487,48 @@ def test_negation_and_uncertainty_are_not_removed_from_supported_claims():
     assert negative["claims"][0]["support_status"] == "matched_saved_wording"
     assert uncertain["claims"][0]["support_status"] == "matched_saved_wording"
 
+def test_explicitly_attributed_exact_source_quote_is_supported():
+    source_text = "Caregiver reported that Mum had a quieter night last week."
+    provenance = build_claim_provenance(
+        "Caregiver-reported: “Mum had a quieter night last week.”",
+        [{
+            "record_type": "care_event",
+            "record_id": "quoted-care-event",
+            "source_text": source_text,
+            "record_status": "recorded",
+            "source_attribution": "caregiver_reported",
+        }],
+    )
+    assert provenance["claims"][0]["support_status"] == "matched_saved_wording"
+    assert provenance["claims"][0]["source_references"][0]["matched_passage"] == (
+        "Mum had a quieter night last week."
+    )
+
+
+def test_exact_source_quote_without_attribution_is_not_supported_for_reported_evidence():
+    provenance = build_claim_provenance(
+        "“Mum had a quieter night last week.”",
+        [{
+            "record_type": "care_event",
+            "record_id": "unattributed-quoted-care-event",
+            "source_text": "Caregiver reported that Mum had a quieter night last week.",
+            "record_status": "recorded",
+            "source_attribution": "caregiver_reported",
+        }],
+    )
+    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
+
+def test_attributed_quote_must_exist_verbatim_in_the_same_source():
+    provenance = build_claim_provenance(
+        "Caregiver-reported: “Mum slept through the night.”",
+        [{
+            "record_type": "care_event",
+            "record_id": "different-quoted-care-event",
+            "source_text": "Caregiver reported that Mum had a quieter night last week.",
+            "record_status": "recorded",
+            "source_attribution": "caregiver_reported",
+        }],
+    )
+    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
