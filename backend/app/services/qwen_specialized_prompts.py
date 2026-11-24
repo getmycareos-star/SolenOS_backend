@@ -175,14 +175,20 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
         for message in messages
         if isinstance(message, dict) and str(message.get("role", "")).casefold() == "system"
     )
-    if not system_text.strip() or any(marker.casefold() in system_text for marker in META_TASK_MARKERS):
+    if not system_text.strip():
         return ()
 
     workflow_ids = re.findall(
-        r"solenos_workflow_id\s*:\s*([a-z0-9_]+)",
+        r"solenos_workflow_id\\s*:\\s*([a-z0-9_]+)",
         system_text,
         flags=re.IGNORECASE,
     )
+    is_meta_task = any(marker.casefold() in system_text for marker in META_TASK_MARKERS)
+    if is_meta_task:
+        if workflow_ids:
+            raise ValueError("ambiguous_meta_task_and_workflow_metadata")
+        return ()
+
     if workflow_ids:
         unique_ids = {workflow_id.casefold() for workflow_id in workflow_ids}
         if len(workflow_ids) != 1 or len(unique_ids) != 1:
