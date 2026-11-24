@@ -96,3 +96,42 @@ def test_daily_capture_extraction_prompt_fits_the_real_qwen_input_budget(monkeyp
             for message in prepared
         ),
     }
+
+def test_qwen_context_budget_reduces_output_reservation_before_discarding_context(monkeypatch):
+    context_lines = [
+        "Canonical source: " + json.dumps({
+            "source_type": "events",
+            "title": "First saved caregiver observation",
+            "description": "Mum has been forgetting whether she has eaten breakfast.",
+            "information_status": "caregiver_reported",
+        })
+    ]
+    attempts = []
+
+    def fake_qwen_chat(messages, *, options=None):
+        attempts.append({
+            "prompt": messages[0]["content"],
+            "num_predict": options["num_predict"],
+        })
+        if options["num_predict"] > 128:
+            raise HTTPException(status_code=413, detail="fixed instructions exceed input budget")
+        return "The saved note records a concern about remembering breakfast."
+
+    monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen_chat)
+    reply, selected_raw, rendered, truncated = asyncio.run(
+        collaboration._qwen_chat_with_bounded_context(
+            "Shared SolenOS instructions. Authorized context:\\n",
+            "What does this saved update mean?",
+            context_lines,
+            options={"temperature": 0, "num_predict": 256},
+        )
+    )
+
+    assert len(attempts) > 1
+    assert attempts[0]["num_predict"] == 256
+    assert attempts[-1]["num_predict"] == 128
+    assert "First saved caregiver observation" in attempts[-1]["prompt"]
+    assert reply == "The saved note records a concern about remembering breakfast."
+    assert selected_raw == context_lines
+    assert rendered
+    assert truncated is False
