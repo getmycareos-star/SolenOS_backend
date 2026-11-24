@@ -3665,6 +3665,10 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
         CareAssertion,
         EvidenceClaimAssessment,
         EvidenceReviewRecord,
+        EvidenceFreshnessAssessment,
+        EvidenceFreshnessPolicy,
+        EvidenceCompletenessAssessment,
+        EvidenceCompletenessPolicy,
     )
 
     test_client, owner, other = client
@@ -3696,6 +3700,26 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
             uploaded_at=before,
             ingested_at=before,
         )
+        freshness_policy = EvidenceFreshnessPolicy(
+            id="asof-freshness-policy",
+            person_id=person_id,
+            domain_key="sleep",
+            policy_version="freshness-v1",
+            max_age_days=30,
+            historical_after_days=90,
+            rationale="Bounded review interval for sleep evidence.",
+            created_by_caregiver_id=caregiver_id,
+        )
+        completeness_policy = EvidenceCompletenessPolicy(
+            id="asof-completeness-policy",
+            person_id=person_id,
+            domain_key="sleep",
+            purpose_key="companion_response",
+            policy_version="completeness-v1",
+            required_fields=["source", "event_time"],
+            rationale="Required provenance for a longitudinal sleep answer.",
+            created_by_caregiver_id=caregiver_id,
+        )
         claim = CareAssertion(
             id="asof-review-claim",
             person_id=person_id,
@@ -3712,7 +3736,7 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
             created_by_caregiver_id=caregiver_id,
             recorded_at=before,
         )
-        db.add_all([evidence, foreign_evidence, claim])
+        db.add_all([evidence, foreign_evidence, freshness_policy, completeness_policy, claim])
         db.flush()
         db.add_all([
             EvidenceReviewRecord(
@@ -3794,6 +3818,105 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
                 reviewed_by_caregiver_id=caregiver_id,
                 created_at=after,
             ),
+            EvidenceFreshnessAssessment(
+                id="asof-freshness-before",
+                person_id=person_id,
+                evidence_id=evidence.id,
+                policy_id=freshness_policy.id,
+                policy_version="freshness-v1",
+                freshness_status="needs_review",
+                source_time=before,
+                source_time_kind="event_occurrence",
+                assessed_at=before,
+                age_days=1,
+                rationale="The source has an explicit review boundary.",
+                assessed_by_caregiver_id=caregiver_id,
+            ),
+            EvidenceFreshnessAssessment(
+                id="asof-freshness-after",
+                person_id=person_id,
+                evidence_id=evidence.id,
+                policy_id=freshness_policy.id,
+                policy_version="freshness-v1",
+                freshness_status="current",
+                source_time=after,
+                source_time_kind="event_occurrence",
+                assessed_at=after,
+                age_days=0,
+                rationale="This assessment occurred after the requested instant.",
+                assessed_by_caregiver_id=caregiver_id,
+            ),
+            EvidenceFreshnessAssessment(
+                id="asof-freshness-foreign",
+                person_id=other["person"]["id"],
+                evidence_id=evidence.id,
+                policy_id=freshness_policy.id,
+                policy_version="freshness-v1",
+                freshness_status="current",
+                source_time=before,
+                source_time_kind="event_occurrence",
+                assessed_at=before,
+                age_days=0,
+                rationale="Cross-person assessment must not appear.",
+                assessed_by_caregiver_id=other["caregiver"]["id"],
+            ),
+            EvidenceCompletenessAssessment(
+                id="asof-completeness-before",
+                person_id=person_id,
+                policy_id=completeness_policy.id,
+                policy_version="completeness-v1",
+                subject_type="evidence",
+                subject_id=evidence.id,
+                assessment_status="partial",
+                required_fields=["source", "event_time"],
+                satisfied_fields=["event_time"],
+                missing_fields=["source"],
+                field_evidence_json="{}",
+                evidence_ids=[evidence.id, foreign_evidence.id],
+                rationale="Source attribution remains incomplete.",
+                assessment_basis="linked_source_coverage_only",
+                semantic_sufficiency="not_automatically_verified",
+                assessed_by_caregiver_id=caregiver_id,
+                assessed_at=before,
+            ),
+            EvidenceCompletenessAssessment(
+                id="asof-completeness-after",
+                person_id=person_id,
+                policy_id=completeness_policy.id,
+                policy_version="completeness-v1",
+                subject_type="evidence",
+                subject_id=evidence.id,
+                assessment_status="complete",
+                required_fields=["source", "event_time"],
+                satisfied_fields=["source", "event_time"],
+                missing_fields=[],
+                field_evidence_json="{}",
+                evidence_ids=[evidence.id],
+                rationale="This assessment occurred after the requested instant.",
+                assessment_basis="linked_source_coverage_only",
+                semantic_sufficiency="not_automatically_verified",
+                assessed_by_caregiver_id=caregiver_id,
+                assessed_at=after,
+            ),
+            EvidenceCompletenessAssessment(
+                id="asof-completeness-foreign",
+                person_id=other["person"]["id"],
+                policy_id=completeness_policy.id,
+                policy_version="completeness-v1",
+                subject_type="evidence",
+                subject_id=evidence.id,
+                assessment_status="complete",
+                required_fields=["source", "event_time"],
+                satisfied_fields=["source", "event_time"],
+                missing_fields=[],
+                field_evidence_json="{}",
+                evidence_ids=[evidence.id],
+                rationale="Cross-person assessment must not appear.",
+                assessment_basis="linked_source_coverage_only",
+                semantic_sufficiency="not_automatically_verified",
+                assessed_by_caregiver_id=other["caregiver"]["id"],
+                assessed_at=before,
+            ),
             EvidenceClaimAssessment(
                 id="asof-claim-assessment-foreign",
                 person_id=other["person"]["id"],
@@ -3832,9 +3955,24 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
         "scope_note": None,
         "source_passage": None,
     }]
+    assert history["freshness_assessments_status"] == "available"
+    assert [item["assessment_id"] for item in history["freshness_assessments"]] == [
+        "asof-freshness-before"
+    ]
+    assert history["freshness_assessments"][0]["freshness_status"] == "needs_review"
+    assert history["completeness_assessments_status"] == "available"
+    assert [item["assessment_id"] for item in history["completeness_assessments"]] == [
+        "asof-completeness-before"
+    ]
+    assert history["completeness_assessments"][0]["evidence_ids"] == ["asof-review-evidence"]
+    assert history["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
     assert "asof-review-after" not in response.text
     assert "asof-review-foreign" not in response.text
     assert "asof-claim-assessment-after" not in response.text
     assert "asof-claim-assessment-foreign" not in response.text
+    assert "asof-freshness-after" not in response.text
+    assert "asof-freshness-foreign" not in response.text
+    assert "asof-completeness-after" not in response.text
+    assert "asof-completeness-foreign" not in response.text
     assert "Private evidence belonging to another care record." not in response.text
 
