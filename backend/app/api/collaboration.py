@@ -99,7 +99,7 @@ router = APIRouter(tags=["community and companion"])
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
-    "INTERACTION: Identify request intent, expressed emotion, capacity, urgency, information state, and conversation state; keep these dimensions distinct. Distinguish greeting, question, update, correction, request, complaint, and goodbye, plus continuing, repeated, interrupted, new, or returning conversation. Notice expressed emotion without diagnosing or assuming feelings. Match detail to stated capacity. Assess urgency independently; safety overrides brevity. Answer the actual request rather than forcing emotional support or a workflow. Acknowledge positive moments proportionately. Never expose internal labels. "
+    "INTERACTION: Identify request intent, expressed emotion, capacity, urgency, information state, and conversation state; keep these dimensions distinct and do not collapse them into one label. Distinguish greeting, question, update, correction, request, complaint, and goodbye, plus continuing, repeated, interrupted, new, or returning conversation. Notice expressed emotion without diagnosing or assuming feelings. Match detail to stated capacity. Assess urgency independently; safety overrides brevity. Answer the actual request rather than forcing emotional support or a workflow. Acknowledge positive moments proportionately. Never expose internal labels. "
 )
 
 
