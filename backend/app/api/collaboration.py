@@ -3906,21 +3906,31 @@ def _contradictory_event_evidence_response(user_text: str, event_context: list[s
         if brace < 0:
             continue
         try:
-            record = json.loads(line[brace:])
+            payload = json.loads(line[brace:])
         except (TypeError, ValueError):
             continue
-        if not isinstance(record, dict) or not record.get("event_id"):
+        if not isinstance(payload, dict):
             continue
-        status = str(record.get("status") or "").casefold()
+        source_type = str(payload.get("source_type") or "").casefold()
+        if source_type and source_type != "events":
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+        event_id = record.get("event_id") or record.get("id") or record.get("source_id") or payload.get("source_id")
+        if not event_id:
+            continue
+        status = str(record.get("status") or record.get("epistemic_status") or "").casefold()
         if status in {"retracted", "deleted", "superseded", "rejected", "cancelled", "canceled"}:
             continue
 
-        title = str(record.get("title") or "").casefold()
+        title = str(record.get("title") or record.get("event_type") or "").casefold()
         description = str(record.get("description") or "").casefold()
         if not description:
             continue
         searchable = f"{title} {description}"
-        raw_date = record.get("occurred_at") or record.get("recorded_at")
+        raw_date = (
+            record.get("occurred_at") or record.get("event_time")
+            or record.get("recorded_at") or record.get("created_at")
+        )
         if not isinstance(raw_date, str) or not raw_date.strip():
             continue
         try:
@@ -9413,7 +9423,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         medication_change_reply = _medication_change_safety_response(user_text)
         unsupported_trend = bool(trend_assessment and not trend_assessment["sufficient"])
-        conflict_response = _contradictory_event_evidence_response(user_text, event_context)
+        # Direct event rows may be removed when the correction-aware shared
+        # projection already contains them. Run conflict detection against both
+        # sources so sanitizer de-duplication cannot hide contradictory reports.
+        conflict_response = _contradictory_event_evidence_response(
+            user_text, [*event_context, *shared_lcr_lines]
+        )
         care_history_extractive_fallback_used = care_history_fallback_from_outage or care_history_direct_answer_used
         if care_history_direct_answer_used:
             reply = care_history_direct_answer
