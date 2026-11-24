@@ -381,10 +381,7 @@ def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depe
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     if not inspect(db.connection()).has_table("evidence_review_records"):
         raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
-    evidence = db.query(Evidence.id).filter(
-        Evidence.id == evidence_id,
-        Evidence.person_id == person_id,
-    ).first()
+    evidence = _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     rows = db.query(EvidenceReviewRecord).filter(
@@ -456,9 +453,8 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
     text_duplicate_ids = []
     if stored_hash and integrity_status == "match":
         possible_text_duplicates = (
-            db.query(Evidence)
+            _active_evidence_query(db, person_id)
             .filter(
-                Evidence.person_id == person_id,
                 Evidence.id != evidence.id,
                 Evidence.source_text_sha256 == stored_hash,
             )
@@ -519,8 +515,7 @@ def get_evidence_source_integrity(evidence_id: str, request: Request, db: Sessio
         .first()
     )
     comparison_rows = (
-        db.query(Evidence)
-        .filter(Evidence.person_id == person_id)
+        _active_evidence_query(db, person_id)
         .order_by(Evidence.uploaded_at.asc(), Evidence.id.asc())
         .limit(NEAR_DUPLICATE_MAX_RECORDS + 1)
         .all()
@@ -798,8 +793,7 @@ def get_claim_assessment_impact(
     if assessed_ids:
         existing = {
             str(row[0])
-            for row in db.query(Evidence.id).filter(
-                Evidence.person_id == person_id,
+            for row in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
                 Evidence.id.in_(sorted(assessed_ids)),
             ).all()
         }
@@ -2641,8 +2635,7 @@ def create_observation_coverage(payload: dict[str, Any], request: Request, db: S
         raise HTTPException(status_code=422, detail="Duplicate source evidence IDs are not allowed")
     if evidence_ids:
         found = {
-            str(row[0]) for row in db.query(Evidence.id).filter(
-                Evidence.person_id == person_id,
+            str(row[0]) for row in _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(
                 Evidence.id.in_(evidence_ids),
             ).all()
         }
@@ -6637,9 +6630,7 @@ def create_evidence_source_relationship(
 def list_evidence_source_relationships(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Return only relationships for evidence visible within the authorized care record."""
     person_id, _ = _scoped_identity(request, db)
-    evidence = db.query(Evidence.id).filter(
-        Evidence.id == evidence_id, Evidence.person_id == person_id
-    ).first()
+    evidence = _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence item not found")
     from app.models.care_continuity import EvidenceSourceRelationship
@@ -6967,7 +6958,7 @@ def _evidence_observation_response(row):
 @router.get("/evidence/{evidence_id}/observations")
 def list_evidence_observations(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
-    evidence = db.query(Evidence.id).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    evidence = _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     from app.models.care_continuity import EvidenceObservation
@@ -7148,10 +7139,7 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
 @router.get("/evidence-freshness/assessments/{evidence_id}")
 def list_evidence_freshness_assessments(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     person_id, _ = _scoped_identity(request, db)
-    evidence = db.query(Evidence.id).filter(
-        Evidence.id == evidence_id,
-        Evidence.person_id == person_id,
-    ).first()
+    evidence = _active_evidence_query(db, person_id).with_entities(Evidence.id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     rows = db.query(EvidenceFreshnessAssessment).filter(
