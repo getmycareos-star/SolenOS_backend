@@ -72,7 +72,7 @@ def test_lcr_authority_and_backend_write_boundary_are_in_the_assembled_contract(
 
 
 def test_identity_covers_origin_and_canonical_creator_response():
-    content = SOLENOS_IDENTITY_CONSTITUTION
+    content = SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
     required = (
         "SolenOS was founded by David Abuchi",
         "If asked who made you, say",
