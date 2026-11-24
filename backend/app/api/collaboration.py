@@ -9302,8 +9302,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Do not expose care-recipient details in a greeting-only response. "
             "Use local date/time only when timezone_status is configured; if it is not configured or is in conflict, "
             "do not guess the time of day or resolve relative dates using an assumed local timezone. "
-            "When timezone_status is configured, use only the supplied greeting_period for a time-based greeting. "
-            "Respect the supplied date format, measurement system, locale, and communication style when present."
+            "When timezone_status is configured, use only the supplied greeting_period for a time-based greeting; do not state the exact clock time or timezone unless asked. "
+            "Use date_format for display only and never rewrite source timestamps. "
+            "Use measurement_system for general units, but never alter a recorded medication dose or clinical measurement; if a conversion is explicitly requested, preserve the original and label the converted value. "
+            "communication_style=concise means brief and direct; balanced means essential explanation; detailed means fuller explanation. Every style must preserve safety, uncertainty, and source attribution. "
+            "locale controls regional formatting only and never overrides the requested response language."
         )
         language_names = {"en": "English", "es": "Spanish", "fr": "French"}
         selected_language = language_names[payload.language]
