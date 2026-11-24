@@ -1,6 +1,9 @@
 import pytest
 
-from app.api.collaboration import _is_companion_identity_question
+from app.api.collaboration import (
+    _companion_identity_direct_answer,
+    _is_companion_identity_question,
+)
 
 
 @pytest.mark.parametrize(
@@ -43,3 +46,27 @@ def test_explicit_product_identity_questions_are_classified_without_care_history
 )
 def test_care_questions_are_not_misclassified_as_product_identity(question):
     assert not _is_companion_identity_question(question)
+
+
+@pytest.mark.parametrize(
+    ("question", "expected"),
+    [
+        ("Who are you?", "I'm SolenOS Companion, the AI care-continuity companion within SolenOS."),
+        (
+            "Who made you?",
+            "I'm SolenOS Companion, an AI companion developed as part of SolenOS. SolenOS was founded by David Abuchi to help family caregivers maintain continuity throughout the care journey.",
+        ),
+        ("Who founded SolenOS?", "SolenOS was founded by David Abuchi."),
+        ("Are you a doctor?", "No. I'm an AI companion, not a healthcare professional or a replacement for professional medical judgment."),
+        ("Are you human?", "No. I'm an AI companion, not a person."),
+        ("Are you ChatGPT?", "I'm SolenOS Companion, powered by AI technology within SolenOS."),
+        ("Who owns you?", "I'm part of the SolenOS product. I can't make a separate legal ownership claim."),
+        ("Can I trust everything you say?", "I can make mistakes or misunderstand information. Check important care details against their source and with a qualified professional when appropriate."),
+    ],
+)
+def test_identity_questions_use_canonical_deterministic_answers(question, expected):
+    assert _companion_identity_direct_answer(question) == expected
+
+
+def test_non_identity_care_question_has_no_product_identity_answer():
+    assert _companion_identity_direct_answer("What changed in Mum's sleep this week?") is None
