@@ -215,23 +215,29 @@ def test_production_evaluation_can_be_the_first_inference_after_deployment(monke
 
     assert result["synthetic_only"] is True
     assert result["care_record_accessed"] is False
-    assert result["total"] == 6
-    assert len(result["results"]) == 6
+    assert result["total"] == 11
+    assert len(result["results"]) == 11
 
 
-def test_production_evaluation_has_five_independent_synthetic_acceptance_criteria():
+def test_production_evaluation_has_ten_specialist_specific_synthetic_acceptance_criteria():
     from app.api.collaboration import _production_qwen_evaluation_cases
 
     cases = _production_qwen_evaluation_cases()
     assert {case["criterion"] for case in cases} == {
-        "contradiction_preservation",
+        "incomplete_history",
         "reporter_attribution",
+        "longitudinal_sparse_observation",
+        "contradiction_preservation",
+        "document_historical_current",
+        "companion_lcr_grounding",
         "event_chronology",
-        "uncertainty",
-        "medication_safety",
+        "caregiver_continuity_gap",
+        "medication_conflict",
+        "event_correction_lineage",
     }
-    assert len(cases) == 5
-    assert all("Synthetic record:" in case["context"] for case in cases)
+    assert len(cases) == 10
+    assert all("Synthetic" in case["context"] for case in cases)
+    assert all("SOLENOS_WORKFLOW_ID:" in case["system"] for case in cases)
 
 
 def test_readiness_and_production_evaluation_are_public_to_session_middleware_only():
