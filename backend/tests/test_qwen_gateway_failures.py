@@ -488,11 +488,14 @@ def test_actual_qwen_transport_rejects_unmapped_workflow_before_network_call(mon
         raise AssertionError("unmapped workflow must not reach Ollama")
 
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", unexpected_request)
-    with pytest.raises(ValueError, match="unmapped_solenos_workflow"):
+    with pytest.raises(HTTPException) as error:
         qwen_gateway.qwen_chat([
             {"role": "system", "content": "SOLENOS_WORKFLOW_ID: future_workflow"},
             {"role": "user", "content": "Hello."},
         ])
+
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "qwen_workflow_routing_unavailable"
 
 
 def test_qwen_gateway_rejects_oversized_prompt_before_network_call(monkeypatch):
