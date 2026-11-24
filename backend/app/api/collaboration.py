@@ -8766,7 +8766,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
             "failed_sources": sorted(
                 name for name, value in (lcr_context_coverage.get("sources") or {}).items()
-                if value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"}
+                if value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
             ),
             "sources": {
                 name: {
@@ -8778,7 +8778,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }
                 for name, value in (lcr_context_coverage.get("sources") or {}).items()
                 if (
-                    value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"}
+                    value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
                     or value.get("has_more")
                     or prompt_source_counts.get(name, 0) > 0
                 )
