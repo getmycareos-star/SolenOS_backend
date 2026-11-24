@@ -407,6 +407,7 @@ def extract_review_candidates(
         {
             "role": "system",
             "content": (
+                "SOLENOS_WORKFLOW_ID: document_candidate_extraction. "
                 "You extract explicitly stated care-relevant statements from source documents, which may be clinician-authored, "
                 "caregiver-authored, or patient-reported. You are not the authority: every output is only a source claim "
                 "pending caregiver review. "
@@ -551,6 +552,7 @@ def extract_companion_care_candidates(source_text: str) -> dict:
             {
                 "role": "system",
                 "content": (
+                    "SOLENOS_WORKFLOW_ID: companion_care_update. "
                     "Identify whether the caregiver's own message contains meaningful new information "
                     "about an actual person's care, condition, experience, or observed behaviour. "
                     "Do not classify greetings, ordinary conversation, general questions, advice requests, "
