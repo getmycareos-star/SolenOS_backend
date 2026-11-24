@@ -1593,6 +1593,22 @@ def test_temporal_relations_contradictions_and_reference_frames_reject_foreign_f
     foreign_fact = create_fact(other, "foreign-fact")
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
 
+    foreign_event = client.post(
+        "/api/v1/events",
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+        json={
+            "person_id": other["person"]["id"],
+            "event_type": "care_observation",
+            "occurred_at": "2026-11-20T10:15:00Z",
+            "title": "Foreign temporal source event",
+            "description": "This event belongs to another person's record.",
+            "evidence_ids": [],
+            "created_by_caregiver_id": other["caregiver"]["id"],
+            "ingestion_key": "foreign-temporal-frame-event",
+        },
+    )
+    assert foreign_event.status_code == 200, foreign_event.text
+
     relation = client.post(
         "/api/v1/temporal/relations",
         headers=headers,
@@ -1628,6 +1644,17 @@ def test_temporal_relations_contradictions_and_reference_frames_reject_foreign_f
         },
     )
     assert reference_frame.status_code == 422, reference_frame.text
+
+    foreign_event_frame = client.post(
+        "/api/v1/temporal/reference-frames",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "name": "Foreign event reference",
+            "source_event_id": foreign_event.json()["id"],
+        },
+    )
+    assert foreign_event_frame.status_code == 422, foreign_event_frame.text
 
 
 def test_temporal_fact_and_relationship_updates_reject_foreign_evidence_references():
