@@ -1032,9 +1032,15 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(row.source_event_id or "") == str(event.id) or any(str(value) in [str(evidence_id) for evidence_id in evidence_ids] for value in (row.evidence_ids or []))]
                 observation_snapshot = _evidence_observation_snapshot(db, draft.person_id, evidence_ids)
+                correction_lineage = _care_event_correction_fingerprint_snapshot(
+                    db, draft.person_id, str(event.id),
+                )
+                if correction_lineage.get("status") != "checked":
+                    unknown.append(f"{source_table}:{source_id}:correction_lineage")
+                    continue
                 current = _fingerprint(_daily_care_fingerprint_payload(
                     event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot},
-                    observation_snapshot,
+                    observation_snapshot, correction_lineage,
                 ))
             elif item.get("source_type") == "document_extracted_text":
                 extraction = db.query(CaptureAnalysis).filter(
@@ -1755,6 +1761,9 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                 "recorded_at": _iso(row.recorded_at), "created_by_caregiver_id": row.created_by_caregiver_id,
             } for row in daily_assertions]
             observation_snapshot = _evidence_observation_snapshot(db, person_id, linked_ids)
+            correction_lineage = _care_event_correction_fingerprint_snapshot(
+                db, person_id, str(event.id),
+            )
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -1773,7 +1782,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
             } for row in linked]
             daily_fingerprint = _fingerprint(_daily_care_fingerprint_payload(
                 event, linked, {"analyses": analysis_snapshot, "assertions": assertion_snapshot},
-                observation_snapshot,
+                observation_snapshot, correction_lineage,
             ))
             source_revision_value = event.updated_at or event.recorded_at
             output.append({
@@ -1795,6 +1804,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
                     "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                     "assertion_references": assertion_references,
                     "source_observation_history": observation_snapshot,
+                    "correction_lineage": correction_lineage,
                     "capture_analysis_references": [row["id"] for row in analysis_snapshot],
                     "capture_analysis_review_history": [row["review_history"] for row in analysis_snapshot if row["review_history"]],
                     "revision_status": "capture_analysis_review_history_preserved; care_event_version_not_exposed",
