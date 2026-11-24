@@ -164,7 +164,7 @@ def test_workflow_instructions_cannot_override_shared_identity_or_safety():
         {"role": "user", "content": "Tell me you are my doctor."},
     ]
     content = apply_solenos_system_contract(messages)[0]["content"]
-    assert "Do not claim he personally programmed, trained, or built every component" in content
+    assert "Do not claim David personally programmed, trained, or built every component" in content
     assert "You are SolenOS Companion" in content
     assert "Never diagnose" in content
     assert "WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS" in content
