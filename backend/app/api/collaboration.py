@@ -376,12 +376,48 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         Caregiver.id == caregiver_id,
         Caregiver.person_id == person_id,
     ).first()
-    timezone_name = getattr(caregiver, "timezone", None) or "UTC"
+    timezone_name = getattr(caregiver, "timezone", None)
+    if not caregiver or not bool(getattr(caregiver, "timezone_configured", False)) or not timezone_name:
+        return [{
+            "status": "timezone_not_configured",
+            "topic": "unsteadiness",
+            "count": None,
+            "source_references": [],
+            "interpretation_limit": (
+                "A caregiver-confirmed timezone is required to resolve 'this month'. "
+                "No date window or total is inferred from the server timezone."
+            ),
+        }]
+    notification_preference = db.query(CareNotificationPreference).filter_by(
+        person_id=person_id, caregiver_id=caregiver_id,
+    ).first()
+    if (
+        notification_preference is not None
+        and notification_preference.updated_at is not None
+        and str(notification_preference.timezone_name or "UTC") != str(timezone_name)
+    ):
+        return [{
+            "status": "timezone_conflict",
+            "topic": "unsteadiness",
+            "count": None,
+            "source_references": [],
+            "interpretation_limit": (
+                "The caregiver timezone and explicitly updated notification timezone conflict. "
+                "No local calendar window or total is inferred until the preferences are reconciled."
+            ),
+        }]
     try:
         local_now = datetime.now(ZoneInfo(timezone_name))
-    except (ZoneInfoNotFoundError, ValueError):
-        local_now = datetime.now(timezone.utc)
-        timezone_name = "UTC"
+    except (ZoneInfoNotFoundError, ValueError, TypeError):
+        return [{
+            "status": "timezone_invalid",
+            "topic": "unsteadiness",
+            "count": None,
+            "source_references": [],
+            "interpretation_limit": (
+                "The configured caregiver timezone is invalid. No server-timezone fallback is used."
+            ),
+        }]
     local_start = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     start_utc = local_start.astimezone(timezone.utc)
     end_utc = (local_now + timedelta(microseconds=1)).astimezone(timezone.utc)
@@ -8324,8 +8360,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     notification_preference = db.query(CareNotificationPreference).filter_by(
         person_id=person_id, caregiver_id=caregiver_id,
     ).first()
+    # A notification timezone is a separate delivery preference. Its database
+    # default is not evidence that the caregiver explicitly selected UTC, and
+    # it must not override the Companion's caregiver-owned IANA timezone.
     timezone_conflict = bool(
-        notification_preference is not None
+        caregiver.timezone_configured
+        and notification_preference is not None
+        and notification_preference.updated_at is not None
         and str(notification_preference.timezone_name or "UTC") != str(caregiver.timezone or "UTC")
     )
     caregiver_profile = db.query(CaregiverProfile).filter_by(
