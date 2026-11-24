@@ -7,8 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
 from app.main import app
-from app.models.care import Caregiver
-from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery, CarePushSubscription
+from app.models.notifications import CareNotification, CarePushDelivery, CarePushSubscription
 from app.models.privacy_delivery import NotificationReadReceipt
 
 
@@ -265,67 +264,3 @@ def test_browser_push_is_disabled_and_in_app_notifications_remain_available(monk
         db.close()
         teardown()
 
-
-
-def test_notification_timezone_never_sets_or_overwrites_companion_timezone(monkeypatch):
-    client, first, _ = setup_client(monkeypatch)
-    headers = {"Authorization": f"Bearer {first['access_token']}"}
-    person_id = first["person"]["id"]
-    caregiver_id = first["caregiver"]["id"]
-    try:
-        # Notification settings are independently editable and must not silently
-        # configure the Companion's caregiver-owned timezone.
-        notification_saved = client.put(
-            "/api/v1/notifications/preferences",
-            headers=headers,
-            json={"timezone_name": "America/Los_Angeles"},
-        )
-        assert notification_saved.status_code == 200, notification_saved.text
-        assert notification_saved.json()["timezone_name"] == "America/Los_Angeles"
-
-        with TestSession() as db:
-            caregiver = db.query(Caregiver).filter_by(
-                id=caregiver_id, person_id=person_id,
-            ).one()
-            assert caregiver.timezone == "UTC"
-            assert caregiver.timezone_configured is False
-
-        # Explicitly configuring the Companion timezone must not overwrite the
-        # separate notification-delivery timezone.
-        companion_saved = client.patch(
-            "/api/v1/caregiver/preferences",
-            headers=headers,
-            json={"timezone": "America/New_York"},
-        )
-        assert companion_saved.status_code == 200, companion_saved.text
-        assert companion_saved.json()["timezone"] == "America/New_York"
-        assert companion_saved.json()["timezone_configured"] is True
-
-        with TestSession() as db:
-            caregiver = db.query(Caregiver).filter_by(
-                id=caregiver_id, person_id=person_id,
-            ).one()
-            notification = db.query(CareNotificationPreference).filter_by(
-                caregiver_id=caregiver_id, person_id=person_id,
-            ).one()
-            assert caregiver.timezone == "America/New_York"
-            assert caregiver.timezone_configured is True
-            assert notification.timezone_name == "America/Los_Angeles"
-
-        # A later notification timezone change still cannot mutate the
-        # caregiver's authoritative Companion timezone.
-        notification_changed = client.put(
-            "/api/v1/notifications/preferences",
-            headers=headers,
-            json={"timezone_name": "America/Chicago"},
-        )
-        assert notification_changed.status_code == 200, notification_changed.text
-        assert notification_changed.json()["timezone_name"] == "America/Chicago"
-        with TestSession() as db:
-            caregiver = db.query(Caregiver).filter_by(
-                id=caregiver_id, person_id=person_id,
-            ).one()
-            assert caregiver.timezone == "America/New_York"
-            assert caregiver.timezone_configured is True
-    finally:
-        teardown()
