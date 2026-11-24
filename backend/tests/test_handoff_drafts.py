@@ -2459,3 +2459,48 @@ def test_handoff_snapshot_marks_corrected_and_uncheckable_events_as_historical()
         "The corrected caregiver account."
     )
 
+def test_handoff_generation_receives_correction_status_and_corrected_wording(monkeypatch):
+    import app.api.handoff_drafts as handoff_drafts
+
+    captured = []
+    monkeypatch.setattr(
+        handoff_drafts, "get_ollama_config",
+        lambda: ("http://ollama", "qwen-test", 30),
+    )
+
+    def capture(messages, **kwargs):
+        captured.append(messages)
+        return json.dumps({"items": [{
+            "section": "Recent observations",
+            "source_ref": "care_events:corrected-event",
+            "summary": "The earlier report was corrected.",
+            "supporting_quote": "Caregiver reported that medicine was given.",
+        }]})
+
+    monkeypatch.setattr(handoff_drafts, "qwen_chat", capture)
+    result = handoff_drafts._generate_grounded_handoff([{
+        "source_table": "care_events",
+        "source_id": "corrected-event",
+        "source_type": "care_event",
+        "epistemic_status": "caregiver_reported",
+        "record_status": "recorded",
+        "event_at": "2026-11-24T10:00:00+00:00",
+        "recorded_at": "2026-11-24T10:05:00+00:00",
+        "stale_warning": True,
+        "information_status": "historical_event",
+        "correction_lineage_status": "checked",
+        "interpretation_limit": "The original wording is historical only.",
+        "corrections": [{
+            "original_text": "Medicine was given.",
+            "corrected_text": "The caregiver did not witness medicine being given.",
+            "reason": "The earlier report overstated what was observed.",
+        }],
+        "text": "Caregiver reported that medicine was given.",
+    }], "family_transition", "family")
+
+    prompt = json.dumps(captured[0], ensure_ascii=False)
+    assert result["status"] == "generated"
+    assert '"information_status": "historical_event"' in prompt
+    assert "The caregiver did not witness medicine being given." in prompt
+    assert "must never be described as the current account" in prompt
+
