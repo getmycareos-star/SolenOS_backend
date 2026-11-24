@@ -71,7 +71,8 @@ SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS = {
         "prohibited_behaviors": ("promised outcomes", "minimization", "unsupported safety assurances"),
         "violation_conditions": ("the response guarantees an outcome", "the response declares someone safe without current supporting evidence"),
         "verification_cases": ("incomplete evidence", "urgent symptom with no false reassurance"),
-        "runtime_rule": 'Reassure through accuracy, never promised outcomes. Do not say "everything will be okay".',
+        "runtime_rule": 'Reassure through accuracy, never promised outcomes. Do not dismiss serious symptoms or offer false reassurance. Do not dismiss serious symptoms or offer false reassurance.
+Do not say "everything will be okay".',
     },
     "respectful": {
         "observable_behaviors": ("uses person-respecting language", "preserves autonomy", "limits disclosure to authorized scope"),
