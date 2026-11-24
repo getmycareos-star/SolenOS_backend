@@ -6,10 +6,12 @@ is isolated in the CI PostgreSQL database.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,43 +91,102 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
     from app.services.qwen_gateway import qwen_chat
     from app.services.qwen_specialized_prompts import (
         WORKFLOW_SPECIALISTS,
+        apply_specialized_intelligence,
         select_specialized_domains,
     )
+    from app.services.qwen_system_prompt import apply_solenos_system_contract
 
     cases = _production_qwen_evaluation_cases()
     assert len(cases) == 10
+    results = []
 
+    # Do not abort on the first behavioural failure. Every controlled scenario
+    # must execute independently so the artifact contains all ten real outputs.
     for case in cases:
         messages = [
             {"role": "system", "content": case["system"]},
             {
                 "role": "user",
-                "content": case["context"] + "\n\nQuestion: " + case["question"],
+                "content": case["context"] + "\\n\\nQuestion: " + case["question"],
             },
         ]
-        workflow_match = re.search(
-            r"SOLENOS_WORKFLOW_ID:\s*([a-z0-9_]+)",
-            case["system"],
-            flags=re.IGNORECASE,
-        )
-        assert workflow_match, case["criterion"]
-        workflow_id = workflow_match.group(1).casefold()
-        assert workflow_id in WORKFLOW_SPECIALISTS, (case["criterion"], workflow_id)
-        assert select_specialized_domains(messages) == WORKFLOW_SPECIALISTS[workflow_id], case["criterion"]
-
-        answer = qwen_chat(
-            messages,
-            timeout=180.0,
-            options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
-        )
-        checks = _production_qwen_answer_checks(case, answer)
-        assert checks and all(checks.values()), {
+        result = {
             "criterion": case["criterion"],
-            "workflow": workflow_id,
-            "selected_specialists": select_specialized_domains(messages),
-            "checks": checks,
-            "answer": answer[:1200],
+            "input_messages": messages,
+            "assembled_system_context": None,
+            "workflow": None,
+            "selected_specialists": [],
+            "answer": None,
+            "checks": {},
+            "passed": False,
         }
+        try:
+            workflow_match = re.search(
+                r"SOLENOS_WORKFLOW_ID:\\s*([a-z0-9_]+)",
+                case["system"],
+                flags=re.IGNORECASE,
+            )
+            if not workflow_match:
+                raise AssertionError("scenario_missing_workflow_id")
+            workflow_id = workflow_match.group(1).casefold()
+            result["workflow"] = workflow_id
+            expected_specialists = WORKFLOW_SPECIALISTS.get(workflow_id)
+            if expected_specialists is None:
+                raise AssertionError("scenario_workflow_has_no_specialist_mapping")
+            selected = select_specialized_domains(messages)
+            result["selected_specialists"] = list(selected)
+            result["routing_passed"] = selected == expected_specialists
+
+            # Capture the exact assembled system contract sent by qwen_chat.
+            # qwen_chat applies these same shared functions immediately before
+            # transport; the original messages below still go through that path.
+            assembled = apply_solenos_system_contract(
+                apply_specialized_intelligence(messages)
+            )
+            result["assembled_system_context"] = assembled[0]["content"]
+
+            answer = qwen_chat(
+                messages,
+                timeout=180.0,
+                options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
+            )
+            result["answer"] = answer
+            checks = _production_qwen_answer_checks(case, answer)
+            result["checks"] = checks
+            result["passed"] = bool(
+                result["routing_passed"] and checks and all(checks.values())
+            )
+        except Exception as exc:
+            result["error"] = f"{type(exc).__name__}: {str(exc)[:1200]}"
+        results.append(result)
+
+    artifact = {
+        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+        "scenario_count": len(results),
+        "passed_count": sum(1 for item in results if item["passed"]),
+        "failed_count": sum(1 for item in results if not item["passed"]),
+        "results": results,
+    }
+    artifact_path = Path(os.getenv("RUNNER_TEMP", "/tmp")) / "solenos-qwen-ten-area-acceptance.json"
+    artifact_path.write_text(
+        json.dumps(artifact, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
+
+    failures = [
+        {
+            "criterion": item["criterion"],
+            "workflow": item["workflow"],
+            "selected_specialists": item["selected_specialists"],
+            "checks": item["checks"],
+            "error": item.get("error"),
+            "answer": (item.get("answer") or "")[:1200],
+        }
+        for item in results
+        if not item["passed"]
+    ]
+    assert not failures, json.dumps(failures, ensure_ascii=False, indent=2)
+
 
 
 def test_real_qwen_generates_family_and_appointment_briefings_only_from_lcr(live_qwen_context):
