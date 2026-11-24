@@ -1003,7 +1003,10 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             db.query(CareStateRevision).filter(
                 CareStateRevision.person_id == person_id
             ).delete(synchronize_session=False)
-            db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+            # The Daily Care delta engine may persist baseline lineage for
+            # this isolated test person. Keep that parent row rather than
+            # deleting it underneath durable baseline references; IDs are
+            # unique per run and the PostgreSQL service is discarded after CI.
             db.commit()
         engine.dispose()
 
