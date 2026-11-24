@@ -351,9 +351,9 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     assert data.get("persistence") == "read_only_assistance", data
     assert identity_contracts, f"{workflow} did not pass through the shared identity contract"
     for contract in identity_contracts:
-        assert "SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION" in contract
+        assert "SOLENOS COMPANION — PRODUCT IDENTITY" in contract
         assert "SolenOS was founded by David Abuchi" in contract
-        assert contract.rstrip().endswith("Human agency before automation.")
+        assert "The model is replaceable." in contract
     assert data.get("authority") == "solenos_care_record_and_caregiver", data
     assert not re.search(
         r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
