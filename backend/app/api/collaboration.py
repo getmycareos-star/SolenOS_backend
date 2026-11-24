@@ -3431,6 +3431,37 @@ def _contains_unrequested_saba(reply: str, source_text: str) -> bool:
     )
 
 
+def _contains_unsupported_quotation(reply: str, source_text: str) -> bool:
+    """Reject long quoted passages unless the exact wording exists in supplied source.
+
+    This verifies quotation fidelity, not semantic entailment of unquoted prose.
+    Short labels and the standard uncertainty disclosure are not treated as source
+    quotations. Source matching is whitespace-normalized and case-insensitive.
+    """
+    source = re.sub(r"\\s+", " ", (source_text or "")).casefold()
+    standard_disclosures = {
+        "i can't verify that from the information available to me.",
+        "i cannot verify that from the information available to me.",
+    }
+    patterns = (
+        r"“([^”]{24,})”",
+        r'"([^"\\n]{24,})"',
+        r"‘([^’]{24,})’",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, reply or ""):
+            quote = re.sub(r"\\s+", " ", match.group(1)).strip()
+            if len(re.findall(r"[^\\W_]+", quote, flags=re.UNICODE)) < 4:
+                continue
+            normalized = quote.casefold()
+            if normalized in standard_disclosures:
+                continue
+            if normalized not in source:
+                logger.warning("Qwen care-grounding rejection: rule=unsupported_quotation")
+                return True
+    return False
+
+
 def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     """Reject high-impact care-status claims when the supplied source does not support them.
 
@@ -3438,6 +3469,8 @@ def _contains_unsupported_care_claim(reply: str, source_text: str) -> bool:
     a claim cannot be grounded by the source wording, prefer retry/unavailable to
     presenting a fabricated care status as fact.
     """
+    if _contains_unsupported_quotation(reply, source_text):
+        return True
     source = (source_text or "").casefold()
     text = (reply or "").casefold()
     patterns = (
@@ -9665,7 +9698,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
                 ) from exc
             reply = deterministic_reply
-        validation_source = user_text + "\n" + "\n".join(bounded_context)
+        validation_source = "\n".join([user_text, *bounded_context, *included_model_context_lines])
         document_fallback_context = list(dict.fromkeys([
             *included_model_context_lines,
             *verified_document_context_lines,
