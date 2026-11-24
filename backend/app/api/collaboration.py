@@ -8763,10 +8763,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "If quoting an original source in another language, make clear it is the original wording."
         )
         system_prompt += " " + COMPANION_INTERACTION_INTERPRETATION_CONTRACT
-        system_prompt += " " + _care_recipient_identity_guidance(person.name)
-        caregiver_guidance = _caregiver_interaction_guidance(user_text)
-        if caregiver_guidance:
-            system_prompt += " " + caregiver_guidance
+        if not identity_question:
+            system_prompt += " " + _care_recipient_identity_guidance(person.name)
+            caregiver_guidance = _caregiver_interaction_guidance(user_text)
+            if caregiver_guidance:
+                system_prompt += " " + caregiver_guidance
         if trend_assessment and not trend_assessment["sufficient"]:
             system_prompt += (
                 " The question asks for a trend, but the retrieved authorized records do not contain two distinct "
