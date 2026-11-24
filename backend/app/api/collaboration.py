@@ -9621,6 +9621,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Use date_format for display only and never rewrite source timestamps. "
             "Use measurement_system for general units, but never alter a recorded medication dose or clinical measurement; if a conversion is explicitly requested, preserve the original and label the converted value. "
             "communication_style=concise means brief and direct; balanced means essential explanation; detailed means fuller explanation. Every style must preserve safety, uncertainty, and source attribution. "
+            "Notification preferences describe delivery settings only. delivery_timezone_name is not the Companion timezone and must never resolve local dates or times. Do not promise that a notification was or will be delivered. "
             "locale controls regional formatting only and never overrides the requested response language. "
             "The active_roles and active_responsibilities entries belong to this authenticated caregiver only. "
             "Do not attribute another caregiver's responsibilities or shared open loops to this caregiver. "
