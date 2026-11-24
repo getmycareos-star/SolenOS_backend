@@ -4376,7 +4376,7 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
     elif criterion == "longitudinal_sparse_observation":
         trend_pattern = (
             r"\b(?:sleep is worsening|sleep has worsened|sleep is getting worse|"
-            r"sleep is becoming worse|sleep is worse|sleep is declining|sleep deteriorated|worsening sleep)\b"
+            r"sleep is becoming worse|sleep is worse|sleep is declining|sleep (?:has )?deteriorated|worsening sleep)\b"
         )
         trend_claim = re.search(trend_pattern, normalized)
         trend_is_qualified = False
