@@ -163,7 +163,7 @@ def test_trait_acceptance_contracts_cover_distinct_context_and_failure_modes():
 def test_runtime_personality_kernel_preserves_canonical_trait_anchors():
     full = " ".join(SOLENOS_PERSONALITY_CONSTITUTION.split())
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.startswith(
-        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\nVersion: 2.3"
+        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\nVersion: 2.4"
     )
     canonical_anchors = {
         "steady": ("Judge urgency from evidence, not emotional intensity.", "Calm never softens urgent guidance."),
