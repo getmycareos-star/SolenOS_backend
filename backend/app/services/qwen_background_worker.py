@@ -164,6 +164,7 @@ async def _classify_task(task_text: str, context_text: str) -> str:
 
     choices = ", ".join(ENABLED_WORKFLOWS)
     prompt = (
+        "SOLENOS_META_TASK: workflow_classification. "
         "Classify the caregiver's request into exactly one enabled SolenOS workflow ID. "
         "Community is disabled and is not an option. Do not answer the caregiver. "
         "Return only a JSON object with one key workflow and a value copied exactly from this list: "
