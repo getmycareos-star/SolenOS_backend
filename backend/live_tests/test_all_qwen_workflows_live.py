@@ -171,9 +171,18 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
             # A bounded startup retry may send the same request more than once.
             actual_payload = captured_requests[-1]
             actual_messages = actual_payload.get("messages")
-            if not isinstance(actual_messages, list):
+            if not isinstance(actual_messages, list) or not actual_messages:
                 raise AssertionError("gateway_request_missing_messages")
             result["gateway_request_messages"] = actual_messages
+            actual_system = actual_messages[0].get("content") if isinstance(actual_messages[0], dict) else None
+            if actual_system != result["assembled_system_context"]:
+                raise AssertionError("actual_gateway_system_contract_differs_from_expected_assembly")
+            for specialist in expected_specialists:
+                if SPECIALIZED_PROMPTS[specialist] not in actual_system:
+                    raise AssertionError(f"actual_gateway_missing_specialist:{specialist}")
+            for specialist, specialist_prompt in SPECIALIZED_PROMPTS.items():
+                if (specialist_prompt in actual_system) != (specialist in expected_specialists):
+                    raise AssertionError(f"actual_gateway_irrelevant_or_missing_specialist:{specialist}")
             result["gateway_prompt_token_estimate"] = _estimate_prompt_tokens(actual_messages)
             actual_options = actual_payload.get("options") or {}
             result["gateway_input_token_budget"] = (
