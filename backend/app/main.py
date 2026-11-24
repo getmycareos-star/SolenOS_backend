@@ -1600,8 +1600,8 @@ async def generate_lcr_orientation(
         orientation_positioning = (
             "NEW CARE RECORD: the authenticated record currently contains no returned care-domain entries, "
             "and its core history sources are available. Do not pretend to remember prior care. "
-            "For a greeting, introduce SolenOS in plain language as the place that helps keep the loved one's "
-            "care story together and make changes easier to understand. Invite the caregiver to start with "
+            "For a greeting, explain in plain language that SolenOS helps keep the person's care "
+            "information together and make changes easier to understand. Invite the caregiver to start with "
             "whatever is happening now; rough fragments are acceptable. Do not describe features as guarantees. "
         )
     elif caregiver_stage == "returning":
