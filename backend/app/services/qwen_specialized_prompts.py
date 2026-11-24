@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import re
 
+from app.services.qwen_workflows import ENABLED_WORKFLOWS
+
 # Keep these instructions operational and compact: retrieved care evidence and
 # output schemas must retain room in the model context.
 SPECIALIZED_PROMPTS: dict[str, str] = {
@@ -114,6 +116,22 @@ WORKFLOWS_WITHOUT_SPECIALISTS = frozenset({
 
 MAX_SPECIALISTS_PER_REQUEST = 2
 
+# Reject routing drift at application import time, before a request can reach
+# inference with missing, duplicate, stale, or over-cap specialist metadata.
+_enabled_workflows = set(ENABLED_WORKFLOWS)
+_specialist_workflows = set(WORKFLOW_SPECIALISTS)
+_unclassified_workflows = set(WORKFLOWS_WITHOUT_SPECIALISTS)
+if _specialist_workflows & _unclassified_workflows:
+    raise RuntimeError("Qwen workflows cannot be both specialist-routed and specialist-free")
+if _specialist_workflows | _unclassified_workflows != _enabled_workflows:
+    raise RuntimeError("Every enabled Qwen workflow must have exactly one routing decision")
+if any(workflow not in _enabled_workflows for workflow in _specialist_workflows | _unclassified_workflows):
+    raise RuntimeError("Qwen specialist routing contains an unsupported workflow")
+if any(not domains or len(domains) > MAX_SPECIALISTS_PER_REQUEST for domains in WORKFLOW_SPECIALISTS.values()):
+    raise RuntimeError("Qwen specialist routing exceeds the configured per-request cap")
+if any(set(domains) - set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values()):
+    raise RuntimeError("Qwen specialist routing references an undefined specialist")
+
 # A classifier is a meta-task. Its prompt contains the names of every workflow,
 # so keyword matching it would incorrectly activate several care specialists.
 META_TASK_MARKERS = ("SOLENOS_META_TASK: workflow_classification",)
@@ -152,7 +170,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
     )
     if workflow_ids:
         unique_ids = {workflow_id.casefold() for workflow_id in workflow_ids}
-        if len(unique_ids) != 1:
+        if len(workflow_ids) != 1 or len(unique_ids) != 1:
             raise ValueError("ambiguous_solenos_workflow_metadata")
         workflow_id = next(iter(unique_ids))
         if workflow_id in WORKFLOWS_WITHOUT_SPECIALISTS:
