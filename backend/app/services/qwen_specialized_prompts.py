@@ -177,7 +177,9 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
             selected.append(domain)
     if "companion" in selected and "lcr_retrieval" not in selected:
         selected.insert(0, "lcr_retrieval")
-    return tuple(selected[:MAX_SPECIALISTS_PER_REQUEST])
+    if len(selected) > MAX_SPECIALISTS_PER_REQUEST:
+        raise ValueError("ambiguous_legacy_specialist_routing")
+    return tuple(selected)
 
 
 def apply_specialized_intelligence(messages: list[dict]) -> list[dict]:
