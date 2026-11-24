@@ -344,6 +344,7 @@ def review_question_answer(
         evidence_rows = engine.db.query(Evidence).filter(
             Evidence.person_id == engine.person_id,
             Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).all()
         evidence_by_id = {row.id: row for row in evidence_rows}
         if set(evidence_by_id) != set(evidence_ids):
