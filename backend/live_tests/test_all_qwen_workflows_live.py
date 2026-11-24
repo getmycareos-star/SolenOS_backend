@@ -247,7 +247,7 @@ def test_live_qwen_background_classifier_uses_shared_gateway_contract(monkeypatc
     assert captured_requests, "background classification did not call the configured Ollama model"
     actual_messages = captured_requests[-1].get("messages")
     assert isinstance(actual_messages, list) and actual_messages
-    system_text = "\\n".join(
+    system_text = "\n".join(
         str(message.get("content") or "")
         for message in actual_messages
         if message.get("role") == "system"
