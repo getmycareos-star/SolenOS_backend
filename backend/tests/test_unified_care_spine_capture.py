@@ -238,7 +238,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             # The caregiver-facing receipt must not wait for extraction or
             # longitudinal reconciliation. Complete the durable work separately.
             def fake_capture_extraction(source_text, *, workflow_id, source_event_id, source_evidence_id):
-                assert workflow_id == "daily_capture"
+                assert workflow_id == "daily_capture_extraction"
                 assert "Mum was unusually confused this afternoon and refused lunch." in source_text
                 return {
                     "observations": [
