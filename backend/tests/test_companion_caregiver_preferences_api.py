@@ -91,11 +91,11 @@ def test_caregiver_preferences_persist_and_are_scoped_to_authenticated_caregiver
         spoofed = client.patch(
             "/api/v1/caregiver/preferences",
             headers=second_headers,
-            json={"preferred_name": "Mary", "caregiver_id": first["caregiver"]["id"]},
+            json={"preferred_name": "John", "caregiver_id": first["caregiver"]["id"]},
         )
         assert spoofed.status_code == 200, spoofed.text
         second_after = client.get("/api/v1/caregiver/preferences", headers=second_headers)
-        assert second_after.json()["preferred_name"] == "Mary"
+        assert second_after.json()["preferred_name"] == "John"
         first_after = client.get("/api/v1/caregiver/preferences", headers=first_headers)
         assert first_after.json()["preferred_name"] == "Mary"
         assert first_after.json()["timezone"] == "America/New_York"
