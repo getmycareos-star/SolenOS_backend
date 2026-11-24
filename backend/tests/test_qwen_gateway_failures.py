@@ -31,6 +31,35 @@ def configure_gateway(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "_complete_inference_metric", lambda *args, **kwargs: True)
 
 
+def test_qwen_gateway_fails_closed_before_model_request_when_audit_start_cannot_persist(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: False)
+
+    def unexpected_request(*args, **kwargs):
+        raise AssertionError("Qwen must not be called without a durable invocation-start receipt")
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", unexpected_request)
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "Use synthetic evidence."}])
+
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "inference_audit_unavailable"
+
+
+def test_qwen_inference_audit_metadata_hashes_content_without_persisting_it():
+    source_text = "SYNTHETIC_PRIVATE_CONTEXT_2e91"
+    metadata = qwen_gateway._inference_audit_metadata([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion. Contract."},
+        {"role": "user", "content": source_text},
+    ])
+
+    assert metadata["workflow_id"] == "companion"
+    assert metadata["operating_contract_version"] == qwen_gateway.SOLENOS_OPERATING_CONTRACT_VERSION
+    assert len(metadata["system_prompt_sha256"]) == 64
+    assert len(metadata["request_context_sha256"]) == 64
+    assert source_text not in json.dumps(metadata)
+
+
 def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
     configure_gateway(monkeypatch)
     attempts = {"count": 0}
