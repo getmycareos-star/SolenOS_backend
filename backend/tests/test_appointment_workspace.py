@@ -3880,6 +3880,25 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
                 assessed_at=before,
             ),
             EvidenceCompletenessAssessment(
+                id="asof-completeness-foreign-subject",
+                person_id=person_id,
+                policy_id=completeness_policy.id,
+                policy_version="completeness-v1",
+                subject_type="evidence",
+                subject_id=foreign_evidence.id,
+                assessment_status="complete",
+                required_fields=["source", "event_time"],
+                satisfied_fields=["source", "event_time"],
+                missing_fields=[],
+                field_evidence_json="{}",
+                evidence_ids=[foreign_evidence.id],
+                rationale="This assessment points at another person's evidence.",
+                assessment_basis="linked_source_coverage_only",
+                semantic_sufficiency="not_automatically_verified",
+                assessed_by_caregiver_id=caregiver_id,
+                assessed_at=before,
+            ),
+            EvidenceCompletenessAssessment(
                 id="asof-completeness-after",
                 person_id=person_id,
                 policy_id=completeness_policy.id,
@@ -3974,5 +3993,6 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
     assert "asof-freshness-foreign" not in response.text
     assert "asof-completeness-after" not in response.text
     assert "asof-completeness-foreign" not in response.text
+    assert "asof-completeness-foreign-subject" not in response.text
     assert "Private evidence belonging to another care record." not in response.text
 
