@@ -249,3 +249,45 @@ def test_every_production_qwen_invocation_has_trusted_audit_context():
                 )
     assert offenders == []
 
+
+
+def test_companion_repair_inferences_preserve_the_original_trusted_audit_context():
+    source = (APP_ROOT / "api" / "collaboration.py").read_text(encoding="utf-8")
+    tree = ast.parse(source, filename="app/api/collaboration.py")
+    companion = next(
+        node for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == "companion_message"
+    )
+    ollama_calls = [
+        node for node in ast.walk(companion)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_ollama_chat"
+    ]
+    assert len(ollama_calls) >= 4, "Companion repair paths must remain covered by the audit"
+    assert all(
+        any(keyword.arg == "audit_context" for keyword in call.keywords)
+        for call in ollama_calls
+    ), "Every Companion repair inference must reuse the authenticated source audit context"
+
+    context_assignment = next(
+        node for node in ast.walk(companion)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "companion_audit_context"
+            for target in node.targets
+        )
+    )
+    context_keys = {
+        key.value
+        for key in context_assignment.value.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    assert {
+        "request_id", "person_id", "caregiver_id", "conversation_session_id",
+        "source_event_ids", "source_evidence_ids", "source_assertion_ids",
+        "source_appointment_ids", "source_document_analysis_ids",
+        "source_lcr_context_ids", "source_freshness_assessment_ids",
+        "source_refs", "retrieval_coverage",
+    }.issubset(context_keys)
