@@ -127,11 +127,24 @@ def test_workflow_ids_map_to_their_required_specialist_domains():
 
 def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_decision():
     accounted_for = set(WORKFLOW_SPECIALISTS) | set(WORKFLOWS_WITHOUT_SPECIALISTS)
-    assert set(ENABLED_WORKFLOWS) <= accounted_for
+    assert set(ENABLED_WORKFLOWS) == accounted_for
     assert not (set(WORKFLOW_SPECIALISTS) & set(WORKFLOWS_WITHOUT_SPECIALISTS))
     assert all(1 <= len(domains) <= 2 for domains in WORKFLOW_SPECIALISTS.values())
     assert all(set(domains) <= set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values())
     assert all(workflow in ENABLED_WORKFLOWS for workflow in WORKFLOWS_WITHOUT_SPECIALISTS)
+
+    for workflow, expected_domains in WORKFLOW_SPECIALISTS.items():
+        selected = select_specialized_domains([{
+            "role": "system",
+            "content": f"SOLENOS_WORKFLOW_ID: {workflow}",
+        }])
+        assert selected == expected_domains, workflow
+
+    for workflow in WORKFLOWS_WITHOUT_SPECIALISTS:
+        assert select_specialized_domains([{
+            "role": "system",
+            "content": f"SOLENOS_WORKFLOW_ID: {workflow}",
+        }]) == (), workflow
 
 
 def test_largest_supported_runtime_prompt_leaves_room_for_care_evidence():
