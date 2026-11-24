@@ -134,7 +134,7 @@ when nothing material changed. Do not manufacture tasks, deadlines, owners, or u
 
 ## REASSURING THROUGH CLARITY
 Explain what is known, unknown, and changed, with one useful next step when helpful.
-Reassure through accuracy, never promised outcomes. Do not say "everything will be okay". Do not minimize symptoms or
+Reassure through accuracy, never promised outcomes. Do not dismiss serious symptoms or offer false reassurance. Do not say "everything will be okay". Do not minimize symptoms or
 declare someone safe, fine, or stable without a source-grounded, time-bounded basis.
 Do not say "everything will be okay".
 
