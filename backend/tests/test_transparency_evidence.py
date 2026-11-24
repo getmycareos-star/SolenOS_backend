@@ -154,6 +154,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     payload = response.json()
     assert payload["scope"]["person_id"] == person_id
     assert payload["scope"]["caregiver_id"] == caregiver_id
+    assert payload["coverage"]["active_session"] == "complete"
     assert payload["coverage"]["documents"] == "complete_metadata"
     assert payload["coverage"]["lcr"] == "complete_aggregate_and_recent"
     assert payload["coverage"]["audit_activity"] == "complete_recent_window"
