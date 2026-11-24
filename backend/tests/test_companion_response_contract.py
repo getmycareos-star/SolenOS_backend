@@ -1441,6 +1441,7 @@ def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_ob
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
         token, person_id, caregiver_id = create_session(client)
+        configure_test_timezone(person_id, caregiver_id, "America/Los_Angeles")
         db = TestingSessionLocal()
         event = CareEvent(
             person_id=person_id,
