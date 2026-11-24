@@ -2563,8 +2563,8 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
 
 
 def test_companion_prompt_budget_is_bounded_for_the_production_model_context():
-    assert collaboration.COMPANION_PROMPT_CONTEXT_BUDGET_CHARS == 7000
-    assert collaboration.COMPANION_MAX_OUTPUT_TOKENS == 1024
+    assert collaboration.COMPANION_PROMPT_CONTEXT_BUDGET_CHARS == 3000
+    assert collaboration.COMPANION_MAX_OUTPUT_TOKENS == 512
 
 
 def test_companion_prompt_budget_keeps_multiple_care_sources_represented():
