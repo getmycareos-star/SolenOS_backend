@@ -10,6 +10,7 @@ on:
       - ".github/workflows/companion-live-inference.yml"
       - "backend/app/services/qwen*"
       - "backend/app/services/solenos_identity.py"
+      - "backend/app/services/solenos_information_stewardship.py"
       - "backend/app/services/solenos_personality.py"
       - "backend/tests/test_qwen_system_prompt.py"
       - "backend/tests/test_qwen_specialized_prompts.py"
