@@ -292,6 +292,7 @@ def test_information_stewardship_is_injected_for_every_qwen_request_after_workfl
     from app.services.solenos_information_stewardship import (
         SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION,
         SOLENOS_INFORMATION_STEWARDSHIP_VERSION,
+        SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP,
     )
 
     messages = [
@@ -300,11 +301,12 @@ def test_information_stewardship_is_injected_for_every_qwen_request_after_workfl
     ]
     assembled = apply_solenos_system_contract(messages)[0]["content"]
     workflow_index = assembled.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS")
-    stewardship_index = assembled.index("INFORMATION STEWARDSHIP AND TRANSPARENCY")
+    stewardship_index = assembled.index("# Information stewardship — applies to every workflow")
     personality_index = assembled.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
     identity_index = assembled.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert workflow_index < stewardship_index < personality_index < identity_index
-    assert SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION in assembled
+    assert SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP in assembled
+    assert SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION not in assembled
     assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.0"
     for phrase in (
         "ACCESS:", "AVAILABLE KNOWLEDGE:", "MEMORY / RETENTION:", "AUTHORITY:",
@@ -313,8 +315,7 @@ def test_information_stewardship_is_injected_for_every_qwen_request_after_workfl
         "proposed", "awaiting_review", "accepted/persisted", "unknown/unconfirmed",
         "I can't verify that from the information available to me.",
     ):
-        assert phrase in assembled
-
+        assert phrase in SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
 
 def test_information_stewardship_forbids_unverified_privacy_and_action_claims():
     from app.services.solenos_information_stewardship import SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
