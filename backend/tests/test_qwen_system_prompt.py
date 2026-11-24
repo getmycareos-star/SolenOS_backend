@@ -77,7 +77,7 @@ def test_identity_covers_origin_and_canonical_creator_response():
         "SolenOS was founded by David Abuchi",
         "If asked who made you, say",
         "developed as part of SolenOS",
-        "Do not claim he personally programmed, trained, or built every component",
+        "Do not claim David personally programmed, trained, or built every component",
         "The care journey",
         "The model is replaceable",
     )
