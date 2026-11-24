@@ -46,14 +46,28 @@ def test_companion_automatically_gets_retrieval_discipline():
     assert select_specialized_domains(messages) == ("lcr_retrieval", "companion")
 
 
-def test_explicit_workflow_routing_is_capped_and_does_not_depend_on_marker_order():
+def test_multiple_workflow_ids_fail_closed_instead_of_silently_dropping_specialists():
     messages = [
         {"role": "system", "content": "SOLENOS_WORKFLOW_ID: delta_engine"},
         {"role": "system", "content": "SOLENOS_WORKFLOW_ID: medication_day"},
     ]
-    selected = select_specialized_domains(messages)
-    assert len(selected) == 2
-    assert selected == ("lcr_retrieval", "longitudinal_reasoning")
+    import pytest
+    with pytest.raises(ValueError, match="ambiguous_solenos_workflow_metadata"):
+        select_specialized_domains(messages)
+
+
+def test_unmapped_explicit_workflow_fails_closed():
+    import pytest
+    with pytest.raises(ValueError, match="unmapped_solenos_workflow"):
+        select_specialized_domains([
+            {"role": "system", "content": "SOLENOS_WORKFLOW_ID: future_unmapped_workflow"}
+        ])
+
+
+def test_operational_workflow_intentionally_uses_only_global_contract():
+    assert select_specialized_domains([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: reminders_notifications"}
+    ]) == ()
 
 
 def test_workflow_classifier_does_not_load_specialists_from_its_workflow_list():
