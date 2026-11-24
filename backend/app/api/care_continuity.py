@@ -4710,10 +4710,7 @@ def list_person_assertions(person_id: str, request: Request, limit: int = 100, d
             latest_by_assertion[assertion_id] = {
                 "revision_number": revision.get("revision_number"),
                 "revision_reason": revision.get("revision_reason"),
-                "changed_by_caregiver_id": revision.get("changed_by_caregiver_id"),
                 "changed_at": revision.get("changed_at"),
-                "previous_payload": revision.get("previous_payload"),
-                "current_payload": revision.get("current_payload"),
             }
         for row in rows:
             row["latest_revision"] = latest_by_assertion.get(str(row.get("id") or ""))
