@@ -13,14 +13,14 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import text, inspect, case
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text, inspect, case, or_
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
-from app.models.care import CareEvent, Evidence
+from app.models.care import CareEvent, Correction, Evidence
 from app.models.collaboration import EvidenceUpload
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import EvidenceSourceRelationship, EvidenceFreshnessAssessment, EvidenceFreshnessPolicy, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
@@ -468,7 +468,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         # The bounded legacy arrays below remain for existing caregiver UI clients.
         living_care_record_context = build_lcr_context(
             db, person_id, caregiver_id=caregiver_id,
-            limit_per_source=40, include_all_history=True,
+            limit_per_source=100, include_all_history=True,
         )
     except Exception:
         logger.exception("Shared LCR retrieval failed for appointment preparation")
@@ -538,12 +538,56 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         if previous_appointment_row else cutoff
     )
     change_window_basis = "since_previous_recorded_appointment" if previous_appointment_row else "bounded_recent_fallback"
+    correction_event_ids: set[str] = set()
+    correction_lookup_complete = True
+    try:
+        if not inspect(db.get_bind()).has_table("corrections"):
+            correction_lookup_complete = False
+        else:
+            correction_event_ids = {
+                str(row[0])
+                for row in db.query(Correction.target_id).filter(
+                    Correction.person_id == person_id,
+                    Correction.target_type == "care_event",
+                    Correction.created_at >= change_window_start,
+                ).all()
+            }
+    except SQLAlchemyError:
+        logger.exception("Recent appointment correction lookup failed")
+        correction_lookup_complete = False
+
+    event_change_predicates = [
+        CareEvent.occurred_at >= change_window_start,
+        CareEvent.recorded_at >= change_window_start,
+        CareEvent.updated_at >= change_window_start,
+    ]
+    if correction_event_ids:
+        event_change_predicates.append(CareEvent.id.in_(correction_event_ids))
     fetched_events = db.query(CareEvent).filter(
         CareEvent.person_id == person_id,
-        CareEvent.occurred_at >= change_window_start,
-    ).order_by(CareEvent.occurred_at.desc()).limit(31).all()
+        or_(*event_change_predicates),
+    ).order_by(
+        CareEvent.updated_at.desc().nullslast(),
+        CareEvent.occurred_at.desc().nullslast(),
+        CareEvent.recorded_at.desc().nullslast(),
+    ).limit(101).all()
     events_has_more = len(fetched_events) > 30
     events = fetched_events[:30]
+    if not correction_lookup_complete:
+        living_care_record_context["retrieval_projection_complete"] = False
+        failed_sources = list(living_care_record_context.get("failed_sources") or [])
+        living_care_record_context["failed_sources"] = list(dict.fromkeys([
+            *failed_sources, "event_correction_lookup",
+        ]))
+        event_source = living_care_record_context.get("sources", {}).get("events")
+        if isinstance(event_source, dict):
+            event_source.update({
+                "status": "partial",
+                "correction_lineage_status": "partial",
+                "interpretation_limit": (
+                    "Recent event corrections could not be checked. Currentness of appointment history is unknown."
+                ),
+            })
     # History is displayed newest-first, but preparation must target the nearest
     # upcoming scheduled visit rather than the furthest future appointment.
     next_appointment_row = db.query(Appointment).filter(
