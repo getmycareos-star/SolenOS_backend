@@ -781,12 +781,18 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
                     content={"detail": "Caregiver attribution does not match this session"},
                 )
 
-        if not target_person_id:
+        # Caregiver preferences are scoped to the bearer-authenticated caregiver,
+        # not to a caller-selected care-record resource. Their route handler
+        # independently revalidates the session and resolves its person/caregiver
+        # pair. Keep the exemption narrow; all other protected routes still need
+        # an explicit or resource-derived care-record scope.
+        session_identity_only = path.rstrip("/") == "/api/v1/caregiver/preferences"
+        if not target_person_id and not session_identity_only:
             return JSONResponse(
                 status_code=403,
                 content={"detail": "Request must identify a care record in the session scope"},
             )
-        if str(target_person_id) != str(scoped_person_id):
+        if target_person_id and str(target_person_id) != str(scoped_person_id):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "This session is not authorised for that care record"},

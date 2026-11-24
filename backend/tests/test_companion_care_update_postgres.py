@@ -542,5 +542,11 @@ def test_postgres_anonymous_caregiver_preferences_are_readable_and_isolated(monk
         assert second_response.status_code == 200, second_response.text
         assert second_response.json()["preferred_name"] is None
         assert second_response.json()["timezone_configured"] is False
+
+        cross_record = client.get(
+            f"/api/v1/caregiver/preferences?person_id={second['person']['id']}",
+            headers=first_headers,
+        )
+        assert cross_record.status_code == 403, cross_record.text
     finally:
         app.dependency_overrides.clear()
