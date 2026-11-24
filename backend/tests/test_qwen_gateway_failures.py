@@ -481,6 +481,47 @@ def test_actual_qwen_transport_receives_global_and_workflow_specialist_contract(
     assert "SPECIALIST: CAREGIVER COMPANION" not in system
 
 
+def test_actual_qwen_transport_applies_the_exact_route_for_every_enabled_workflow(monkeypatch):
+    from app.services.qwen_specialized_prompts import (
+        SPECIALIZED_PROMPTS,
+        WORKFLOWS_WITHOUT_SPECIALISTS,
+        WORKFLOW_SPECIALISTS,
+    )
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS
+
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(request, **kwargs):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(json.dumps({"message": {"content": "Grounded response."}}).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+
+    for workflow in ENABLED_WORKFLOWS:
+        captured.clear()
+        answer = qwen_gateway.qwen_chat([
+            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
+            {"role": "user", "content": "Use only the supplied synthetic evidence."},
+        ])
+        assert answer == "Grounded response.", workflow
+        payload = captured["payload"]
+        assert payload["messages"], workflow
+        system = payload["messages"][0]["content"]
+        assert "GLOBAL AI OPERATING CONTRACT" in system, workflow
+        assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system, workflow
+        assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system, workflow
+
+        expected = WORKFLOW_SPECIALISTS.get(workflow, ())
+        assert workflow in WORKFLOWS_WITHOUT_SPECIALISTS or expected, workflow
+        for specialist, prompt in SPECIALIZED_PROMPTS.items():
+            assert (prompt in system) == (specialist in expected), {
+                "workflow": workflow,
+                "specialist": specialist,
+                "expected": expected,
+            }
+
+
 def test_actual_qwen_transport_rejects_unmapped_workflow_before_network_call(monkeypatch):
     configure_gateway(monkeypatch)
 
