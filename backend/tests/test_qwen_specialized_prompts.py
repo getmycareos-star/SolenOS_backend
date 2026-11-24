@@ -14,6 +14,36 @@ from app.services.qwen_system_prompt import (
 )
 
 
+
+def test_every_enabled_workflow_receives_the_shared_care_partner_contract():
+    required_characteristics = (
+        "Steady",
+        "Empathetic",
+        "Observant",
+        "Thoughtful",
+        "Patient",
+        "Honest",
+        "Proactive",
+        "Reassuring",
+        "Respectful",
+        "Dependable",
+    )
+    assert ENABLED_WORKFLOWS
+    for workflow in ENABLED_WORKFLOWS:
+        messages = [
+            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
+            {"role": "user", "content": "Explain the relevant care information."},
+        ]
+        routed = apply_specialized_intelligence(messages)
+        final = apply_solenos_system_contract(routed)
+        system = final[0]["content"]
+
+        assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system, workflow
+        assert all(trait in system for trait in required_characteristics), workflow
+        assert "Uncertainty must not become confidence to reassure" in system, workflow
+        assert "Never silently write" in system, workflow
+
+
 def test_all_ten_specialists_are_defined_and_have_distinct_responsibilities():
     assert len(SPECIALIZED_PROMPTS) == 10
     required = {
