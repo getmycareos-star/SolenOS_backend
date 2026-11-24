@@ -19,7 +19,7 @@ from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION_VERSION
 def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait():
     runtime = SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
     assert f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}" in runtime
-    assert len(runtime) < 6500, f"Runtime personality kernel grew to {len(runtime)} characters"
+    assert len(runtime) < 2500, f"Runtime personality kernel grew to {len(runtime)} characters"
     required_fields = {
         "observable_behaviors",
         "required_context",
@@ -33,15 +33,8 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
         assert required_fields.issubset(contract), trait
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in runtime
         assert contract["runtime_rule"] in runtime
-        for field in (
-            "observable_behaviors",
-            "required_context",
-            "prohibited_behaviors",
-            "violation_conditions",
-            "verification_cases",
-        ):
-            for dimension in contract[field]:
-                assert dimension in runtime, (trait, field, dimension)
+        # Detailed dimensions remain complete in the canonical machine-readable
+        # constitution, but are not duplicated into every inference prompt.
         for field in required_fields:
             values = contract[field]
             assert values, (trait, field)
@@ -50,6 +43,7 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
             else:
                 assert isinstance(values, (tuple, list)), (trait, field)
                 assert all(isinstance(value, str) and value.strip() for value in values), (trait, field)
+
 
 
 def test_runtime_personality_is_injected_after_specialist_instructions():
@@ -74,23 +68,15 @@ def test_runtime_personality_is_injected_after_specialist_instructions():
     assert system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
 
 
-def test_every_personality_dimension_is_present_in_the_actual_assembled_qwen_system_message():
+def test_every_personality_trait_rule_is_present_in_the_actual_assembled_qwen_system_message():
     system = apply_solenos_system_contract(
         [{"role": "user", "content": "Has anything changed with my mother?"}]
     )[0]["content"]
-    assert system.startswith(SOLENOS_OPERATING_CONTRACT_MANIFEST)
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system
         assert contract["runtime_rule"] in system
-        for field in (
-            "observable_behaviors",
-            "required_context",
-            "prohibited_behaviors",
-            "violation_conditions",
-            "verification_cases",
-        ):
-            assert all(value in system for value in contract[field]), (trait, field)
+
 
 
 def test_runtime_contract_preserves_product_boundaries_and_precedence():
