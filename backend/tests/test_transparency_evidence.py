@@ -251,8 +251,9 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
         f"/api/v1/transparency/evidence?person_id={secrets.token_hex(12)}",
         headers=headers,
     )
-    assert wrong_scope.status_code == 200
-    assert wrong_scope.json()["scope"]["person_id"] == person_id
+    # A mismatched caller-supplied person identifier is rejected rather
+    # than silently widening or changing the bearer session's authorized scope.
+    assert wrong_scope.status_code == 403
 
 
 def test_documents_only_caregiver_receives_document_evidence_but_not_lcr_or_member_roster():
