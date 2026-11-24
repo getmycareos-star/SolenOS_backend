@@ -69,14 +69,14 @@ def is_low_capacity_caregiver_message(message: str) -> bool:
     # caregiver explicitly reports crying alongside a care recipient's emotional
     # change, however, the caregiver's own distress must be acknowledged.
     patient_emotional_context = re.search(
-        r"\\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
-        r"wife|husband|partner|he|she|they|the patient|care recipient)\\b"
-        r".{0,100}\\b(?:sad|withdrawn|frightened|terrified|lonely|upset|distressed|"
-        r"afraid|scared|anxious|panicking)\\b",
+        r"\b(?:mum|mom|mother|dad|father|grandma|grandmother|grandpa|grandfather|"
+        r"wife|husband|partner|he|she|they|the patient|care recipient)\b"
+        r".{0,100}\b(?:sad|withdrawn|frightened|terrified|lonely|upset|distressed|"
+        r"afraid|scared|anxious|panicking)\b",
         value,
     )
     caregiver_crying = re.search(
-        r"\\b(?:i(?:'ve| have) been crying|i(?:'m| am) crying|i cried)\\b",
+        r"\b(?:i(?:'ve| have) been crying|i(?:'m| am) crying|i cried)\b",
         value,
     )
     if patient_emotional_context and caregiver_crying:
