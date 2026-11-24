@@ -11,8 +11,10 @@ from fastapi.testclient import TestClient
 
 from test_open_loops import (
     create_loop,
+    create_independent_corroboration,
+    create_source_evidence,
     current_loop_version,
-    session, 
+    session,
     setup_function as setup_open_loop_db,
     teardown_function as teardown_open_loop_db,
 )
@@ -158,15 +160,41 @@ def test_mw09_reopened_loop_retains_reason_and_audit_history(care_case):
                            json={"text": "Delivery desk says delivered",
                                  "evidence": [{"kind": "delivery_message", "text": "Desk report"}]})
     assert response.status_code == 200
+
+    source_id = create_source_evidence(loop, "Persisted delivery desk record")
+    second_source_id = create_source_evidence(loop, "Independent recipient delivery confirmation")
+    attested = client.post(
+        f"/api/v1/open-loops/{loop['id']}/verify-outcome",
+        headers=headers,
+        json={
+            "text": "Caregiver reviewed the delivery record",
+            "evidence": [{"evidence_id": source_id, "kind": "supporting_record"}],
+            "verification_rule": "The delivery outcome must be supported by persisted source records.",
+        },
+    )
+    assert attested.status_code == 200, attested.text
+    assert attested.json()["outcome_status"] == "outcome_reported"
+    create_independent_corroboration(client, headers, source_id, second_source_id)
+    corroborated = client.post(
+        f"/api/v1/open-loops/{loop['id']}/corroborate-outcome",
+        headers=headers,
+        json={
+            "text": "Caregiver reviewed two separately originated delivery records",
+            "evidence": [{"evidence_id": source_id}, {"evidence_id": second_source_id}],
+        },
+    )
+    assert corroborated.status_code == 200, corroborated.text
+    assert corroborated.json()["outcome_status"] == "outcome_verified"
+
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
                          json={"text": "Reviewed response", "evidence": [{"kind": "review"}],
                                "expected_version": current_loop_version(client, headers, loop["id"])})
-    assert closed.status_code == 200
+    assert closed.status_code == 200, closed.text
     reopened = client.post(f"/api/v1/open-loops/{loop['id']}/reopen", headers=headers,
                            json={"text": "Recipient says parcel was not found; recheck",
                                  "evidence": [{"kind": "caregiver_report"}],
-                                 "expected_version": closed.json()["loop"]["version"]})
-    assert reopened.status_code == 200
+                                 "expected_version": current_loop_version(client, headers, loop["id"])})
+    assert reopened.status_code == 200, reopened.text
     history = client.get(f"/api/v1/open-loops/{loop['id']}/history", headers=headers).json()
     assert any(event["event_type"] == "reopened" for event in history)
 
