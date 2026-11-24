@@ -2811,14 +2811,28 @@ def prepare_handoff_draft(
                     if has_valid_caregiver_necessity(question, db, person_id)
                 }
                 rows = [row for row in rows if str(row.get("id")) in valid_question_ids]
-            source_status = "available" if rows else "empty"
+            correction_lineage_by_event = {}
+            correction_lineage_incomplete = False
+            if table_name == "care_events" and rows:
+                correction_lineage_by_event = _care_event_correction_fingerprint_snapshots(
+                    db, person_id, [str(row.get("id")) for row in rows if row.get("id")],
+                )
+                correction_lineage_incomplete = any(
+                    item.get("status") != "checked"
+                    for item in correction_lineage_by_event.values()
+                )
+            source_status = (
+                "partial" if correction_lineage_incomplete
+                else "available" if rows else "empty"
+            )
             statuses[table_name] = {
                 "status": source_status,
                 "label": spec["label"],
                 "count": len(rows),
                 "returned_count": len(rows),
                 "has_more": source_has_more,
-                "retrieval_complete": not source_has_more,
+                "retrieval_complete": not source_has_more and not correction_lineage_incomplete,
+                "reason": "event_correction_fingerprint_unavailable" if correction_lineage_incomplete else None,
             }
             for row in rows:
                 source_id = row.get("id")
@@ -2880,8 +2894,9 @@ def prepare_handoff_draft(
                     record_status = "active" if row.get("is_active") else "superseded"
                 fingerprint_row = _normalize_reflected_fingerprint_row(row)
                 if table_name == "care_events":
-                    correction_lineage = _care_event_correction_fingerprint_snapshot(
-                        db, person_id, str(source_id),
+                    correction_lineage = correction_lineage_by_event.get(
+                        str(source_id),
+                        {"status": "unavailable", "corrections": [], "relationships": []},
                     )
                     if correction_lineage.get("status") != "checked":
                         statuses[table_name].update({
