@@ -1127,6 +1127,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     "person_id": person_id,
                     "caregiver_id": caregiver_id,
                     "request_id": getattr(request.state, "request_id", None),
+                    "source_document_analysis_ids": [str(analysis.id)],
                 },
             )
         except HTTPException:
