@@ -181,8 +181,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
         db.add(OpenQuestion(
             id=open_question_id,
             person_id=owner["person"]["id"],
-            question="What transfer support is required for the next handoff?",
-            description="The current transfer support level is not recorded.",
+            question="What transfer support is required for the next handoff? The current transfer support level is not recorded.",
             subject_type="person",
             subject_id=owner["person"]["id"],
             status="open",
