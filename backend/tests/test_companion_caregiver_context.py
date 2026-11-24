@@ -99,16 +99,15 @@ def test_invalid_timezone_fails_neutral_without_using_server_timezone():
     assert context["greeting_period"] == "neutral"
 
 
-def test_conflicting_notification_timezone_suppresses_local_time():
+def test_companion_context_uses_caregiver_timezone_without_notification_preference_input():
     context = build_companion_caregiver_context(
-        _caregiver(),
+        _caregiver(timezone="America/Los_Angeles", timezone_configured=True),
         _grant(),
         now=datetime(2026, 11, 24, 14, 0, tzinfo=timezone.utc),
-        timezone_conflict=True,
     )
-    assert context["timezone_status"] == "conflict"
-    assert context["local_datetime"] is None
-    assert context["greeting_period"] == "neutral"
+    assert context["timezone_status"] == "configured"
+    assert context["timezone_name"] == "America/Los_Angeles"
+    assert context["local_time"] == "6:00 AM"
 
 
 @pytest.mark.parametrize(
