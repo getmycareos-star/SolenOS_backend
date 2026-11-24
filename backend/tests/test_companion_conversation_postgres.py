@@ -374,3 +374,52 @@ def test_companion_prompt_receives_authenticated_caregiver_recipient_and_timezon
     assert context["local_time"]
     assert captured["audit_context"]["person_id"] == person_id
     assert captured["audit_context"]["caregiver_id"] == caregiver_id
+
+
+def test_companion_retrieval_and_qwen_source_gate_exclude_caregiver_deleted_evidence():
+    from fastapi import HTTPException
+
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Deleted evidence recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    active_id = f"active-evidence-{suffix}"
+    deleted_id = f"deleted-evidence-{suffix}"
+    active_text = "Caregiver reported that Mum felt dizzy this morning."
+    deleted_text = "Caregiver reported that Mum fell yesterday."
+
+    with Session() as db:
+        db.add_all([
+            Evidence(
+                id=active_id,
+                person_id=person_id,
+                type="note",
+                source_text=active_text,
+                uploaded_by_caregiver_id=caregiver_id,
+                evidence_status="available",
+            ),
+            Evidence(
+                id=deleted_id,
+                person_id=person_id,
+                type="note",
+                source_text=deleted_text,
+                uploaded_by_caregiver_id=caregiver_id,
+                evidence_status="deleted_by_caregiver",
+            ),
+        ])
+        db.commit()
+
+        visible = collaboration._active_person_evidence_query(db, person_id).all()
+        visible_ids = {str(item.id) for item in visible}
+        assert active_id in visible_ids
+        assert deleted_id not in visible_ids
+
+        collaboration._require_owned_qwen_source(
+            db, person_id, caregiver_id, active_id, active_text,
+        )
+        with pytest.raises(HTTPException) as deleted:
+            collaboration._require_owned_qwen_source(
+                db, person_id, caregiver_id, deleted_id, deleted_text,
+            )
+        assert deleted.value.status_code == 404
