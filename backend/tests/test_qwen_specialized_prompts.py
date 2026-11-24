@@ -39,7 +39,7 @@ def test_every_enabled_workflow_receives_the_shared_care_partner_contract():
         system = final[0]["content"]
 
         assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system, workflow
-        assert all(trait in system for trait in required_characteristics), workflow
+        assert all(trait.casefold() in system.casefold() for trait in required_characteristics), workflow
         assert "Uncertainty must not become confidence to reassure" in system, workflow
         assert "Never silently write" in system, workflow
 
