@@ -7145,7 +7145,7 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 r"(?:establish|show|confirm|prove|support)(?: that)?\s*$",
                 r"\b(?:i|we) (?:don't|do not) have (?:enough|any) "
                 r"(?:evidence|information|basis) to "
-                r"(?:say|confirm|tell|know)(?: that)?\s*$",
+                r"(?:say|confirm|tell|know)(?: that)?(?: (?:he|she|they|it|mum|mom|dad|the person))?\s*$",
                 r"\b(?:there is|there's) no (?:evidence|information|basis) to "
                 r"(?:say|confirm|show|establish)(?: that)?\s*$",
             )
