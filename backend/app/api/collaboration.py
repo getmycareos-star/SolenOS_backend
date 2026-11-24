@@ -214,8 +214,8 @@ def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict)
     )
     same_person_evidence_ids = {
         str(evidence_id)
-        for (evidence_id,) in db.query(Evidence.id).filter(
-            Evidence.person_id == person_id
+        for (evidence_id,) in db.query(EvidenceModel.id).filter(
+            EvidenceModel.person_id == person_id
         ).all()
     }
 
