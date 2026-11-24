@@ -417,14 +417,14 @@ def build_unified_lcr_context(
         try:
             ZoneInfo(caregiver_timezone)
         except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError("The caregiver timezone is invalid; update it in caregiver preferences before using date-relative history.") from exc
+            raise ValueError("Your saved time zone is not valid. Update it in Settings before asking about dates.") from exc
         temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
     else:
         # Probe only to detect date-dependent language. Never use UTC as a
         # substitute for the caregiver's unknown local calendar.
         requested_window = _temporal_window(query, timezone_name="UTC")
         if requested_window is not None:
-            raise ValueError("Set the caregiver's local timezone in preferences before asking for date-relative care history.")
+            raise ValueError("Set your time zone in Settings before asking about yesterday or another date range.")
         temporal_window = None
     context = build_lcr_context(
         db, str(person_id), caregiver_id=str(caregiver_id),
