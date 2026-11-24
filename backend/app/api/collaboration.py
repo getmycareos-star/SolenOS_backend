@@ -4524,7 +4524,7 @@ def evaluate_deployed_qwen(request: Request):
                 # The first request after a Railway restart must include model load time.
                 # Keep the per-case budget aligned with the provider's 180-second cap.
                 timeout=180.0,
-                options={"temperature": 0, "num_predict": 128, "num_ctx": 512},
+                options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
             )
             checks = _production_qwen_answer_checks(case, answer)
             passed = all(checks.values())
