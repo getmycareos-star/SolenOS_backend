@@ -86,3 +86,11 @@ At the latest observed frontend production workflow, the production build and va
 - Missing/incomplete schemas remain explicitly unavailable; the overall reconstruction status remains partial.
 - Regression coverage was extended for historical cutoffs, foreign evidence links, foreign subjects, and freshness/completeness assessment retrieval.
 - Exact-current-main backend and PostgreSQL test results remain unobserved; these changes are implemented but not yet verified.
+
+### Phase 5 increment — explicit source-family lineage for trend counts
+
+- The existing distinct-event aggregation now receives additional same-origin pairs derived from explicit evidence parent-child lineage and exact matching original-source references.
+- Identical source-text hashes alone are deliberately not treated as proof of shared origin; independently authored records can contain identical wording.
+- Existing human-reviewed EvidenceSourceRelationship pairs are retained only when both evidence IDs resolve to persisted evidence belonging to the same person.
+- Regression tests cover parent-child lineage, exact original-source references, identical text hashes without lineage, and duplicate incident-count suppression.
+- This improves one existing trend aggregation path; automated source-family discovery across every source type and all trend consumers remains incomplete. Exact-main test execution remains pending.
