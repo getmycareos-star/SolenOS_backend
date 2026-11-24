@@ -3734,7 +3734,23 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
             created_by_caregiver_id=caregiver_id,
             recorded_at=before,
         )
-        db.add_all([evidence, foreign_evidence, freshness_policy, completeness_policy, claim])
+        claim_v2 = CareAssertion(
+            id="asof-review-claim-v2",
+            person_id=person_id,
+            subject_type="care_recipient",
+            subject_id=person_id,
+            field="sleep",
+            assertion_kind="current_state",
+            asserted_value="Caregiver report withdrawn after correction.",
+            source_label="Caregiver correction",
+            source_text="The caregiver withdrew the earlier sleep report.",
+            evidence_ids=["asof-review-evidence"],
+            assertion_status="withdrawn",
+            epistemic_state="withdrawn",
+            created_by_caregiver_id=caregiver_id,
+            recorded_at=before + timedelta(minutes=30),
+        )
+        db.add_all([evidence, foreign_evidence, freshness_policy, completeness_policy, claim, claim_v2])
         db.flush()
         db.add_all([
             EvidenceReviewRecord(
@@ -3803,6 +3819,20 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
                 ],
                 reviewed_by_caregiver_id=caregiver_id,
                 created_at=before,
+            ),
+            EvidenceClaimAssessment(
+                id="asof-claim-assessment-before-v2",
+                person_id=person_id,
+                claim_id=claim.id,
+                claim_version=2,
+                status="withdrawn",
+                rationale="The caregiver withdrew the earlier report after correction.",
+                policy_version="claim-v1",
+                evidence_links=[{"evidence_id": evidence.id, "relationship": "supersedes"}],
+                reviewed_by_caregiver_id=caregiver_id,
+                supersedes_assessment_id="asof-claim-assessment-before",
+                superseded_by_claim_id=claim_v2.id,
+                created_at=before + timedelta(minutes=30),
             ),
             EvidenceClaimAssessment(
                 id="asof-claim-assessment-after",
@@ -3960,12 +3990,15 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
     assert [item["review_id"] for item in history["evidence_reviews"]] == [
         "asof-review-before", "asof-review-foreign-reviewer"
     ]
+    assert history["evidence_reviews"][0]["source_attribution_snapshot"] == "{}"
     assert history["evidence_reviews"][1]["reviewed_by_caregiver_id"] is None
     assert history["evidence_reviews"][1]["reviewer_scope_validation"] == "reviewer_not_verified"
     assert history["claim_assessments_status"] == "available"
     assert [item["assessment_id"] for item in history["claim_assessments"]] == [
-        "asof-claim-assessment-before"
+        "asof-claim-assessment-before", "asof-claim-assessment-before-v2"
     ]
+    assert history["claim_assessments"][1]["supersedes_assessment_id"] == "asof-claim-assessment-before"
+    assert history["claim_assessments"][1]["superseded_by_claim_id"] == "asof-review-claim-v2"
     assert history["claim_assessments"][0]["evidence_links"] == [{
         "evidence_id": "asof-review-evidence",
         "relationship": "supports",
@@ -3977,12 +4010,16 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
         "asof-freshness-before"
     ]
     assert history["freshness_assessments"][0]["freshness_status"] == "needs_review"
+    assert history["freshness_assessments"][0]["policy_domain"] == "sleep"
+    assert history["freshness_assessments"][0]["policy_max_age_days"] == 30
     assert history["completeness_assessments_status"] == "available"
     assert [item["assessment_id"] for item in history["completeness_assessments"]] == [
         "asof-completeness-before"
     ]
     assert history["completeness_assessments"][0]["evidence_ids"] == ["asof-review-evidence"]
     assert history["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
+    assert history["completeness_assessments"][0]["policy_domain"] == "sleep"
+    assert history["completeness_assessments"][0]["policy_purpose"] == "companion_response"
     assert "asof-review-after" not in response.text
     assert "asof-review-foreign" not in response.text
     assert "asof-claim-assessment-after" not in response.text
