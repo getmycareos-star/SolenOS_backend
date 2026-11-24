@@ -421,6 +421,15 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
     captured = []
 
     def fake_chat(messages, *, timeout=None, options=None):
+        # Exercise the same prompt transformations and context preflight as the
+        # production gateway. The bounded assistant retries with smaller,
+        # source-balanced context and a smaller output reservation after HTTP 413.
+        prepared = apply_solenos_system_contract(apply_specialized_intelligence(messages))
+        _enforce_prompt_context_budget(
+            prepared,
+            num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+            num_predict=int((options or {}).get("num_predict", os.getenv("OLLAMA_NUM_PREDICT", "96"))),
+        )
         captured.append({"messages": messages, "options": options or {}, "timeout": timeout})
         return "The saved care record contains one caregiver-reported sleep observation."
 
