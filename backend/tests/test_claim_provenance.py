@@ -767,3 +767,24 @@ def test_reported_source_is_not_promoted_to_verified_by_claim_provenance():
     assert reference["record_status"] == "caregiver_reported"
     assert reference["epistemic_status"] == "reported"
     assert reference["person_scope_status"] == "matched"
+
+
+def test_bracketed_context_record_preserves_embedded_person_scope():
+    from app.services.claim_provenance import context_lines_to_source_records
+
+    records = context_lines_to_source_records([
+        'Canonical LCR source [event-1]: {"source_type":"care_events","record":{"id":"event-1","person_id":"person-other","description":"Caregiver reported that Mum felt unsteady."}}'
+    ])
+    assert len(records) == 1
+    assert records[0]["record_id"] == "event-1"
+    assert records[0]["person_id"] == "person-other"
+
+
+def test_bracketed_context_record_does_not_let_missing_embedded_scope_become_implicit():
+    from app.services.claim_provenance import context_lines_to_source_records
+
+    records = context_lines_to_source_records([
+        'Canonical LCR source [event-1]: {"source_type":"care_events","record":{"id":"event-1","description":"Caregiver reported that Mum felt unsteady."}}'
+    ])
+    assert len(records) == 1
+    assert records[0]["person_id"] is None
