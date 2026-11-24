@@ -23,6 +23,12 @@ class Caregiver(Base):
     relationship = Column(String, nullable=False)
     person_id = Column(String, ForeignKey("persons.id"), nullable=False, index=True)
     timezone = Column(String, nullable=False, default="UTC")
+    timezone_configured = Column(Boolean, nullable=False, default=False, server_default="false")
+    preferred_name = Column(String(80), nullable=True)
+    locale = Column(String(16), nullable=True)
+    date_format = Column(String(24), nullable=True)
+    measurement_system = Column(String(24), nullable=True)
+    communication_style = Column(String(24), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
