@@ -161,3 +161,55 @@ def test_qwen_context_budget_never_reduces_safety_response_reservation(monkeypat
 
     assert attempts
     assert set(attempts) == {256}
+
+
+def test_focused_first_visit_assist_prompt_fits_configured_qwen_context():
+    from app.services import qwen_gateway
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_system_prompt import apply_solenos_system_contract
+
+    coverage = {
+        "schema_status": "complete",
+        "history_coverage": "complete_history_scan_ranked_subset",
+        "retrieval_scan_complete": True,
+        "retrieval_projection_complete": True,
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "sources": {
+            name: {
+                "status": "available" if name in {"events", "evidence"} else "empty",
+                "candidate_scan_complete": True,
+                "has_more": False,
+                "selection_truncated": False,
+            }
+            for name in (
+                "living_record", "events", "evidence", "evidence_observations",
+                "evidence_freshness_assessments", "facts", "assertions", "corrections",
+                "conflicts", "contradictions", "uncertainties", "uncertainty_assessments",
+                "open_questions",
+            )
+        },
+    }
+    prefix = collaboration._build_companion_prompt_prefix(
+        "living_care_record",
+        "Summarize only authorized recorded context. Preserve provenance and uncertainty.",
+        "",
+        "",
+        "Target 45 words; hard maximum 70 words.",
+        ["Canonical LCR retrieval coverage: " + json.dumps(coverage)],
+    )
+    messages = [
+        {"role": "system", "content": prefix + "No matching recorded context was found."},
+        {"role": "user", "content": "Interpret this newly saved caregiver-reported event using only authorized care information."},
+    ]
+    prepared = apply_solenos_system_contract(apply_specialized_intelligence(messages))
+    estimate = qwen_gateway._estimate_prompt_tokens(prepared)
+    input_budget = 4096 - 128 - 128
+    assert estimate <= input_budget, {
+        "estimated_prompt_tokens": estimate,
+        "input_budget": input_budget,
+        "prompt_bytes": sum(
+            len(str(message.get("content") or "").encode("utf-8"))
+            for message in prepared
+        ),
+    }
