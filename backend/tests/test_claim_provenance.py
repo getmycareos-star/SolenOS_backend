@@ -560,44 +560,52 @@ def test_lcr_event_evidence_prefix_resolves_to_persisted_event_type():
         "recorded_at": None,
     }]
 
-def test_shared_origin_pairs_use_explicit_parent_and_source_reference_lineage_only():
+
+def test_shared_lineage_service_deduplicates_explicit_origin_but_not_hash_only_matches():
     from types import SimpleNamespace
-    from app.services.claim_provenance import build_shared_origin_evidence_pairs
+    from app.services.evidence_lineage import build_evidence_lineage
 
     rows = [
         SimpleNamespace(
-            id="source-original",
+            id="origin-a",
             parent_evidence_id=None,
             original_source_reference="https://records.example/source/visit-17",
             source_text_sha256="same-hash",
+            transfer_source=None,
+            transfer_reference=None,
         ),
         SimpleNamespace(
-            id="source-copy",
-            parent_evidence_id="source-original",
+            id="origin-b",
+            parent_evidence_id="origin-a",
             original_source_reference="https://records.example/source/visit-17",
             source_text_sha256="same-hash",
+            transfer_source=None,
+            transfer_reference=None,
         ),
         SimpleNamespace(
             id="independent-identical-text",
             parent_evidence_id=None,
             original_source_reference="https://records.example/source/independent-visit",
             source_text_sha256="same-hash",
+            transfer_source=None,
+            transfer_reference=None,
         ),
     ]
-    pairs = build_shared_origin_evidence_pairs(rows)
-    assert frozenset(("source-original", "source-copy")) in pairs
-    assert frozenset(("source-original", "independent-identical-text")) not in pairs
-    assert frozenset(("source-copy", "independent-identical-text")) not in pairs
-
-
-def test_explicit_source_lineage_prevents_duplicate_incident_count_inflation():
-    from types import SimpleNamespace
-    from app.services.claim_provenance import build_shared_origin_evidence_pairs
-
-    lineage = build_shared_origin_evidence_pairs([
-        SimpleNamespace(id="origin-a", parent_evidence_id=None, original_source_reference=""),
-        SimpleNamespace(id="origin-b", parent_evidence_id="origin-a", original_source_reference=""),
+    lineage_by_id, _ = build_evidence_lineage(rows, [], [
+        "origin-a", "origin-b", "independent-identical-text"
     ])
+    groups = {}
+    for evidence_id, lineage_id in lineage_by_id.items():
+        groups.setdefault(lineage_id, []).append(evidence_id)
+    shared_pairs = {
+        frozenset((left, right))
+        for evidence_ids in groups.values()
+        for index, left in enumerate(sorted(set(evidence_ids)))
+        for right in sorted(set(evidence_ids))[index + 1:]
+    }
+    assert frozenset(("origin-a", "origin-b")) in shared_pairs
+    assert frozenset(("origin-a", "independent-identical-text")) not in shared_pairs
+
     aggregate = build_distinct_event_aggregate(
         [
             {
@@ -618,14 +626,22 @@ def test_explicit_source_lineage_prevents_duplicate_incident_count_inflation():
                 "description": "Caregiver reported one episode of unsteadiness.",
                 "evidence_ids": ["origin-b"],
             },
+            {
+                "id": "event-c",
+                "event_type": "care_observation",
+                "status": "recorded",
+                "occurred_at": datetime(2026, 11, 5, 9, 0, tzinfo=timezone.utc),
+                "title": "Mobility",
+                "description": "Caregiver reported one episode of unsteadiness.",
+                "evidence_ids": ["independent-identical-text"],
+            },
         ],
         topic="unsteadiness",
         start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
         end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
         window_label="first half of November",
-        shared_origin_evidence_pairs=lineage,
+        shared_origin_evidence_pairs=shared_pairs,
     )
     assert aggregate["status"] == "validated"
-    assert aggregate["count"] == 1
+    assert aggregate["count"] == 2
     assert aggregate["duplicate_event_ids"] == ["event-b"]
-
