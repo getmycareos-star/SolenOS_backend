@@ -564,6 +564,7 @@ def get_change_detail(
         .filter(
             Evidence.person_id == person_id,
             Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         )
         .order_by(Evidence.occurred_at.asc(), Evidence.ingested_at.asc(), Evidence.id.asc())
         .all()
