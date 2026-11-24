@@ -128,6 +128,9 @@ def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_deci
     accounted_for = set(WORKFLOW_SPECIALISTS) | set(WORKFLOWS_WITHOUT_SPECIALISTS)
     assert set(ENABLED_WORKFLOWS) <= accounted_for
     assert not (set(WORKFLOW_SPECIALISTS) & set(WORKFLOWS_WITHOUT_SPECIALISTS))
+    assert all(1 <= len(domains) <= 2 for domains in WORKFLOW_SPECIALISTS.values())
+    assert all(set(domains) <= set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values())
+    assert all(workflow in ENABLED_WORKFLOWS for workflow in WORKFLOWS_WITHOUT_SPECIALISTS)
 
 
 def test_shared_system_contract_fits_a_bounded_prompt_budget():
