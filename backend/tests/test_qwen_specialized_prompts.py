@@ -48,7 +48,7 @@ def test_every_enabled_workflow_receives_the_shared_care_partner_contract():
         ), workflow
         assert all(trait.casefold() in system.casefold() for trait in required_characteristics), workflow
         assert "Uncertainty must not become confidence to reassure" in system, workflow
-        assert "Never silently create, update, accept, withdraw, or resolve an LCR item" in system, workflow
+        assert "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item" in system, workflow
         assert "Community functionality is disabled" in system, workflow
 
 

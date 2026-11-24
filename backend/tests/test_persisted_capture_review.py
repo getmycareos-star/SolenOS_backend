@@ -349,7 +349,7 @@ def test_daily_capture_correction_then_acceptance_creates_source_linked_lcr_asse
         "possible_safety_flags": [],
     }
     def fake_extract_review_candidates(source_text, *, source_event_id, source_evidence_id=None, workflow_id, audit_context=None):
-        assert workflow_id == "daily_capture"
+        assert workflow_id == "daily_capture_extraction"
         return {
             **candidates,
             "observations": [
@@ -749,7 +749,7 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
     seen = []
 
     def extract(source_text, *, source_event_id, source_evidence_id=None, workflow_id, audit_context=None):
-        assert workflow_id == "daily_capture"
+        assert workflow_id == "daily_capture_extraction"
         seen.append((source_text, source_event_id, source_evidence_id, workflow_id))
         return {
             "observations": [{
@@ -785,7 +785,7 @@ def test_daily_capture_extracts_from_saved_evidence_and_persists_execution_stage
     try:
         evidence = db.query(Evidence).filter_by(id=body["evidence_ids"][0]).one()
         analysis = db.query(CaptureAnalysis).filter_by(id=body["qwen_analysis_id"]).one()
-        assert seen == [(analysis.source_text, body["id"], evidence.id, "daily_capture")]
+        assert seen == [(analysis.source_text, body["id"], evidence.id, "daily_capture_extraction")]
         assert analysis.source_text
         assert analysis.execution_status["source_preservation"] == "verified"
         assert analysis.execution_status["evidence"] == "verified"
@@ -930,7 +930,7 @@ def test_second_authorized_caregiver_can_review_first_caregivers_daily_capture(m
     first_auth = {"Authorization": f"Bearer {first['access_token']}"}
     source = "Caregiver report: the person prefers a quiet room after lunch."
     def deterministic_extraction(source_text, *, source_event_id, source_evidence_id=None, workflow_id, audit_context=None):
-        assert workflow_id == "daily_capture"
+        assert workflow_id == "daily_capture_extraction"
         return {
             "observations": [{
                 "subject": "environment",

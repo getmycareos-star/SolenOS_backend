@@ -2506,7 +2506,7 @@ def test_handoff_generation_receives_correction_status_and_corrected_wording(mon
         "text": "Caregiver reported that medicine was given.",
     }], "family_transition", "family")
 
-    prompt = json.dumps(captured[0], ensure_ascii=False)
+    prompt = captured[0][1]["content"]
     assert result["status"] == "generated"
     assert '"information_status": "historical_event"' in prompt
     assert "The caregiver did not witness medicine being given." in prompt

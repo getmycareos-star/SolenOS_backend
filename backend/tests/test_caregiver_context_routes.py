@@ -1047,6 +1047,9 @@ def test_lcr_context_api_applies_explicit_previous_calendar_year_window():
     caregiver_id = session["caregiver"]["id"]
 
     with TestingSessionLocal() as db:
+        caregiver = db.query(Caregiver).filter_by(id=caregiver_id).one()
+        caregiver.timezone = "America/New_York"
+        caregiver.timezone_configured = True
         db.add_all([
             CareEvent(
                 id="lcr-temporal-2025-event",

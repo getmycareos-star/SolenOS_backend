@@ -642,8 +642,8 @@ def test_companion_inference_timeout_allows_cold_start_and_is_bounded_by_ui_budg
     monkeypatch.setattr(
         collaboration,
         "qwen_chat",
-        lambda messages, timeout=None, options=None: (
-            captured.update({"timeout": timeout, "options": options}) or "bounded reply"
+        lambda messages, timeout=None, options=None, audit_context=None: (
+            captured.update({"timeout": timeout, "options": options, "audit_context": audit_context}) or "bounded reply"
         ),
     )
     reply = collaboration._ollama_chat(
@@ -880,14 +880,10 @@ def test_companion_blocks_unproven_sleep_trend_without_writing_care_events(monke
         )
 
         # The deterministic evidence guard blocks model generation because one
-        # dated report cannot establish a worsening sleep pattern.
+        # dated report cannot establish a worsening sleep pattern. No professional-
+        # assigned question is pushed onto the family caregiver.
         assert captured == {}
-        assert "reported by: Daughter" in user_payload
-        assert "Did the restless sleep continue on another night?" in user_payload
-        assert "intended answerer role: professional" in user_payload.casefold()
-        assert "ask no more than one focused question" in system_prompt
         assert "Did the restless sleep continue on another night?" not in data["reply"]
-        assert captured["options"]["num_predict"] > 32
 
         db = TestingSessionLocal()
         try:
