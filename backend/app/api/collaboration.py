@@ -6254,6 +6254,7 @@ def _record_companion_output_validation(
     rejected = bool(rejection_reasons)
     details = {
         "request_id": request_id,
+        "caregiver_id": caregiver_id,
         "workflow_id": "companion",
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
         "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
