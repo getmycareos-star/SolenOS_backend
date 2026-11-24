@@ -265,9 +265,13 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert lcr_details["recent_corrections"][0]["actor_name"] == "Primary caregiver"
     assert lcr_details["recent_corrections"][0]["original_text"] == "uses a walking aid"
     assert lcr_details["recent_corrections"][0]["corrected_text"] == "uses a walker"
-    assert lcr_details["recent_revisions"][0]["revision_number"] == 1
-    assert lcr_details["recent_revisions"][0]["changed_fields"] == ["field"]
-    assert lcr_details["recent_revisions"][0]["after_state"] == {"field": "mobility"}
+    assertion_revision = next(
+        revision for revision in lcr_details["recent_revisions"]
+        if revision["target_id"] == assertion_id
+        and revision["after_state"] == {"field": "mobility"}
+    )
+    assert assertion_revision["revision_number"] == 1
+    assert assertion_revision["changed_fields"] == ["field"]
     assert lcr_details["recent_proposals"][0]["status"] == "accepted"
     assert lcr_details["recent_proposals"][0]["decisions"][0]["decision"] == "accept"
     assert by_kind["audit_activity"]["details"]["recent_events"][0]["action"] == "synthetic.document.uploaded"
