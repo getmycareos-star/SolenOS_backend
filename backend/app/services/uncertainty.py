@@ -275,6 +275,7 @@ def persist_source_clarification_questions(
         source_row = db.query(EvidenceModel).filter(
             EvidenceModel.id == source_record_id,
             EvidenceModel.person_id == person_id,
+            EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
         ).first()
         if source_row is None:
             raise ValueError("The clarification source document is missing or belongs to another care record.")
@@ -286,6 +287,7 @@ def persist_source_clarification_questions(
         rows = db.query(EvidenceModel.id).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.id.in_(linked_ids),
+            EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
         ).all()
         if {str(row[0]) for row in rows} != set(linked_ids):
             raise ValueError("Every clarification source must belong to the same care record.")
@@ -1224,6 +1226,7 @@ class UncertaintyEngine:
             evidence_count = self.db.query(Evidence.id).filter(
                 Evidence.person_id == scoped_person_id,
                 Evidence.id.in_(evidence_ids),
+                Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
             ).count()
             if evidence_count != len(evidence_ids):
                 raise ValueError("Every conflict evidence reference must belong to the same care record")
@@ -1312,7 +1315,11 @@ class UncertaintyEngine:
             if evidence_ids:
                 evidence_count = (
                     self.db.query(Evidence)
-                    .filter(Evidence.person_id == db_contradiction.person_id, Evidence.id.in_(evidence_ids))
+                    .filter(
+                        Evidence.person_id == db_contradiction.person_id,
+                        Evidence.id.in_(evidence_ids),
+                        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
+                    )
                     .count()
                 )
                 if evidence_count != len(evidence_ids):
