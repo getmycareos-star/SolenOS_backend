@@ -279,13 +279,19 @@ def build_transparency_evidence(
             # transparency response must never need.
             document_rows = (
                 db.query(
-                    Evidence,
-                    EvidenceUpload.filename.label("upload_filename"),
-                    EvidenceUpload.mime_type.label("upload_mime_type"),
-                    EvidenceUpload.size_bytes.label("upload_size_bytes"),
-                    EvidenceUpload.sha256.label("upload_sha256"),
-                    EvidenceUpload.storage_backend.label("upload_storage_backend"),
-                    EvidenceUpload.storage_key.label("upload_storage_key"),
+                    Evidence.id.label("evidence_id"),
+                    Evidence.type.label("evidence_type"),
+                    Evidence.evidence_kind.label("evidence_kind"),
+                    Evidence.evidence_status.label("evidence_status"),
+                    Evidence.epistemic_status.label("epistemic_status"),
+                    Evidence.uploaded_at.label("uploaded_at"),
+                    Evidence.uploaded_by_caregiver_id.label("uploaded_by_caregiver_id"),
+                    EvidenceUpload.filename.label("filename"),
+                    EvidenceUpload.mime_type.label("mime_type"),
+                    EvidenceUpload.size_bytes.label("size_bytes"),
+                    EvidenceUpload.sha256.label("sha256"),
+                    EvidenceUpload.storage_backend.label("storage_backend"),
+                    EvidenceUpload.storage_key.label("storage_key"),
                     EvidenceUpload.created_at.label("upload_created_at"),
                 )
                 .outerjoin(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
@@ -295,28 +301,38 @@ def build_transparency_evidence(
                 .all()
             )
         else:
-            document_rows = [
-                (row, None, None, None, None, None, None, None) for row in (
-                    db.query(Evidence)
-                    .filter(
-                        Evidence.person_id == person_id,
-                        or_(Evidence.type == "document", Evidence.source_type == "document"),
-                    )
-                    .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
-                    .limit(MAX_RECENT_ITEMS + 1)
-                    .all()
+            fallback_rows = (
+                db.query(
+                    Evidence.id.label("evidence_id"),
+                    Evidence.type.label("evidence_type"),
+                    Evidence.evidence_kind.label("evidence_kind"),
+                    Evidence.evidence_status.label("evidence_status"),
+                    Evidence.epistemic_status.label("epistemic_status"),
+                    Evidence.uploaded_at.label("uploaded_at"),
+                    Evidence.uploaded_by_caregiver_id.label("uploaded_by_caregiver_id"),
                 )
+                .filter(
+                    Evidence.person_id == person_id,
+                    or_(Evidence.type == "document", Evidence.source_type == "document"),
+                )
+                .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
+                .limit(MAX_RECENT_ITEMS + 1)
+                .all()
+            )
+            document_rows = [
+                (row.evidence_id, row.evidence_type, row.evidence_kind, row.evidence_status,
+                 row.epistemic_status, row.uploaded_at, row.uploaded_by_caregiver_id,
+                 None, None, None, None, None, None, None)
+                for row in fallback_rows
             ]
         has_more = len(document_rows) > MAX_RECENT_ITEMS
         missing_upload_metadata = (
-            sum(1 for row in document_rows[:MAX_RECENT_ITEMS] if row[1] is None)
+            sum(1 for row in document_rows[:MAX_RECENT_ITEMS] if row[7] is None)
             if uploads_available else None
         )
         recent_documents = []
         uploader_ids = {
-            str(row[0].uploaded_by_caregiver_id)
-            for row in document_rows[:MAX_RECENT_ITEMS]
-            if row[0].uploaded_by_caregiver_id
+            str(row[6]) for row in document_rows[:MAX_RECENT_ITEMS] if row[6]
         }
         uploader_names = {
             str(row.id): row.name for row in db.query(Caregiver).filter(
@@ -324,18 +340,21 @@ def build_transparency_evidence(
                 Caregiver.id.in_(uploader_ids),
             ).all()
         } if uploader_ids else {}
-        for (
-            evidence, filename, mime_type, size_bytes, sha256,
-            storage_backend, storage_key, upload_created_at,
-        ) in document_rows[:MAX_RECENT_ITEMS]:
+        for row in document_rows[:MAX_RECENT_ITEMS]:
+            (
+                evidence_id, evidence_type, evidence_kind, evidence_status,
+                epistemic_status, uploaded_at, uploaded_by_caregiver_id,
+                filename, mime_type, size_bytes, sha256, storage_backend,
+                storage_key, upload_created_at,
+            ) = row
             recent_documents.append({
-                "evidence_id": str(evidence.id),
-                "evidence_type": evidence.type,
-                "evidence_kind": evidence.evidence_kind,
-                "evidence_status": evidence.evidence_status,
-                "epistemic_status": evidence.epistemic_status,
-                "uploaded_at": _iso(evidence.uploaded_at),
-                "uploaded_by": uploader_names.get(str(evidence.uploaded_by_caregiver_id), "Another caregiver"),
+                "evidence_id": str(evidence_id),
+                "evidence_type": evidence_type,
+                "evidence_kind": evidence_kind,
+                "evidence_status": evidence_status,
+                "epistemic_status": epistemic_status,
+                "uploaded_at": _iso(uploaded_at),
+                "uploaded_by": uploader_names.get(str(uploaded_by_caregiver_id), "Another caregiver"),
                 "filename": filename,
                 "mime_type": mime_type,
                 "size_bytes": size_bytes,
