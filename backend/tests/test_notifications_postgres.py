@@ -19,7 +19,8 @@ pytestmark = pytest.mark.skipif(
 
 from app.core.database import get_db
 from app.main import app
-from app.models.notifications import CareNotification
+from app.models.care import Caregiver
+from app.models.notifications import CareNotification, CareNotificationPreference
 from app.models.privacy_delivery import NotificationReadReceipt
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -247,5 +248,82 @@ def test_assigned_reminder_quiet_hours_release_uses_recipient_preference():
                 category="reminder_due",
             ).one()
             assert notification.person_id == primary_session["person"]["id"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_companion_and_notification_timezones_remain_independent_in_postgres():
+    suffix = uuid.uuid4().hex[:12]
+    client = TestClient(app)
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    try:
+        created = client.post(
+            "/api/v1/sessions/anonymous",
+            json={
+                "name": f"Timezone recipient {suffix}",
+                "caregiver_name": f"Timezone caregiver {suffix}",
+            },
+        )
+        assert created.status_code == 201, created.text
+        session = created.json()
+        headers = {"Authorization": f"Bearer {session['access_token']}"}
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+
+        notification_saved = client.put(
+            "/api/v1/notifications/preferences",
+            headers=headers,
+            json={"timezone_name": "America/Los_Angeles"},
+        )
+        assert notification_saved.status_code == 200, notification_saved.text
+        with Session() as db:
+            caregiver = db.query(Caregiver).filter_by(
+                id=caregiver_id, person_id=person_id,
+            ).one()
+            assert caregiver.timezone_configured is False
+            assert caregiver.timezone == "UTC"
+
+        companion_saved = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=headers,
+            json={"timezone": "America/New_York"},
+        )
+        assert companion_saved.status_code == 200, companion_saved.text
+        assert companion_saved.json()["timezone"] == "America/New_York"
+        with Session() as db:
+            caregiver = db.query(Caregiver).filter_by(
+                id=caregiver_id, person_id=person_id,
+            ).one()
+            notification = db.query(CareNotificationPreference).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            assert caregiver.timezone == "America/New_York"
+            assert caregiver.timezone_configured is True
+            assert notification.timezone_name == "America/Los_Angeles"
+
+        notification_changed = client.put(
+            "/api/v1/notifications/preferences",
+            headers=headers,
+            json={"timezone_name": "America/Chicago"},
+        )
+        assert notification_changed.status_code == 200, notification_changed.text
+        with Session() as db:
+            caregiver = db.query(Caregiver).filter_by(
+                id=caregiver_id, person_id=person_id,
+            ).one()
+            notification = db.query(CareNotificationPreference).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            assert caregiver.timezone == "America/New_York"
+            assert caregiver.timezone_configured is True
+            assert notification.timezone_name == "America/Chicago"
     finally:
         app.dependency_overrides.clear()
