@@ -953,6 +953,12 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
         assert "Caregiver is unsure whether Mum slept through the night." in prompt
     finally:
         with SessionLocal() as db:
+            db.query(AnonymousSession).filter(
+                AnonymousSession.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(CaregiverAccessGrant).filter(
+                CaregiverAccessGrant.person_id == person_id
+            ).delete(synchronize_session=False)
             db.query(CareRecordRelationship).filter(
                 CareRecordRelationship.person_id == person_id
             ).delete(synchronize_session=False)
