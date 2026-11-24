@@ -920,8 +920,10 @@ def _log_inference_result(
             outcome="failed" if error_category else "succeeded",
             metrics_json=metadata,
         )
-        persisted = _persist_inference_metric(metric)
+        # Capture the scalar identifier before persistence closes its SQLAlchemy
+        # session. The ORM instance may be expired/detached after commit.
         metric_id = metric.id
+        persisted = _persist_inference_metric(metric)
     logger.info(json.dumps({
         "event": "qwen_inference",
         "inference_audit_id": metric_id,
