@@ -32,7 +32,7 @@ from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import create_assertion
 from app.services.qwen_gateway import qwen_chat
 from app.services.lcr_context import build_lcr_context, _expanded_search_terms
-from app.services.response_length_policy import resolve_response_length_policy, response_exceeds_hard_maximum
+from app.services.response_length_policy import resolve_response_length_policy, response_exceeds_hard_maximum, is_critical_safety_message
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -490,14 +490,27 @@ def _daily_care_lcr_context_summary(context: dict[str, Any] | None) -> dict[str,
     context = context if isinstance(context, dict) else {}
     sources = context.get("sources") if isinstance(context.get("sources"), dict) else {}
     source_summary = {}
-    for name, source in list(sources.items())[:12]:
+    core_sources = {"events", "evidence", "facts", "assertions", "decisions", "appointments"}
+    failure_states = {"failed", "partial", "partial_source_history", "partial_search_coverage", "unsearchable"}
+    for name, source in sources.items():
         if not isinstance(source, dict):
             continue
-        source_summary[str(name)] = {
-            key: source.get(key)
-            for key in ("status", "count", "has_more", "error_code")
-            if source.get(key) is not None
-        }
+        status = source.get("status")
+        include_source = (
+            name in core_sources
+            or status in failure_states
+            or source.get("has_more") is True
+        )
+        if not include_source or len(source_summary) >= 10:
+            continue
+        compact = {}
+        for key in ("status", "count", "has_more", "error_code"):
+            value = source.get(key)
+            if value is not None:
+                compact[key] = value
+        if status in failure_states and source.get("interpretation_limit"):
+            compact["interpretation_limit"] = str(source["interpretation_limit"])[:180]
+        source_summary[str(name)] = compact
     return {
         "schema_status": context.get("schema_status"),
         "retrieval_completeness": context.get("retrieval_completeness"),
@@ -689,13 +702,38 @@ async def ask_daily_care_qwen(
         DAILY_CARE_MAX_OUTPUT_TOKENS,
         response_length_policy.token_budget + (128 if payload.prepare_lcr_proposals else 0),
     )
+    effective_daily_token_budget = daily_token_budget
+    allow_output_budget_fallback = not is_critical_safety_message(payload.question)
+
+    async def _call_daily_care_qwen(messages: list[dict]) -> str:
+        nonlocal effective_daily_token_budget
+        try:
+            return await __import__("asyncio").to_thread(
+                qwen_chat,
+                messages,
+                response_format=schema,
+                options={"temperature": 0, "num_predict": effective_daily_token_budget},
+            )
+        except HTTPException as exc:
+            if (
+                exc.status_code != 413
+                or not allow_output_budget_fallback
+                or effective_daily_token_budget <= 128
+            ):
+                raise
+            # Preserve the selected evidence first; only reduce the output
+            # reservation after the bounded evidence payload still exceeds Qwen's
+            # input window. Safety-critical requests never take this fallback.
+            effective_daily_token_budget = 128
+            return await __import__("asyncio").to_thread(
+                qwen_chat,
+                messages,
+                response_format=schema,
+                options={"temperature": 0, "num_predict": effective_daily_token_budget},
+            )
+
     try:
-        raw = await __import__("asyncio").to_thread(
-            qwen_chat,
-            daily_messages,
-            response_format=schema,
-            options={"temperature": 0, "num_predict": daily_token_budget},
-        )
+        raw = await _call_daily_care_qwen(daily_messages)
         parsed = json.loads(raw)
         if (
             not isinstance(parsed, dict)
@@ -714,12 +752,7 @@ async def ask_daily_care_qwen(
                     "or remove a material safety detail. Keep the proposals array and exact JSON schema valid. Return JSON only."
                 )},
             ]
-            raw = await __import__("asyncio").to_thread(
-                qwen_chat,
-                repair_messages,
-                response_format=schema,
-                options={"temperature": 0, "num_predict": daily_token_budget},
-            )
+            raw = await _call_daily_care_qwen(repair_messages)
             parsed = json.loads(raw)
             if (
                 not isinstance(parsed, dict)
