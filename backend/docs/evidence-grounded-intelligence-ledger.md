@@ -493,3 +493,5 @@ This increment does not complete claim-level semantic entailment, full historica
 - Existing human-reviewed EvidenceSourceRelationship pairs are retained only when both evidence IDs resolve to persisted evidence belonging to the same person.
 - Regression tests cover parent-child lineage, exact original-source references, identical text hashes without lineage, and duplicate incident-count suppression.
 - This improves one existing trend aggregation path; automated source-family discovery across every source type and all trend consumers remains incomplete. Exact-main test execution remains pending.
+
+- **Implementation refinement:** the monthly unsteadiness aggregate now reuses the existing bounded, person-scoped evidence-lineage loader and lineage builder rather than maintaining a separate source-family implementation. It fails closed when the lineage closure is truncated or any referenced evidence ID cannot be resolved to the same person's record. The shared lineage service now also honors the explicit copied_or_same_origin status.
