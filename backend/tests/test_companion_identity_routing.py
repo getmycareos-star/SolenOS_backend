@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 from app.api.collaboration import (
     _companion_identity_direct_answer,
@@ -165,3 +166,11 @@ def test_model_identity_admits_unavailable_runtime_configuration(monkeypatch):
 
 def test_non_identity_care_question_has_no_product_identity_answer():
     assert _companion_identity_direct_answer("What changed in Mum's sleep this week?") is None
+
+
+
+def test_caregiver_orientation_preserves_the_global_solenos_companion_identity():
+    source = (Path(__file__).resolve().parents[1] / "app" / "main.py").read_text(encoding="utf-8")
+    assert "You are SolenOS Companion in the caregiver-orientation workflow" in source
+    assert "You are not a general chatbot, therapist, medical professional, or AI Companion." not in source
+    assert "Never invent a recipient, relationship, event, prior conversation, emotion" in source
