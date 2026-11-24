@@ -9268,11 +9268,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             name for name, value in source_coverage.items()
             if value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
         )
-        unsearchable_source_notes = sorted(
-            f"{name}: cannot be searched for this topic"
-            for name, value in source_coverage.items()
-            if value.get("status") == "unsearchable"
-        )
         more_available_source_names = sorted(
             name for name, value in source_coverage.items()
             if value.get("has_more")
