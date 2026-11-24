@@ -1327,7 +1327,7 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(mon
     client = setup_client(monkeypatch)
 
     def fake_qwen(base, model, messages, options=None):
-        return "The record includes a caregiver report of restless sleep."
+        return "Caregiver-reported: “waking several times overnight and restless sleep.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -1981,7 +1981,7 @@ def test_companion_temporal_question_retrieves_events_without_literal_temporal_v
 
     def fake_qwen(base, model, messages, options=None):
         captured["messages"] = messages
-        return "The record says Mum had a quieter night."
+        return "Caregiver-reported: “Mum had a quieter night last week.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -2090,7 +2090,7 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
 
     def fake_qwen(base, model, messages, options=None):
         captured["messages"] = messages
-        return "The older caregiver-provided note mentions restless sleep overnight."
+        return "Caregiver-reported: “restless sleep and waking several times overnight.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -2362,7 +2362,7 @@ def test_companion_returns_typed_document_extraction_and_original_evidence_refer
 
     def fake_qwen(base, model, messages, options=None):
         captured["messages"] = messages
-        return "The uploaded document reports sleep disturbance."
+        return "According to the document: “sleep disturbance was reported by the family.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
@@ -2474,7 +2474,7 @@ def test_companion_claim_source_trace_includes_event_reporter_and_original_docum
     client = setup_client(monkeypatch)
 
     def fake_qwen(base, model, messages, options=None):
-        return "She felt unsteady near the kitchen."
+        return "According to the caregiver: “She felt unsteady near the kitchen.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
