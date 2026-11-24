@@ -90,6 +90,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             ("recorded handoff", "care_handoff"),
             ("recorded notification", "notification"),
             ("recorded freshness policy application", "freshness_assessment"),
+            ("caregiver-attributed lcr assertion", "care_assertion"),
             ("canonical lcr source", "lcr_record"),
         ):
             if marker in prefix:
@@ -104,7 +105,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             payload = json.loads(text[text.index("{"):])
             if isinstance(payload, dict):
                 if not record_id:
-                    for key in ("source_id", "event_id", "care_event_id", "evidence_id", "capture_analysis_id", "document_analysis_id", "appointment_id", "handoff_id", "care_handoff_id", "notification_id", "id"):
+                    for key in ("source_id", "event_id", "care_event_id", "evidence_id", "assertion_id", "capture_analysis_id", "document_analysis_id", "appointment_id", "handoff_id", "care_handoff_id", "notification_id", "id"):
                         if payload.get(key):
                             record_id = str(payload[key])
                             break
