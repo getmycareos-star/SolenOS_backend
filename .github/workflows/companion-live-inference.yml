@@ -127,6 +127,10 @@ jobs:
       - name: Apply complete Alembic migration chain
         working-directory: backend
         run: python -m alembic upgrade head
+      - name: Verify calm personality and evidence-based reassurance guards
+        run: |
+          python -m pytest backend/tests/test_qwen_calm_personality.py -q
+          python -m pytest backend/tests/test_companion_response_contract.py -k "unsupported_reassurance or clear_uncertainty or emergency_language_remains_direct" -q
       - name: Run document semantic and lifecycle regression tests
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
       - name: Run bounded Qwen startup retry regression tests
