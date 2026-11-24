@@ -110,6 +110,7 @@ def build_companion_caregiver_context(
     assigned_open_loops=None,
     responsibilities_truncated: bool = False,
     open_loops_truncated: bool = False,
+    has_prior_conversation: bool | None = None,
 ) -> dict:
     """Return a JSON-safe context for one authenticated caregiver/person pair.
 
@@ -181,6 +182,11 @@ def build_companion_caregiver_context(
 
     return {
         "caregiver_id": caregiver_id,
+        "conversation_stage": (
+            "returning" if has_prior_conversation is True
+            else "first_time" if has_prior_conversation is False
+            else "unknown"
+        ),
         # Internal audit identity only. The prompt identity envelope deliberately
         # excludes account/session identifiers and never asks Qwen to authorize.
         "authenticated_account_id": _clean(authenticated_account_id, limit=80),
@@ -266,6 +272,7 @@ def build_companion_prompt_identity_context(
     context = caregiver_context if isinstance(caregiver_context, dict) else {}
     result = {
         "identity_context_status": "authenticated",
+        "conversation_stage": context.get("conversation_stage", "unknown"),
         "caregiver_display_name": context.get("display_name"),
         "caregiver_relationship": context.get("relationship"),
         "caregiver_role": context.get("caregiver_role"),
