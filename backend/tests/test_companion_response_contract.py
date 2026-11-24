@@ -4467,8 +4467,14 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
             headers={"Authorization": f"Bearer {token}"},
             json={"person_id": person_id, "text": "What does the record say about Mum's mobility?"},
         )
-        assert response.status_code == 503, response.text
-        assert "could not produce a sufficiently grounded response" in response.text.casefold()
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["reply"].startswith("I can't confirm that from the care record")
+        assert body["ai_generated"] is False
+        assert body["model"] is None
+        assert body["response_origin"] == "backend_grounding_fallback"
+        assert body["grounding_status"] == "insufficient_evidence"
+        assert body["written_to_lcr"] is False
     finally:
         teardown()
 
