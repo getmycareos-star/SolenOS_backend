@@ -62,7 +62,7 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
     assert "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded" in assembled
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in assembled
     assert "initially focused on the United States" in SOLENOS_IDENTITY_CONSTITUTION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.1"
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.2"
 
 
 def test_lcr_authority_and_backend_write_boundary_are_in_the_assembled_contract():
@@ -83,6 +83,9 @@ def test_identity_covers_origin_and_canonical_creator_response():
         "The care journey",
         "The model is replaceable",
         "ownership of third-party technology",
+        "What can't you do?",
+        "Can I trust everything you say?",
+        "qualified professional when appropriate",
     )
     for phrase in required:
         assert phrase in content
