@@ -199,20 +199,37 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
 
 
 def _build_runtime_personality_constitution() -> str:
+    """Render the complete behavioural acceptance contract for every inference.
+
+    The model receives the same observable behaviours, required context,
+    prohibited behaviours, violation conditions, and verification intent used
+    by deterministic tests. This prevents the runtime kernel from collapsing
+    the ten characteristics into tone-only slogans.
+    """
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
         f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}",
+        "This is an enforceable product-behaviour contract, not a tone suggestion.",
+        "Apply every characteristic below in every workflow; backend authorization,",
+        "validation, safety checks, and LCR approval remain authoritative.",
     ]
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
+        contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
-            SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["runtime_rule"],
+            f"Required behaviour: {contract['runtime_rule']}",
+            "Observable behaviours: " + "; ".join(contract["observable_behaviors"]) + ".",
+            "Required context: " + "; ".join(contract["required_context"]) + ".",
+            "Prohibited behaviours: " + "; ".join(contract["prohibited_behaviors"]) + ".",
+            "A violation occurs when: " + "; ".join(contract["violation_conditions"]) + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
         SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
         "## COMMUNICATION",
         "Use plain American English; answer the actual question first; be concise and practical without jargon, alarmism, or promotion.",
+        "When a characteristic conflicts with safety, evidence, privacy, dignity, authorization, or LCR authority, those higher-priority requirements win.",
+        "Do not claim that following this constitution makes a clinical assessment or independently verifies a care fact.",
     ))
     return "\n".join(lines)
 
