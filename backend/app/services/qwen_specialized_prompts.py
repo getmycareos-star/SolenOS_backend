@@ -149,7 +149,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
         return ()
 
     workflow_ids = re.findall(
-        r"solenos_workflow_id\\s*:\\s*([a-z0-9_]+)",
+        r"solenos_workflow_id\s*:\s*([a-z0-9_]+)",
         system_text,
         flags=re.IGNORECASE,
     )
