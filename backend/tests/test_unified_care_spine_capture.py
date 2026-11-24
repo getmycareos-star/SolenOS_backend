@@ -954,7 +954,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
     finally:
         with SessionLocal() as db:
             session_ids = [
-                row.id for row in db.query(ConversationSession.id).filter(
+                row[0] for row in db.query(ConversationSession.id).filter(
                     ConversationSession.person_id == person_id
                 ).all()
             ]
