@@ -221,6 +221,16 @@ def test_accepted_care_assertion_withdrawal_preserves_history_and_rejects_stale_
         assert body["created_by_caregiver_id"] == caregiver_id
         assert body["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
 
+        current_care = client.get(
+            "/api/v1/care-continuity/current-care?source=assertions",
+            headers=headers,
+        )
+        assert current_care.status_code == 200, current_care.text
+        assert all(
+            item.get("id") != assertion_id
+            for item in current_care.json().get("items", [])
+        ), "withdrawn assertions must remain in history but disappear from the current-care projection"
+
         with SessionLocal() as db:
             persisted = db.query(CareAssertion).filter_by(id=assertion_id).one()
             assert persisted.assertion_status == "withdrawn"
