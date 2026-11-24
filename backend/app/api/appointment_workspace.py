@@ -797,6 +797,16 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         living_care_record_context["failed_sources"] = list(dict.fromkeys([
             *failed_sources, "event_correction_lineage",
         ]))
+        event_source = living_care_record_context.get("sources", {}).get("events")
+        if isinstance(event_source, dict):
+            event_source.update({
+                "status": "partial",
+                "correction_lineage_status": "partial",
+                "interpretation_limit": (
+                    "At least one appointment event could not be matched to the correction-aware "
+                    "Living Care Record projection. Its currentness is unknown."
+                ),
+            })
     appointment_items = [{
         "source_table": "appointments",
         "source_id": str(item.id),
