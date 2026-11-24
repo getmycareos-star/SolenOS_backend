@@ -560,3 +560,72 @@ def test_lcr_event_evidence_prefix_resolves_to_persisted_event_type():
         "recorded_at": None,
     }]
 
+def test_shared_origin_pairs_use_explicit_parent_and_source_reference_lineage_only():
+    from types import SimpleNamespace
+    from app.services.claim_provenance import build_shared_origin_evidence_pairs
+
+    rows = [
+        SimpleNamespace(
+            id="source-original",
+            parent_evidence_id=None,
+            original_source_reference="https://records.example/source/visit-17",
+            source_text_sha256="same-hash",
+        ),
+        SimpleNamespace(
+            id="source-copy",
+            parent_evidence_id="source-original",
+            original_source_reference="https://records.example/source/visit-17",
+            source_text_sha256="same-hash",
+        ),
+        SimpleNamespace(
+            id="independent-identical-text",
+            parent_evidence_id=None,
+            original_source_reference="https://records.example/source/independent-visit",
+            source_text_sha256="same-hash",
+        ),
+    ]
+    pairs = build_shared_origin_evidence_pairs(rows)
+    assert frozenset(("source-original", "source-copy")) in pairs
+    assert frozenset(("source-original", "independent-identical-text")) not in pairs
+    assert frozenset(("source-copy", "independent-identical-text")) not in pairs
+
+
+def test_explicit_source_lineage_prevents_duplicate_incident_count_inflation():
+    from types import SimpleNamespace
+    from app.services.claim_provenance import build_shared_origin_evidence_pairs
+
+    lineage = build_shared_origin_evidence_pairs([
+        SimpleNamespace(id="origin-a", parent_evidence_id=None, original_source_reference=""),
+        SimpleNamespace(id="origin-b", parent_evidence_id="origin-a", original_source_reference=""),
+    ])
+    aggregate = build_distinct_event_aggregate(
+        [
+            {
+                "id": "event-a",
+                "event_type": "care_observation",
+                "status": "recorded",
+                "occurred_at": datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
+                "title": "Mobility",
+                "description": "Caregiver reported one episode of unsteadiness.",
+                "evidence_ids": ["origin-a"],
+            },
+            {
+                "id": "event-b",
+                "event_type": "care_observation",
+                "status": "recorded",
+                "occurred_at": datetime(2026, 11, 4, 9, 0, tzinfo=timezone.utc),
+                "title": "Mobility",
+                "description": "Caregiver reported one episode of unsteadiness.",
+                "evidence_ids": ["origin-b"],
+            },
+        ],
+        topic="unsteadiness",
+        start_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        end_at=datetime(2026, 11, 13, tzinfo=timezone.utc),
+        window_label="first half of November",
+        shared_origin_evidence_pairs=lineage,
+    )
+    assert aggregate["status"] == "validated"
+    assert aggregate["count"] == 1
+    assert aggregate["duplicate_event_ids"] == ["event-b"]
+
