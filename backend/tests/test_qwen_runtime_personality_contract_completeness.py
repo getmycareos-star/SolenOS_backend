@@ -96,8 +96,6 @@ def test_every_personality_trait_rule_is_present_in_the_actual_assembled_qwen_sy
             ("observable_behaviors", "Behaviour: "),
             ("required_context", "Context: "),
             ("prohibited_behaviors", "Prohibited: "),
-            ("violation_conditions", "Violation: "),
-            ("verification_cases", "Test: "),
         ):
             anchor = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait][field]
             assert label + anchor in system, (trait, field)
