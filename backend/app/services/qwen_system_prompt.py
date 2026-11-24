@@ -1,11 +1,5 @@
-from app.services.solenos_identity import (
-    SOLENOS_IDENTITY_CONSTITUTION as SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
-)
-from app.services.solenos_personality import (
-    SOLENOS_PERSONALITY_CONSTITUTION as SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
-)
+"""Canonical SolenOS inference contract assembled from model-independent constitutions."""
 
-SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 from app.services.solenos_identity import SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 from app.services.solenos_personality import SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
 
