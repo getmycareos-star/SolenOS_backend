@@ -400,6 +400,14 @@ def qwen_chat(
         payload["think"] = False
     if response_format is not None:
         payload["format"] = response_format
+    audit_metadata["generation_options"] = dict(bounded_options)
+    audit_metadata["response_format_kind"] = (
+        "json" if response_format == "json" else
+        "json_schema" if isinstance(response_format, dict) else "none"
+    )
+    audit_metadata["timeout_seconds"] = timeout or configured_timeout
+    audit_metadata["attempt_count"] = 0
+    audit_metadata["transient_http_retry_used"] = False
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     audit_id = _begin_inference_metric(model, audit_metadata)
     if audit_id is None:
@@ -433,8 +441,12 @@ def qwen_chat(
     last_startup_error = None
     first_attempt = True
     transient_http_retry_used = False
+    attempt_count = 0
     try:
         while True:
+            attempt_count += 1
+            audit_metadata["attempt_count"] = attempt_count
+            audit_metadata["transient_http_retry_used"] = transient_http_retry_used
             if first_attempt:
                 attempt_timeout = timeout or configured_timeout
             else:
