@@ -6189,6 +6189,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             person_id=person_id,
             caregiver_id=caregiver_id,
             request_id=getattr(request.state, "request_id", None),
+            workflow_id=payload.workflow,
             reply=reply,
             rejection_reasons=rejection_reasons,
             ai_generated=True,
@@ -6262,9 +6263,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             person_id=person_id,
             caregiver_id=caregiver_id,
             request_id=getattr(request.state, "request_id", None),
+            workflow_id=payload.workflow,
             reply=reply,
             rejection_reasons=[],
             ai_generated=True,
+            commit_success=True,
             source_event_ids=source_event_ids,
             source_evidence_ids=source_evidence_ids,
             source_document_analysis_ids=source_document_analysis_ids,
@@ -6312,6 +6315,7 @@ def _record_companion_output_validation(
     person_id: str,
     caregiver_id: str,
     request_id: str | None,
+    workflow_id: str,
     reply: str,
     rejection_reasons: list[str],
     ai_generated: bool,
@@ -6322,13 +6326,14 @@ def _record_companion_output_validation(
     source_assertion_ids: list[str],
     source_lcr_context_ids: list[str],
     source_freshness_assessment_ids: list[str],
+    commit_success: bool = False,
 ) -> None:
     """Persist a metadata-only safety decision; never store rejected model text."""
     rejected = bool(rejection_reasons)
     details = {
         "request_id": request_id,
         "caregiver_id": caregiver_id,
-        "workflow_id": "companion",
+        "workflow_id": workflow_id,
         "generator": "qwen" if ai_generated else "deterministic_solenos",
         "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
         "response_sha256": hashlib.sha256((reply or "").encode("utf-8")).hexdigest(),
@@ -6346,7 +6351,7 @@ def _record_companion_output_validation(
     }
     db.add(AISafetyCheck(
         person_id=person_id,
-        check_name="companion_response_grounding",
+        check_name=f"{workflow_id}_response_grounding",
         check_version=SOLENOS_OPERATING_CONTRACT_VERSION,
         result="rejected" if rejected else "passed",
         risk_level="high" if rejected else "none",
@@ -6356,7 +6361,7 @@ def _record_companion_output_validation(
         db.add(AIOutputRejection(
             person_id=person_id,
             caregiver_id=caregiver_id,
-            reason_code="companion_grounding_validation_failed",
+            reason_code=f"{workflow_id}_grounding_validation_failed"[:80],
             reason_text=",".join(details["rejection_reasons"])[:2000] or "grounding_validation_failed",
             rejected_by="safety_system",
             policy_version=SOLENOS_OPERATING_CONTRACT_VERSION,
@@ -6366,7 +6371,20 @@ def _record_companion_output_validation(
             db.commit()
         except Exception:
             db.rollback()
-            logger.exception("Companion output rejection audit could not be persisted")
+            logger.exception("Qwen output rejection audit could not be persisted")
+    elif commit_success:
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Qwen output validation audit could not be persisted")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "output_validation_audit_unavailable",
+                    "message": "SolenOS could not verify the response record. No answer was delivered.",
+                },
+            ) from exc
 
 
 def _stored_response_metadata(row: ConversationMessage) -> dict:
