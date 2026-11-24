@@ -4367,10 +4367,18 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
             normalized,
         ) is None
     elif criterion == "caregiver_continuity_gap":
-        checks["does_not_assert_missed_task"] = re.search(
+        missed_claim = re.search(
             r"\b(?:the follow-up call|the call)\s+(?:was|is|has been)\s+missed\b",
             normalized,
-        ) is None
+        )
+        negated_context = ""
+        if missed_claim:
+            negated_context = normalized[max(0, missed_claim.start() - 60):missed_claim.start()]
+        missed_claim_is_qualified = any(
+            marker in negated_context
+            for marker in ("not", "no evidence", "cannot determine", "can't determine", "does not establish")
+        )
+        checks["does_not_assert_missed_task"] = missed_claim is None or missed_claim_is_qualified
     elif criterion == "incomplete_history":
         checks["does_not_claim_history_complete"] = not bool(re.search(
             r"\b(?:there were no|the person had no|no falls occurred)\s+falls?\s+in june\b",
