@@ -481,7 +481,7 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
         _enforce_prompt_context_budget(
             prepared_prompt,
             num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
-            num_predict=int(os.getenv("OLLAMA_NUM_PREDICT", "96")),
+            num_predict=int(captured[0]["options"].get("num_predict", os.getenv("OLLAMA_NUM_PREDICT", "96"))),
         )
         model_coverage = json.loads(coverage_line.partition(": ")[2])
         assert "legacy_optional" in model_coverage["failed_sources"]
