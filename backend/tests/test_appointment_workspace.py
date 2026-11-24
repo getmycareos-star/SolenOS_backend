@@ -3630,6 +3630,8 @@ def test_appointment_brief_includes_old_event_when_its_correction_is_recent(clie
             caregiver_id=owner["caregiver"]["id"],
             processing_status="completed",
             processing_attempts=1,
+            created_at=now - timedelta(days=10),
+            processed_at=now - timedelta(days=1),
         ))
         db.flush()
         db.add(CareRecordRelationship(
