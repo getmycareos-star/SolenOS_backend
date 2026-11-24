@@ -878,3 +878,24 @@ def test_caregiver_deleted_evidence_cannot_support_a_current_claim():
     )
     assert provenance["claims"][0]["support_status"] == "matched_historical_only"
     assert unmatched_material_claims(provenance)
+
+
+def test_caregiver_attributed_lcr_assertion_is_a_resolvable_claim_source():
+    records = context_lines_to_source_records([
+        "Caregiver-attributed LCR assertion (status preserved): " + json.dumps({
+            "assertion_id": "assertion-1",
+            "source_type": "assertions",
+            "record": {
+                "id": "assertion-1",
+                "person_id": "person-1",
+                "source_text": "Caregiver reported that Mum felt dizzy.",
+                "assertion_status": "reported",
+                "epistemic_state": "reported",
+                "recorded_at": "2026-11-24T10:00:00+00:00",
+            },
+        })
+    ])
+    assert len(records) == 1
+    assert records[0]["record_type"] == "care_assertion"
+    assert records[0]["record_id"] == "assertion-1"
+    assert records[0]["person_id"] == "person-1"
