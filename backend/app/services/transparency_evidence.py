@@ -61,8 +61,11 @@ def build_transparency_evidence(
     can_view_lcr = grant.access_scope == "full_record" and (
         bool(grant.can_manage_members) or "view_lcr" in set(grant.permissions or [])
     )
-    can_view_documents = grant.access_scope == "full_record" and (
-        bool(grant.can_manage_members) or "view_documents" in set(grant.permissions or [])
+    can_view_documents = (
+        grant.access_scope == "documents_only" and "view_documents" in set(grant.permissions or [])
+    ) or (
+        grant.access_scope == "full_record"
+        and (bool(grant.can_manage_members) or "view_documents" in set(grant.permissions or []))
     )
     can_manage_members = bool(grant.can_manage_members)
 
