@@ -46,6 +46,27 @@ def test_qwen_gateway_fails_closed_before_model_request_when_audit_start_cannot_
     assert error.value.detail["code"] == "inference_audit_unavailable"
 
 
+def test_qwen_gateway_withholds_successful_model_text_when_audit_finalization_fails(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(qwen_gateway, "_complete_inference_metric", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps({
+            "message": {"role": "assistant", "content": "A plausible but unrecorded answer."},
+            "done": True,
+            "done_reason": "stop",
+        }).encode("utf-8")),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "Use synthetic evidence."}])
+
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "inference_audit_unavailable"
+    assert "No answer was delivered" in error.value.detail["message"]
+
+
 def test_qwen_inference_audit_metadata_hashes_content_without_persisting_it():
     source_text = "SYNTHETIC_PRIVATE_CONTEXT_2e91"
     metadata = qwen_gateway._inference_audit_metadata([
