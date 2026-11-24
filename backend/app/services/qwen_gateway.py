@@ -500,7 +500,6 @@ def extract_review_candidates(
                 "Multiple patient identities: no observations; ask caregiver to separate records. "
                 "No supported statements: empty observations. Ask at most three questions; ignore greetings/small talk."
             ),
-            ),
         },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
     ]
