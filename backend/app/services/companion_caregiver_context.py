@@ -27,12 +27,85 @@ def _greeting_period(local_now: datetime) -> str:
     return "neutral"
 
 
+def _enum_value(value):
+    return getattr(value, "value", value)
+
+
+def _iso_value(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
+
+
+def _clean_list(values, *, limit: int = 8, item_limit: int = 240) -> list[str]:
+    if not isinstance(values, (list, tuple)):
+        return []
+    return [clean for value in values[:limit] if (clean := _clean(value, limit=item_limit))]
+
+
+def _responsibility_context(row) -> dict:
+    return {
+        "responsibility_type": _clean(getattr(row, "responsibility_type", None), limit=100),
+        "scope": _clean(getattr(row, "scope", None), limit=400),
+        "status": _enum_value(getattr(row, "status", None)),
+        "acceptance_status": _enum_value(getattr(row, "acceptance_status", None)),
+        "effective_start": _iso_value(getattr(row, "effective_start", None)),
+        "effective_end": _iso_value(getattr(row, "effective_end", None)),
+        "assignment_source": _clean(getattr(row, "assignment_source", None), limit=80),
+        "is_joint": bool(getattr(row, "is_joint", False)),
+        "schedule_pattern": _clean(getattr(row, "schedule_pattern", None), limit=160),
+        "provenance": _clean(getattr(row, "provenance", None), limit=320),
+    }
+
+
+def _role_context(row) -> dict:
+    return {
+        "role_type": _enum_value(getattr(row, "role_type", None)),
+        "custom_role_name": _clean(getattr(row, "custom_role_name", None), limit=100),
+        "scope": _clean(getattr(row, "scope", None), limit=400),
+        "effective_start": _iso_value(getattr(row, "effective_start", None)),
+        "effective_end": _iso_value(getattr(row, "effective_end", None)),
+        "assignment_source": _clean(getattr(row, "assignment_source", None), limit=80),
+        "is_current": bool(getattr(row, "is_current", False)),
+    }
+
+
+def _open_loop_context(row) -> dict:
+    return {
+        "id": _clean(getattr(row, "id", None), limit=80),
+        "loop_type": _clean(getattr(row, "loop_type", None), limit=40),
+        "title": _clean(getattr(row, "title", None), limit=180),
+        "description": _clean(getattr(row, "description", None), limit=800),
+        "status": _clean(getattr(row, "status", None), limit=40),
+        "outcome_status": _clean(getattr(row, "outcome_status", None), limit=32),
+        "owner_role": _clean(getattr(row, "owner_role", None), limit=80),
+        "owner_label": _clean(getattr(row, "owner_label", None), limit=120),
+        "uncertainty": _clean(getattr(row, "uncertainty", None), limit=40),
+        "missing_information": _clean_list(getattr(row, "missing_information", None), limit=8),
+        "request_text": _clean(getattr(row, "request_text", None), limit=600),
+        "recipient_label": _clean(getattr(row, "recipient_label", None), limit=120),
+        "deadline_at": _iso_value(getattr(row, "deadline_at", None)),
+        "deadline_timezone": _clean(getattr(row, "deadline_timezone", None), limit=80),
+        "deadline_source": _clean(getattr(row, "deadline_source", None), limit=40),
+        "priority": _clean(getattr(row, "priority", None), limit=16),
+        "priority_reasons": _clean_list(getattr(row, "priority_reasons", None), limit=5),
+        "deferred_reason": _clean(getattr(row, "deferred_reason", None), limit=400),
+        "review_at": _iso_value(getattr(row, "review_at", None)),
+        "consequence_of_delay": _clean(getattr(row, "consequence_of_delay", None), limit=40),
+        "verification_rule": _clean(getattr(row, "verification_rule", None), limit=400),
+    }
+
+
 def build_companion_caregiver_context(
     caregiver,
     access_grant,
     *,
     now: datetime | None = None,
     timezone_conflict: bool = False,
+    caregiver_profile=None,
+    active_roles=None,
+    active_responsibilities=None,
+    assigned_open_loops=None,
+    responsibilities_truncated: bool = False,
+    open_loops_truncated: bool = False,
 ) -> dict:
     """Return a JSON-safe context for one authenticated caregiver/person pair.
 
@@ -105,4 +178,23 @@ def build_companion_caregiver_context(
         "date_format": _clean(getattr(caregiver, "date_format", None), limit=24),
         "measurement_system": _clean(getattr(caregiver, "measurement_system", None), limit=24),
         "communication_style": _clean(getattr(caregiver, "communication_style", None), limit=24),
+        "caregiver_profile": {
+            "participation_category": _enum_value(getattr(caregiver_profile, "participation_category", None)),
+            "involvement_status": _enum_value(getattr(caregiver_profile, "involvement_status", None)),
+            "availability_status": _enum_value(getattr(caregiver_profile, "availability_status", None)),
+            "is_primary_designated": bool(getattr(caregiver_profile, "is_primary_designated", False)),
+        } if caregiver_profile is not None else None,
+        "active_roles": [_role_context(row) for row in (active_roles or [])[:10]],
+        "active_responsibilities": [
+            _responsibility_context(row) for row in (active_responsibilities or [])[:20]
+        ],
+        "active_responsibilities_status": (
+            "profile_not_linked" if caregiver_profile is None
+            else "available" if active_responsibilities
+            else "no_rows_returned"
+        ),
+        "active_responsibilities_truncated": bool(responsibilities_truncated),
+        "assigned_open_loops": [_open_loop_context(row) for row in (assigned_open_loops or [])[:20]],
+        "assigned_open_loops_status": "available" if assigned_open_loops else "no_rows_returned",
+        "assigned_open_loops_truncated": bool(open_loops_truncated),
     }
