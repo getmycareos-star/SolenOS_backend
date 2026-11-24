@@ -105,7 +105,7 @@ from app.services.care_continuity import (
 router = APIRouter(tags=["community and companion"])
 
 # Railway's observed 4,096-token model window must leave room for system rules and output.
-COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 2600
+COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
     "INTERACTION: Keep intent, expressed emotion, capacity, urgency, information state, and conversation state distinct; "
@@ -113,6 +113,8 @@ COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
     "Notice emotion without treating an interpretation as a psychological diagnosis or assuming feelings. "
     "An angry caregiver may also be frightened; a sad caregiver may still want a detailed factual answer. "
     "Acknowledge positive moments without turning them into a crisis. "
+    "Do not collect a second structured care entry in chat. When a caregiver shares a new observation, event, or change, "
+    "respond to the substance and direct capture to Daily Care; do not ask them to repeat the same information in a form. "
 )
 
 
