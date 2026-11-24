@@ -90,11 +90,12 @@ _TRANSPARENCY_VALUE_KEYS = frozenset({
     "epistemic_state", "epistemic_status", "observed_at", "recorded_at",
     "occurred_at", "event_time_text", "title", "description", "status",
     "source_label", "source_quote", "source_span_start", "source_span_end",
+    "observation", "subject", "claim", "reporter", "reported_by",
     "review_status", "decision", "reason", "rationale", "change_kind",
     "event_type", "target_type", "target_id", "source_event_id",
     "source_evidence_id", "evidence_ids", "open_questions",
     "possible_safety_flags", "observations", "proposed_assertions",
-    "proposed_change", "operation", "candidate_index", "confidence",
+    "proposed_change", "operation", "candidate_index",
 })
 
 
