@@ -4473,6 +4473,7 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
         assert body["ai_generated"] is False
         assert body["model"] is None
         assert body["response_origin"] == "backend_grounding_fallback"
+        assert body["response_mode"] == "deterministic_grounding_fallback"
         assert body["grounding_status"] == "insufficient_evidence"
         assert body["written_to_lcr"] is False
     finally:
