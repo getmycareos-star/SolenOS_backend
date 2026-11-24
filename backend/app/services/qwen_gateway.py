@@ -268,7 +268,7 @@ def qwen_chat(
         model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         _mark_inference_unverified(model)
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"), audit_metadata=audit_metadata, audit_id=audit_id)
+        _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"), audit_metadata=audit_metadata)
         raise
     # Keep the model context within the Railway memory envelope. The
     # preflight below rejects oversized requests before Ollama can truncate
@@ -510,7 +510,7 @@ def qwen_chat(
         # failure, not an uncaught server error and never a successful answer.
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, response_metadata=result, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         _mark_inference_unverified(model)
@@ -565,7 +565,7 @@ def qwen_chat(
             failure_reason = "generation_limit_reached"
         else:
             failure_reason = "invalid_completion_metadata"
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, response_metadata=result, audit_id=audit_id)
         raise HTTPException(
             status_code=502,
             detail={
