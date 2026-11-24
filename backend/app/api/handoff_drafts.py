@@ -716,6 +716,8 @@ def _draft_response(draft: HandoffDraft) -> dict:
                 "source_type", "source_table", "source_id", "source_fingerprint", "source_revision", "source_revision_status", "event_at", "recorded_at",
                 "due_at", "details", "epistemic_state", "epistemic_status", "assertion_status", "record_status", "stale_warning",
                 "evidence_ids", "evidence_sources", "evidence_reference_status",
+                "information_status", "correction_lineage_status", "interpretation_limit",
+                "corrections", "pending_corrections",
             )}
             for item in records if isinstance(item, dict)
         ],
@@ -3187,7 +3189,13 @@ def prepare_handoff_draft(
         "generation": generated_document,
         "claim_provenance": _handoff_claim_provenance(structured_content, source_snapshot),
         "source_references": [
-            {key: item[key] for key in ("source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at", "details", "epistemic_status", "record_status", "stale_warning", "evidence_ids", "evidence_sources", "evidence_reference_status")}
+            {key: item.get(key) for key in (
+                "source_type", "source_table", "source_id", "event_at", "recorded_at", "due_at",
+                "details", "epistemic_status", "record_status", "stale_warning",
+                "evidence_ids", "evidence_sources", "evidence_reference_status",
+                "information_status", "correction_lineage_status", "interpretation_limit",
+                "corrections", "pending_corrections",
+            )}
             for item in records
         ],
         "evidence_lineage": evidence_lineage,
