@@ -1600,24 +1600,24 @@ async def generate_lcr_orientation(
         orientation_positioning = (
             "NEW CARE RECORD: the authenticated record currently contains no returned care-domain entries, "
             "and its core history sources are available. Do not pretend to remember prior care. "
-            "For a greeting, explain in plain language that SolenOS helps keep the person's care "
-            "information together and make changes easier to understand. Invite the caregiver to start with "
-            "whatever is happening now; rough fragments are acceptable. Do not describe features as guarantees. "
+            "For a greeting-only message, give a brief, warm welcome as SolenOS Companion. Do not start "
+            "an onboarding flow, list features, or assume a family relationship. Invite the caregiver to share "
+            "what they need only when a light invitation fits the message. "
         )
     elif caregiver_stage == "returning":
         orientation_positioning = (
             "RETURNING CARE RECORD: the authenticated record contains care-domain entries. Acknowledge continuity "
             "naturally without saying 'I remember everything', 'picking up where we left off', or implying the "
-            "bounded context is complete. For a greeting, orient the caregiver briefly to the existing care story. "
-            "Mention one specific, relevant, currently supported detail only when it genuinely helps; otherwise "
-            "acknowledge that the care record is already underway and invite the most useful update. "
-            "Never dump a history summary in response to 'Hi'. "
+            "bounded context is complete. For a greeting-only message, do not surface patient-specific details "
+            "or a history summary. Acknowledge the ongoing care record without claiming independent memory; "
+            "wait for the caregiver to ask for care information before retrieving or summarizing it. "
         )
     else:
         orientation_positioning = (
             "CARE HISTORY STATUS UNKNOWN: core history sources are unavailable or incomplete. Do not label the "
-            "caregiver new or returning and do not infer that care history is absent. For a greeting, keep the "
-            "orientation neutral, introduce SolenOS briefly, and invite the caregiver to share the current situation. "
+            "caregiver new or returning and do not infer that care history is absent. For a greeting-only "
+            "message, give a brief neutral welcome as SolenOS Companion without an onboarding assumption or "
+            "patient-specific disclosure. "
         )
     response_length_policy = resolve_response_length_policy(raw_input, caregiver_stage=caregiver_stage)
     system_prompt = (
