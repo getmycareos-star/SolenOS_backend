@@ -510,8 +510,28 @@ def build_claim_provenance(
                 if exact_match or quoted_match:
                     record_status = str(source.get("record_status") or "").casefold()
                     lifecycle_status = str(source.get("source_lifecycle_status") or "").casefold()
-                    is_historical = record_status in historical_statuses or lifecycle_status in historical_statuses
-                    is_non_current = record_status in non_current_statuses or lifecycle_status in non_current_statuses
+                    related_source_statuses = [
+                        str(item.get(key) or "").casefold()
+                        for item in (source.get("related_evidence") or [])
+                        if isinstance(item, dict)
+                        for key in ("record_status", "source_lifecycle_status", "epistemic_status")
+                    ]
+                    is_historical = (
+                        record_status in historical_statuses
+                        or lifecycle_status in historical_statuses
+                        or (
+                            source.get("record_type") == "document_extraction"
+                            and any(status in historical_statuses for status in related_source_statuses)
+                        )
+                    )
+                    is_non_current = (
+                        record_status in non_current_statuses
+                        or lifecycle_status in non_current_statuses
+                        or (
+                            source.get("record_type") == "document_extraction"
+                            and any(status in non_current_statuses for status in related_source_statuses)
+                        )
+                    )
                     matched_passage = quoted_passage if quoted_match and not exact_match else statement
                     if not is_historical and not is_non_current:
                         current_matches += 1
