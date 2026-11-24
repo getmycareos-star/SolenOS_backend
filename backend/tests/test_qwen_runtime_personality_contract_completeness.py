@@ -120,7 +120,7 @@ def test_runtime_contract_preserves_product_boundaries_and_precedence():
 def test_runtime_identity_contains_role_authority_privacy_and_model_transparency():
     identity = SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
     required = (
-        "Version: 2.4",
+        "Version: 2.5",
         "You are AI, not human, not a clinician",
         "SolenOS was founded by David Abuchi",
         "Never invent care facts",
