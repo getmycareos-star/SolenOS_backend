@@ -196,6 +196,14 @@ def _inference_audit_metadata(messages: list[dict], audit_context: dict | None =
                 source_refs[key] = clean
     if source_refs:
         metadata["source_references"] = source_refs
+    generic_refs = trusted_context.get("source_refs")
+    if isinstance(generic_refs, (list, tuple)):
+        clean_refs = list(dict.fromkeys(
+            value.strip() for value in generic_refs
+            if isinstance(value, str) and value.strip() and len(value) <= 240
+        ))[:100]
+        if clean_refs:
+            metadata["source_refs"] = clean_refs
     coverage = trusted_context.get("retrieval_coverage")
     if isinstance(coverage, dict):
         allowed_coverage = ("status", "retrieval_projection_complete", "page_limit_reached", "context_truncated")
