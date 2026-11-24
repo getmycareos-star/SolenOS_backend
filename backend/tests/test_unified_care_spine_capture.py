@@ -992,6 +992,11 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             db.query(Caregiver).filter(
                 Caregiver.person_id == person_id
             ).delete(synchronize_session=False)
+            # Care-state revisions are retained by FK policy; remove this
+            # isolated test fixture's revisions explicitly before its person.
+            db.query(CareStateRevision).filter(
+                CareStateRevision.person_id == person_id
+            ).delete(synchronize_session=False)
             db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
             db.commit()
         engine.dispose()
