@@ -457,7 +457,15 @@ def extract_review_candidates(
     """Return verbatim-grounded review candidates under the correct source workflow."""
     if workflow_id not in {"care_claim_extraction", "document_candidate_extraction"}:
         raise ValueError("unsupported_candidate_extraction_workflow")
-    bounded_source = (source_text or "").strip()[:12_000]
+    bounded_source = (source_text or "").strip()
+    if len(bounded_source) > 12_000:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "candidate_source_exceeds_limit",
+                "message": "This source is too long for one extraction pass. Split it into smaller reviewed sections; no text was truncated or sent to the model.",
+            },
+        )
     if not bounded_source:
         return {"observations": [], "open_questions": []}
 
@@ -602,7 +610,15 @@ def extract_review_candidates(
 
 def extract_companion_care_candidates(source_text: str) -> dict:
     """Identify possible care observations; every returned candidate is an exact source quotation."""
-    source = (source_text or "").strip()[:4000]
+    source = (source_text or "").strip()
+    if len(source) > 4_000:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "companion_update_source_exceeds_limit",
+                "message": "This message is too long for one care-update review pass. The original conversation remains unchanged; no text was truncated or sent for extraction.",
+            },
+        )
     if not source:
         return {"observations": []}
     raw = qwen_chat(
