@@ -2707,7 +2707,7 @@ def test_relative_care_history_requires_an_explicit_caregiver_timezone():
                 "timezone": "UTC", "timezone_configured": False,
             })
         with Session(bind=connection) as db:
-            with pytest.raises(ValueError, match="Set the caregiver's local timezone"):
+            with pytest.raises(ValueError, match="Set your time zone in Settings"):
                 build_unified_lcr_context(
                     db, "person-no-zone", "caregiver-no-zone", query="What happened yesterday?"
                 )
