@@ -99,7 +99,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
         # Parse the JSON envelope even when a bracketed source ID was already
         # found. The envelope can carry the authoritative person scope and
         # epistemic qualifiers; skipping it for bracketed records would allow
-        # the caller's later default scope to mask a mismatched payload scope.
+        # a later default scope to mask a mismatched payload scope.
         try:
             payload = json.loads(text[text.index("{"):])
             if isinstance(payload, dict):
@@ -109,65 +109,65 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                             record_id = str(payload[key])
                             break
                 source_type_map = {
-                        "living_record": "living_care_record",
-                        "events": "care_event",
-                        "care_events": "care_event",
-                        "evidence": "care_evidence",
-                        "care_evidence": "care_evidence",
-                        "document_extractions": "document_extraction",
-                        "capture_analyses": "document_extraction",
-                        "appointments": "appointment",
-                        "handoffs": "care_handoff",
-                        "care_handoffs": "care_handoff",
-                        "notifications": "notification",
-                        "evidence_freshness_assessments": "freshness_assessment",
-                        "evidence_completeness_assessments": "completeness_assessment",
-                        "evidence_observations": "care_evidence_observation",
-                        "assertions": "care_assertion",
-                        "facts": "care_fact",
-                        "decisions": "care_decision",
-                        "decision_outcomes": "care_decision_outcome",
-                        "uncertainties": "care_uncertainty",
-                        "uncertainty_assessments": "care_uncertainty_assessment",
-                        "open_questions": "open_question",
-                        "corrections": "care_correction",
-                    }
-                    raw_source_type = str(payload.get("source_type") or record_type)
-                    record_type = source_type_map.get(raw_source_type, raw_source_type)
-                    record_payload = payload.get("record") if isinstance(payload.get("record"), dict) else payload
-                    if isinstance(record_payload, dict):
-                        source_status = (
-                            record_payload.get("epistemic_status")
-                            or record_payload.get("record_status")
-                            or record_payload.get("status")
-                        )
-                        source_attribution = (
-                            record_payload.get("source_attribution")
-                            or record_payload.get("time_provenance")
-                        )
-                        if source_status is not None:
-                            record_metadata["record_status"] = str(source_status)
-                        if source_attribution is not None:
-                            record_metadata["source_attribution"] = str(source_attribution)
-                        record_metadata["person_id"] = (
-                            str(record_payload.get("person_id")) if record_payload.get("person_id") is not None else None
-                        )
-                        record_metadata["reported_by"] = (
-                            record_payload.get("reported_by_label")
-                            or record_payload.get("original_author")
-                        )
-                        record_metadata["occurred_at"] = (
-                            record_payload.get("occurred_at")
-                            or record_payload.get("observed_at")
-                            or record_payload.get("event_at")
-                        )
-                        record_metadata["recorded_at"] = (
-                            record_payload.get("recorded_at")
-                            or record_payload.get("uploaded_at")
-                            or record_payload.get("created_at")
-                        )
-            except (ValueError, TypeError, json.JSONDecodeError):
-                pass
+                    "living_record": "living_care_record",
+                    "events": "care_event",
+                    "care_events": "care_event",
+                    "evidence": "care_evidence",
+                    "care_evidence": "care_evidence",
+                    "document_extractions": "document_extraction",
+                    "capture_analyses": "document_extraction",
+                    "appointments": "appointment",
+                    "handoffs": "care_handoff",
+                    "care_handoffs": "care_handoff",
+                    "notifications": "notification",
+                    "evidence_freshness_assessments": "freshness_assessment",
+                    "evidence_completeness_assessments": "completeness_assessment",
+                    "evidence_observations": "care_evidence_observation",
+                    "assertions": "care_assertion",
+                    "facts": "care_fact",
+                    "decisions": "care_decision",
+                    "decision_outcomes": "care_decision_outcome",
+                    "uncertainties": "care_uncertainty",
+                    "uncertainty_assessments": "care_uncertainty_assessment",
+                    "open_questions": "open_question",
+                    "corrections": "care_correction",
+                }
+                raw_source_type = str(payload.get("source_type") or record_type)
+                record_type = source_type_map.get(raw_source_type, raw_source_type)
+                record_payload = payload.get("record") if isinstance(payload.get("record"), dict) else payload
+                if isinstance(record_payload, dict):
+                    source_status = (
+                        record_payload.get("epistemic_status")
+                        or record_payload.get("record_status")
+                        or record_payload.get("status")
+                    )
+                    source_attribution = (
+                        record_payload.get("source_attribution")
+                        or record_payload.get("time_provenance")
+                    )
+                    if source_status is not None:
+                        record_metadata["record_status"] = str(source_status)
+                    if source_attribution is not None:
+                        record_metadata["source_attribution"] = str(source_attribution)
+                    record_metadata["person_id"] = (
+                        str(record_payload.get("person_id")) if record_payload.get("person_id") is not None else None
+                    )
+                    record_metadata["reported_by"] = (
+                        record_payload.get("reported_by_label")
+                        or record_payload.get("original_author")
+                    )
+                    record_metadata["occurred_at"] = (
+                        record_payload.get("occurred_at")
+                        or record_payload.get("observed_at")
+                        or record_payload.get("event_at")
+                    )
+                    record_metadata["recorded_at"] = (
+                        record_payload.get("recorded_at")
+                        or record_payload.get("uploaded_at")
+                        or record_payload.get("created_at")
+                    )
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
         if not record_id:
             continue
         key = (record_type, str(record_id))
