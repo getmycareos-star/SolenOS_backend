@@ -849,3 +849,465 @@ def test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time(
         app.dependency_overrides.clear()
         main_module.SessionLocal = original_session_local
         engine.dispose()
+
+def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_history():
+    from app.models.care import CareEvent, Evidence
+    from app.models.care_continuity import (
+        CareAssertion,
+        EvidenceClaimAssessment,
+        EvidenceReviewRecord,
+        EvidenceFreshnessAssessment,
+        EvidenceFreshnessPolicy,
+        EvidenceCompletenessAssessment,
+        EvidenceCompletenessPolicy,
+    )
+    from app.api import collaboration
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex[:10]
+    person_id = f"asof-owner-{suffix}"
+    caregiver_id = f"asof-owner-caregiver-{suffix}"
+    other_person_id = f"asof-other-{suffix}"
+    other_caregiver_id = f"asof-other-caregiver-{suffix}"
+    token = f"asof-token-{suffix}"
+    other_token = f"asof-other-token-{suffix}"
+    before = datetime(2026, 10, 28, 10, 0, tzinfo=timezone.utc)
+    after = datetime(2026, 10, 28, 13, 0, tzinfo=timezone.utc)
+    as_of = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+
+    def override_get_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    original_session_local = main_module.SessionLocal
+    app.dependency_overrides[get_db] = override_get_db
+    main_module.SessionLocal = Session
+    try:
+        with Session() as db:
+            db.add_all([
+                Person(id=person_id, name="PostgreSQL as-of owner"),
+                Person(id=other_person_id, name="PostgreSQL as-of other person"),
+            ])
+            db.flush()
+            db.add_all([
+                Caregiver(id=caregiver_id, name="Owner caregiver", relationship="family", person_id=person_id),
+                Caregiver(id=other_caregiver_id, name="Other caregiver", relationship="family", person_id=other_person_id),
+            ])
+            db.flush()
+            db.add_all([
+                _primary_access_grant(person_id, caregiver_id),
+                _primary_access_grant(other_person_id, other_caregiver_id),
+                AnonymousSession(
+                    id=f"asof-session-{suffix}",
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    token_hash=hashlib.sha256(token.encode()).hexdigest(),
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
+                ),
+                AnonymousSession(
+                    id=f"asof-other-session-{suffix}",
+                    person_id=other_person_id,
+                    caregiver_id=other_caregiver_id,
+                    token_hash=hashlib.sha256(other_token.encode()).hexdigest(),
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=3),
+                ),
+            ])
+
+            evidence = Evidence(
+                id=f"asof-evidence-{suffix}",
+                person_id=person_id,
+                type="note",
+                source_text="Caregiver reported that Mum woke twice overnight.",
+                uploaded_by_caregiver_id=caregiver_id,
+                evidence_status="recorded",
+                source_type="caregiver_report",
+                uploaded_at=before,
+            )
+            foreign_evidence = Evidence(
+                id=f"asof-foreign-evidence-{suffix}",
+                person_id=other_person_id,
+                type="note",
+                source_text="Private evidence belonging to another care record.",
+                uploaded_by_caregiver_id=other_caregiver_id,
+                evidence_status="recorded",
+                source_type="caregiver_report",
+                uploaded_at=before,
+            )
+            freshness_policy = EvidenceFreshnessPolicy(
+                id=f"asof-freshness-policy-{suffix}",
+                person_id=person_id,
+                domain_key="sleep",
+                policy_version="freshness-v1",
+                max_age_days=30,
+                historical_after_days=90,
+                rationale="Bounded review interval for sleep evidence.",
+                created_by_caregiver_id=caregiver_id,
+            )
+            completeness_policy = EvidenceCompletenessPolicy(
+                id=f"asof-completeness-policy-{suffix}",
+                person_id=person_id,
+                domain_key="sleep",
+                purpose_key="companion_response",
+                policy_version="completeness-v1",
+                required_fields=["source", "event_time"],
+                rationale="Required provenance for a longitudinal sleep answer.",
+                created_by_caregiver_id=caregiver_id,
+            )
+            claim = CareAssertion(
+                id=f"asof-claim-{suffix}",
+                person_id=person_id,
+                subject_type="care_recipient",
+                subject_id=person_id,
+                field="sleep",
+                assertion_kind="current_state",
+                asserted_value="Caregiver reported waking twice overnight.",
+                source_label="Caregiver report",
+                source_text="Caregiver reported that Mum woke twice overnight.",
+                evidence_ids=[evidence.id],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=before,
+            )
+            claim_v2 = CareAssertion(
+                id=f"asof-claim-v2-{suffix}",
+                person_id=person_id,
+                subject_type="care_recipient",
+                subject_id=person_id,
+                field="sleep",
+                assertion_kind="current_state",
+                asserted_value="Earlier caregiver report withdrawn after correction.",
+                source_label="Caregiver correction",
+                source_text="The caregiver withdrew the earlier sleep report.",
+                evidence_ids=[evidence.id],
+                assertion_status="withdrawn",
+                epistemic_state="withdrawn",
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=before + timedelta(minutes=30),
+            )
+            foreign_event = CareEvent(
+                id=f"asof-foreign-event-{suffix}",
+                person_id=other_person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=before,
+                title="Mobility report",
+                description="Caregiver reported that Mum felt unsteady.",
+                evidence_ids=[],
+                created_by_caregiver_id=other_caregiver_id,
+                time_provenance="caregiver_reported",
+            )
+            db.add_all([
+                evidence, foreign_evidence, freshness_policy, completeness_policy,
+                claim, claim_v2, foreign_event,
+            ])
+            db.flush()
+            db.add_all([
+                EvidenceReviewRecord(
+                    id=f"asof-review-before-{suffix}",
+                    person_id=person_id,
+                    evidence_id=evidence.id,
+                    review_type="reliability",
+                    outcome="unverified",
+                    rationale="The original author remains unconfirmed.",
+                    criteria=[{"criterion": "source attribution", "result": "incomplete"}],
+                    policy_version="review-v1",
+                    source_attribution_snapshot="{}",
+                    reviewed_by_caregiver_id=caregiver_id,
+                    created_at=before,
+                ),
+                EvidenceReviewRecord(
+                    id=f"asof-review-foreign-reviewer-{suffix}",
+                    person_id=person_id,
+                    evidence_id=evidence.id,
+                    review_type="reliability",
+                    outcome="unverified",
+                    rationale="Reviewer belongs to another care record.",
+                    criteria=[],
+                    policy_version="review-v1",
+                    source_attribution_snapshot="{}",
+                    reviewed_by_caregiver_id=other_caregiver_id,
+                    created_at=before,
+                ),
+                EvidenceReviewRecord(
+                    id=f"asof-review-after-{suffix}",
+                    person_id=person_id,
+                    evidence_id=evidence.id,
+                    review_type="reliability",
+                    outcome="supported",
+                    rationale="This review occurred after the requested instant.",
+                    criteria=[],
+                    policy_version="review-v1",
+                    source_attribution_snapshot="{}",
+                    reviewed_by_caregiver_id=caregiver_id,
+                    created_at=after,
+                ),
+                EvidenceReviewRecord(
+                    id=f"asof-review-foreign-{suffix}",
+                    person_id=other_person_id,
+                    evidence_id=evidence.id,
+                    review_type="reliability",
+                    outcome="supported",
+                    rationale="Cross-person review must not appear.",
+                    criteria=[],
+                    policy_version="review-v1",
+                    source_attribution_snapshot="{}",
+                    reviewed_by_caregiver_id=other_caregiver_id,
+                    created_at=before,
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-claim-assessment-before-{suffix}",
+                    person_id=person_id,
+                    claim_id=claim.id,
+                    claim_version=1,
+                    status="unverified",
+                    rationale="The caregiver report is retained without independent confirmation.",
+                    policy_version="claim-v1",
+                    evidence_links=[
+                        {"evidence_id": evidence.id, "relationship": "supports"},
+                        {"evidence_id": foreign_evidence.id, "relationship": "neutral"},
+                    ],
+                    reviewed_by_caregiver_id=caregiver_id,
+                    created_at=before,
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-claim-assessment-before-v2-{suffix}",
+                    person_id=person_id,
+                    claim_id=claim.id,
+                    claim_version=2,
+                    status="withdrawn",
+                    rationale="The caregiver withdrew the earlier report after correction.",
+                    policy_version="claim-v1",
+                    evidence_links=[{"evidence_id": evidence.id, "relationship": "supersedes"}],
+                    reviewed_by_caregiver_id=caregiver_id,
+                    supersedes_assessment_id=f"asof-claim-assessment-before-{suffix}",
+                    superseded_by_claim_id=claim_v2.id,
+                    created_at=before + timedelta(minutes=30),
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-claim-assessment-after-{suffix}",
+                    person_id=person_id,
+                    claim_id=claim.id,
+                    claim_version=3,
+                    status="supported",
+                    rationale="This assessment occurred after the requested instant.",
+                    policy_version="claim-v1",
+                    evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                    reviewed_by_caregiver_id=caregiver_id,
+                    created_at=after,
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-claim-assessment-foreign-{suffix}",
+                    person_id=other_person_id,
+                    claim_id=claim.id,
+                    claim_version=4,
+                    status="supported",
+                    rationale="Cross-person assessment must not appear.",
+                    policy_version="claim-v1",
+                    evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                    reviewed_by_caregiver_id=other_caregiver_id,
+                    created_at=before,
+                ),
+                EvidenceFreshnessAssessment(
+                    id=f"asof-freshness-before-{suffix}",
+                    person_id=person_id,
+                    evidence_id=evidence.id,
+                    policy_id=freshness_policy.id,
+                    policy_version="freshness-v1",
+                    freshness_status="needs_review",
+                    source_time=before,
+                    source_time_kind="event_occurrence",
+                    assessed_at=before,
+                    age_days=1,
+                    rationale="The source has an explicit review boundary.",
+                    assessed_by_caregiver_id=caregiver_id,
+                ),
+                EvidenceFreshnessAssessment(
+                    id=f"asof-freshness-after-{suffix}",
+                    person_id=person_id,
+                    evidence_id=evidence.id,
+                    policy_id=freshness_policy.id,
+                    policy_version="freshness-v1",
+                    freshness_status="current",
+                    source_time=after,
+                    source_time_kind="event_occurrence",
+                    assessed_at=after,
+                    age_days=0,
+                    rationale="This assessment occurred after the requested instant.",
+                    assessed_by_caregiver_id=caregiver_id,
+                ),
+                EvidenceFreshnessAssessment(
+                    id=f"asof-freshness-foreign-{suffix}",
+                    person_id=other_person_id,
+                    evidence_id=evidence.id,
+                    policy_id=freshness_policy.id,
+                    policy_version="freshness-v1",
+                    freshness_status="current",
+                    source_time=before,
+                    source_time_kind="event_occurrence",
+                    assessed_at=before,
+                    age_days=0,
+                    rationale="Cross-person assessment must not appear.",
+                    assessed_by_caregiver_id=other_caregiver_id,
+                ),
+                EvidenceCompletenessAssessment(
+                    id=f"asof-completeness-before-{suffix}",
+                    person_id=person_id,
+                    policy_id=completeness_policy.id,
+                    policy_version="completeness-v1",
+                    subject_type="evidence",
+                    subject_id=evidence.id,
+                    assessment_status="partial",
+                    required_fields=["source", "event_time"],
+                    satisfied_fields=["event_time"],
+                    missing_fields=["source"],
+                    field_evidence_json="{}",
+                    evidence_ids=[evidence.id, foreign_evidence.id],
+                    rationale="Source attribution remains incomplete.",
+                    assessment_basis="linked_source_coverage_only",
+                    semantic_sufficiency="not_automatically_verified",
+                    assessed_by_caregiver_id=caregiver_id,
+                    assessed_at=before,
+                ),
+                EvidenceCompletenessAssessment(
+                    id=f"asof-completeness-after-{suffix}",
+                    person_id=person_id,
+                    policy_id=completeness_policy.id,
+                    policy_version="completeness-v1",
+                    subject_type="evidence",
+                    subject_id=evidence.id,
+                    assessment_status="complete",
+                    required_fields=["source", "event_time"],
+                    satisfied_fields=["source", "event_time"],
+                    missing_fields=[],
+                    field_evidence_json="{}",
+                    evidence_ids=[evidence.id],
+                    rationale="This assessment occurred after the requested instant.",
+                    assessment_basis="linked_source_coverage_only",
+                    semantic_sufficiency="not_automatically_verified",
+                    assessed_by_caregiver_id=caregiver_id,
+                    assessed_at=after,
+                ),
+                EvidenceCompletenessAssessment(
+                    id=f"asof-completeness-foreign-subject-{suffix}",
+                    person_id=person_id,
+                    policy_id=completeness_policy.id,
+                    policy_version="completeness-v1",
+                    subject_type="evidence",
+                    subject_id=foreign_evidence.id,
+                    assessment_status="complete",
+                    required_fields=["source", "event_time"],
+                    satisfied_fields=["source", "event_time"],
+                    missing_fields=[],
+                    field_evidence_json="{}",
+                    evidence_ids=[foreign_evidence.id],
+                    rationale="This assessment points at another person's evidence.",
+                    assessment_basis="linked_source_coverage_only",
+                    semantic_sufficiency="not_automatically_verified",
+                    assessed_by_caregiver_id=caregiver_id,
+                    assessed_at=before,
+                ),
+                EvidenceCompletenessAssessment(
+                    id=f"asof-completeness-foreign-{suffix}",
+                    person_id=other_person_id,
+                    policy_id=completeness_policy.id,
+                    policy_version="completeness-v1",
+                    subject_type="evidence",
+                    subject_id=evidence.id,
+                    assessment_status="complete",
+                    required_fields=["source", "event_time"],
+                    satisfied_fields=["source", "event_time"],
+                    missing_fields=[],
+                    field_evidence_json="{}",
+                    evidence_ids=[evidence.id],
+                    rationale="Cross-person assessment must not appear.",
+                    assessment_basis="linked_source_coverage_only",
+                    semantic_sufficiency="not_automatically_verified",
+                    assessed_by_caregiver_id=other_caregiver_id,
+                    assessed_at=before,
+                ),
+            ])
+            db.commit()
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/api/v1/care-continuity/state-reconstruction/as-of",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"as_of": as_of.isoformat()},
+            )
+            assert response.status_code == 200, response.text
+            history = response.json()["append_only_history"]
+            assert history["evidence_reviews_status"] == "available"
+            review_rows = history["evidence_reviews"]
+            assert [row["review_id"] for row in review_rows] == [
+                f"asof-review-before-{suffix}",
+                f"asof-review-foreign-reviewer-{suffix}",
+            ]
+            assert review_rows[0]["source_attribution_snapshot"] == "{}"
+            assert review_rows[1]["reviewed_by_caregiver_id"] is None
+            assert review_rows[1]["reviewer_scope_validation"] == "reviewer_not_verified"
+
+            assert history["claim_assessments_status"] == "available"
+            claim_rows = history["claim_assessments"]
+            assert [row["assessment_id"] for row in claim_rows] == [
+                f"asof-claim-assessment-before-{suffix}",
+                f"asof-claim-assessment-before-v2-{suffix}",
+            ]
+            assert claim_rows[1]["supersedes_assessment_id"] == f"asof-claim-assessment-before-{suffix}"
+            assert claim_rows[1]["superseded_by_claim_id"] == claim_v2.id
+            assert [link["evidence_id"] for link in claim_rows[0]["evidence_links"]] == [evidence.id]
+
+            assert history["freshness_assessments_status"] == "available"
+            assert [row["assessment_id"] for row in history["freshness_assessments"]] == [
+                f"asof-freshness-before-{suffix}"
+            ]
+            assert history["freshness_assessments"][0]["policy_domain"] == "sleep"
+            assert history["freshness_assessments"][0]["policy_max_age_days"] == 30
+
+            assert history["completeness_assessments_status"] == "available"
+            assert [row["assessment_id"] for row in history["completeness_assessments"]] == [
+                f"asof-completeness-before-{suffix}"
+            ]
+            assert history["completeness_assessments"][0]["evidence_ids"] == [evidence.id]
+            assert history["completeness_assessments"][0]["semantic_sufficiency"] == "not_automatically_verified"
+            assert history["completeness_assessments"][0]["policy_purpose"] == "companion_response"
+            for forbidden_id in (
+                f"asof-review-after-{suffix}",
+                f"asof-review-foreign-{suffix}",
+                f"asof-claim-assessment-after-{suffix}",
+                f"asof-claim-assessment-foreign-{suffix}",
+                f"asof-freshness-after-{suffix}",
+                f"asof-freshness-foreign-{suffix}",
+                f"asof-completeness-after-{suffix}",
+                f"asof-completeness-foreign-subject-{suffix}",
+                f"asof-completeness-foreign-{suffix}",
+            ):
+                assert forbidden_id not in response.text
+
+        with Session() as db:
+            enriched = collaboration._enrich_qwen_claim_source_records(
+                db,
+                person_id,
+                [
+                    {
+                        "record_type": "care_event",
+                        "record_id": foreign_event.id,
+                        "source_text": "Caregiver reported that Mum felt unsteady.",
+                    },
+                    {
+                        "record_type": "care_record",
+                        "record_id": f"unverified-context-id-{suffix}",
+                        "source_text": "Mum's mobility has worsened.",
+                    },
+                ],
+            )
+            assert enriched == []
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        main_module.SessionLocal = original_session_local
+        engine.dispose()
+
