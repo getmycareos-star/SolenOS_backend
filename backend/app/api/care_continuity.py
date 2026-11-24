@@ -5136,6 +5136,12 @@ def reconstruct_recorded_state_as_of(
             for evidence_id in (row.evidence_ids or [])
             if evidence_id
         }
+        completeness_subject_evidence_ids = {
+            str(row.subject_id)
+            for row in completeness_rows
+            if str(row.subject_type or "").casefold() in {"evidence", "care_evidence"} and row.subject_id
+        }
+        completeness_evidence_ids.update(completeness_subject_evidence_ids)
         authorized_completeness_evidence_ids = set()
         if completeness_evidence_ids:
             authorized_completeness_evidence_ids = {
@@ -5144,13 +5150,54 @@ def reconstruct_recorded_state_as_of(
                     Evidence.id.in_(completeness_evidence_ids),
                 ).all()
             }
+        completeness_subject_assertion_ids = {
+            str(row.subject_id)
+            for row in completeness_rows
+            if str(row.subject_type or "").casefold() in {"assertion", "care_assertion"} and row.subject_id
+        }
+        authorized_completeness_assertion_ids = set()
+        if completeness_subject_assertion_ids:
+            authorized_completeness_assertion_ids = {
+                str(value) for (value,) in db.query(CareAssertion.id).filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.id.in_(completeness_subject_assertion_ids),
+                ).all()
+            }
+        completeness_subject_event_ids = {
+            str(row.subject_id)
+            for row in completeness_rows
+            if str(row.subject_type or "").casefold() in {"event", "care_event"} and row.subject_id
+        }
+        authorized_completeness_event_ids = set()
+        if completeness_subject_event_ids:
+            authorized_completeness_event_ids = {
+                str(value) for (value,) in db.query(CareEvent.id).filter(
+                    CareEvent.person_id == person_id,
+                    CareEvent.id.in_(completeness_subject_event_ids),
+                ).all()
+            }
         completeness_history_status = "available" if completeness_rows else "empty"
-        completeness_history = [{
+        completeness_history = []
+        for row in completeness_rows:
+            subject_type = str(row.subject_type or "").casefold()
+            subject_id = str(row.subject_id or "")
+            if subject_type in {"evidence", "care_evidence"}:
+                subject_valid = subject_id in authorized_completeness_evidence_ids
+            elif subject_type in {"assertion", "care_assertion"}:
+                subject_valid = subject_id in authorized_completeness_assertion_ids
+            elif subject_type in {"event", "care_event"}:
+                subject_valid = subject_id in authorized_completeness_event_ids
+            else:
+                subject_valid = False
+            if not subject_valid:
+                continue
+            completeness_history.append({
             "assessment_id": str(row.id),
             "policy_id": str(row.policy_id),
             "policy_version": row.policy_version,
             "subject_type": row.subject_type,
-            "subject_id": row.subject_id,
+            "subject_id": subject_id,
+            "subject_scope_validation": "same_person_verified",
             "assessment_status": row.assessment_status,
             "required_fields": list(row.required_fields or []),
             "satisfied_fields": list(row.satisfied_fields or []),
@@ -5172,7 +5219,7 @@ def reconstruct_recorded_state_as_of(
                 else "reviewer_not_verified"
             ),
             "assessed_at": row.assessed_at.isoformat() if row.assessed_at else None,
-        } for row in completeness_rows]
+            })
 
     return {
         "person_id": person_id,
