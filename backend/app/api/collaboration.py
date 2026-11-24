@@ -7341,6 +7341,14 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bcan i trust everything you say$",
         r"\bwhat can you do$",
         r"\bwhat can'?t you do$",
+        r"\bwhat information can you see$",
+        r"\bcan you see (?:all )?(?:my|our|the) (?:care )?records$",
+        r"\bcan you read (?:my|the) documents$",
+        r"\bcan you see (?:my|our) (?:previous|past) conversations$",
+        r"\bcan you (?:see|access) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b",
+        r"\bcan you access (?:a )?(?:hospital|pharmacy|doctor|insurance|patient)(?: portal| records)?\b",
+        r"\bcan another caregiver see my information$",
+        r"\bdo you put everything i say in the lcr$",
         r"\bwhich model (?:powers|is powering) you$",
         r"\bwhat model (?:powers|is powering) you$",
     )
@@ -7391,6 +7399,46 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
             "caregiver report, access records that aren't available or authorized, or independently "
             "change the Living Care Record. I can make mistakes, so important care information "
             "should be checked against its source."
+        )
+    if re.search(r"\bwhat information can you see$", normalized):
+        return (
+            "I can use only information SolenOS has authorized and supplied for this request. "
+            "I cannot assume access to the whole LCR, every document, every conversation, or external accounts."
+        )
+    if re.search(r"\bcan you see (?:all )?(?:my|our|the) (?:care )?records$", normalized):
+        return (
+            "No. I can use only records returned within the authorized scope for this request. "
+            "I do not have automatic access to every record, document, or conversation."
+        )
+    if re.search(r"\bcan you read (?:my|the) documents$", normalized):
+        return (
+            "Only documents or extracted content supplied by the current authorized workflow. "
+            "I cannot access every upload by default."
+        )
+    if re.search(r"\bcan you see (?:my|our) (?:previous|past) conversations$", normalized):
+        return (
+            "Only conversation context explicitly supplied to this request. "
+            "I do not have complete chat history by default."
+        )
+    if re.search(r"\bcan you (?:see|access) my (?:phone|camera|microphone|photos|files|email|contacts|location)\b", normalized):
+        return (
+            "No, not by default. I can use information from those sources only when the current "
+            "workflow explicitly provides it and you have authorized it."
+        )
+    if re.search(r"\bcan you access (?:a )?(?:hospital|pharmacy|doctor|insurance|patient)(?: portal| records)?\b", normalized):
+        return (
+            "I do not have access to those portals by default. I can only claim an integration "
+            "when trusted configuration and the current workflow confirm it."
+        )
+    if re.search(r"\bcan another caregiver see my information$", normalized):
+        return (
+            "I cannot determine another caregiver's access from this conversation. It depends on "
+            "SolenOS permissions and sharing settings; check the app's access and sharing settings."
+        )
+    if re.search(r"\bdo you put everything i say in the lcr$", normalized):
+        return (
+            "No. Conversation text is not automatically an accepted care record. "
+            "Only an approved application workflow can persist accepted information."
         )
     if re.search(r"\bwhich model (?:powers|is powering) you$|\bwhat model (?:powers|is powering) you$", normalized):
         try:
