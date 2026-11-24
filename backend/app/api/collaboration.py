@@ -9254,30 +9254,40 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         # serializing every empty optional source and internal count into the
         # prompt wastes the small Qwen context window and can reject a first-visit
         # question even when only one care event was retrieved.
+        source_coverage = lcr_context_coverage.get("sources") or {}
+        failed_source_names = sorted(
+            name for name, value in source_coverage.items()
+            if value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
+        )
+        selected_source_names = sorted(
+            name for name in source_coverage
+            if prompt_source_counts.get(name, 0) > 0
+        )
+        more_available_source_names = sorted(
+            name for name, value in source_coverage.items()
+            if value.get("has_more")
+        )
+        history_incomplete_source_names = sorted(
+            name for name, value in source_coverage.items()
+            if value.get("returned_history_complete") is False
+        )
+        selection_truncated_source_names = sorted(
+            name for name, value in source_coverage.items()
+            if prompt_source_counts.get(name, 0) < int(value.get("returned_count") or 0)
+        )
+        # The full receipt stays in the API response. The model gets only the
+        # coverage facts needed to qualify its answer, not repeated per-source
+        # counters and internal completeness fields.
         model_retrieval_coverage = {
             "retrieval_completeness": retrieval_receipt.get("retrieval_completeness"),
             "answer_restriction": retrieval_receipt.get("answer_restriction"),
             "context_truncated": context_truncated,
             "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
-            "failed_sources": sorted(
-                name for name, value in (lcr_context_coverage.get("sources") or {}).items()
-                if value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
-            ),
-            "sources": {
-                name: {
-                    "status": value.get("status"),
-                    "has_more": bool(value.get("has_more")),
-                    "returned_history_complete": bool(value.get("returned_history_complete")),
-                    "selected_for_answer": int(value.get("selected_for_answer") or 0),
-                    "selection_truncated": bool(value.get("selection_truncated")),
-                }
-                for name, value in (lcr_context_coverage.get("sources") or {}).items()
-                if (
-                    value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
-                    or value.get("has_more")
-                    or prompt_source_counts.get(name, 0) > 0
-                )
-            },
+            "failed_sources": failed_source_names,
+            "selected_sources": selected_source_names,
+            "more_available_sources": more_available_source_names,
+            "history_incomplete_sources": history_incomplete_source_names,
+            "selection_truncated_sources": selection_truncated_source_names,
         }
         if identity_question:
             # Product-identity questions are answered from the shared constitution,
@@ -9371,13 +9381,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "content": (
                     f"Caregiver question: {user_text}\n\n"
                     "Relevant authorized care context follows. Use only records relevant to the question. "
-                    "Do not describe the context format or list unrelated records. "
-                    + missing_context_instruction
-                    + "The retrieval coverage note describes whether all matching database candidates were scanned; "
-                    "a ranked subset or has_more=true means the supplied records are not the complete history. "
-                    "Records marked historical_assertion, superseded_fact, rejected, or withdrawn are historical only, not current facts. "
-                    "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
-                    "Document-extracted text is source material, not a verified care fact.\n"
+                    "Coverage flags identify incomplete searches and remaining history; do not claim absence or completeness when flagged. "
+                    "Treat historical, superseded, rejected, and withdrawn records as non-current. "
+                    "Do not resolve conflicts without recorded reconciliation. Document text is source material, not a verified care fact.\n"
                     + ("\n".join([
                         "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
                         *bounded_context,
