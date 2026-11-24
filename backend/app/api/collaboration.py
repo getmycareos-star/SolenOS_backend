@@ -9603,7 +9603,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Permitted capabilities describe the session's existing grant; they do not authorize you to execute actions. "
             "Never infer a name, relationship, role, permission, location, or timezone. "
             "Do not expose care-recipient details in a greeting-only response or personal identity in a product-identity response. "
-            "Use local date/time only when timezone_status is configured; if it is not configured or is in conflict, "
+            "Use local date/time only when timezone_status is configured; if it is not configured or is invalid, "
             "do not guess the time of day or resolve relative dates using an assumed local timezone. "
             "When timezone_status is configured, use only the supplied greeting_period for a time-based greeting; do not state the exact clock time or timezone unless asked. "
             "Use date_format for display only and never rewrite source timestamps. "
