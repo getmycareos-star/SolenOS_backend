@@ -8,6 +8,8 @@ from app.services.solenos_personality import (
     SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
 )
 from app.services.qwen_system_prompt import (
+    SOLENOS_OPERATING_CONTRACT_MANIFEST,
+    SOLENOS_OPERATING_CONTRACT_VERSION,
     SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
     apply_solenos_system_contract,
 )
@@ -76,10 +78,19 @@ def test_every_personality_dimension_is_present_in_the_actual_assembled_qwen_sys
     system = apply_solenos_system_contract(
         [{"role": "user", "content": "Has anything changed with my mother?"}]
     )[0]["content"]
+    assert system.startswith(SOLENOS_OPERATING_CONTRACT_MANIFEST)
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system
         assert contract["runtime_rule"] in system
+        for field in (
+            "observable_behaviors",
+            "required_context",
+            "prohibited_behaviors",
+            "violation_conditions",
+            "verification_cases",
+        ):
+            assert all(value in system for value in contract[field]), (trait, field)
 
 
 def test_runtime_contract_preserves_product_boundaries_and_precedence():
@@ -137,3 +148,22 @@ def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_person
             contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
             assert contract["runtime_rule"] in system, (workflow, trait)
             assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system, (workflow, trait)
+
+def test_aggregate_contract_manifest_pins_all_constitution_versions():
+    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.1"
+    assert "Identity constitution: 2.4" in SOLENOS_OPERATING_CONTRACT_MANIFEST
+    assert f"Personality constitution: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}" in SOLENOS_OPERATING_CONTRACT_MANIFEST
+    assert "Information stewardship constitution: 1.0" in SOLENOS_OPERATING_CONTRACT_MANIFEST
+    assert "coordinated contract" in SOLENOS_OPERATING_CONTRACT_MANIFEST
+
+
+def test_production_companion_prompts_do_not_identify_as_the_qwen_model():
+    from pathlib import Path
+
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    offenders = []
+    for source_path in app_root.rglob("*.py"):
+        source = source_path.read_text(encoding="utf-8")
+        if "You are Qwen," in source or "I am Qwen," in source:
+            offenders.append(str(source_path.relative_to(app_root)))
+    assert offenders == []
