@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import http.client
 import json
+import math
 import re
 import logging
 import os
@@ -94,6 +95,55 @@ def get_ollama_config() -> tuple[str, str, float]:
     return base, model, timeout
 
 
+def _estimate_prompt_tokens(messages: list[dict]) -> int:
+    """Conservative preflight estimate; never log or persist prompt contents."""
+    content_bytes = sum(
+        len(str(message.get("content") or "").encode("utf-8"))
+        for message in messages
+        if isinstance(message, dict)
+    )
+    # 3.5 bytes/token is deliberately conservative for mostly English care text.
+    # Message framing adds a small fixed allowance per message.
+    return math.ceil(content_bytes / 3.5) + (8 * len(messages))
+
+
+def _enforce_prompt_context_budget(
+    messages: list[dict],
+    *,
+    num_ctx: int,
+    num_predict: int,
+    safety_margin_tokens: int = 128,
+) -> int:
+    """Fail before inference if instructions + source context cannot safely fit."""
+    estimate = _estimate_prompt_tokens(messages)
+    input_budget = max(0, int(num_ctx) - int(num_predict) - int(safety_margin_tokens))
+    if estimate > input_budget:
+        prompt_bytes = sum(
+            len(str(message.get("content") or "").encode("utf-8"))
+            for message in messages
+            if isinstance(message, dict)
+        )
+        logger.warning(
+            "Qwen request rejected by context preflight: estimated_tokens=%s input_budget=%s prompt_bytes=%s",
+            estimate,
+            input_budget,
+            prompt_bytes,
+        )
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "qwen_prompt_context_budget_exceeded",
+                "message": (
+                    "The care instructions and supplied information exceed the model's safe context window. "
+                    "No model inference was run. Narrow the question or reduce the supplied record range."
+                ),
+                "estimated_prompt_tokens": estimate,
+                "input_token_budget": input_budget,
+            },
+        )
+    return estimate
+
+
 def qwen_chat(
     messages: list[dict],
     *,
@@ -175,6 +225,13 @@ def qwen_chat(
                 bounded_options[key] = max(lower, min(int(options[key]), upper))
             except (TypeError, ValueError):
                 continue
+    # Never let Ollama silently discard part of the evidence or the operating
+    # contract when a request exceeds the configured context window.
+    _enforce_prompt_context_budget(
+        messages,
+        num_ctx=bounded_options["num_ctx"],
+        num_predict=bounded_options["num_predict"],
+    )
     payload = {
         "model": model,
         "messages": messages,
