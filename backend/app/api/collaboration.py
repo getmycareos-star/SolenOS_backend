@@ -7305,6 +7305,8 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
         return "SolenOS was founded by David Abuchi."
     if re.search(r"\bwho owns you$", normalized):
         return "I'm part of the SolenOS product. I can't make a separate legal ownership claim."
+    if re.search(r"\bare you (?:a )?human or (?:a )?(?:doctor|nurse|therapist|medical professional|healthcare professional)$", normalized):
+        return "No. I'm an AI companion, not a person or healthcare professional."
     if re.search(r"\bare you (?:a )?(?:human|person)$", normalized):
         return "No. I'm an AI companion, not a person."
     if re.search(r"\bare you (?:a )?(?:doctor|nurse|therapist|medical professional|healthcare professional)$", normalized):
