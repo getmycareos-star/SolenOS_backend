@@ -5,6 +5,7 @@ must not silently fall back to SQLite or a mocked persistence layer.
 """
 import asyncio
 import hashlib
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
