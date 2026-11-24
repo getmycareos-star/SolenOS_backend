@@ -2,6 +2,7 @@
 
 from app.services.solenos_personality import (
     SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS,
+    SOLENOS_PERSONALITY_RUNTIME_ANCHORS,
     SOLENOS_PERSONALITY_CHARACTERISTICS,
     SOLENOS_PERSONALITY_CONSTITUTION_VERSION,
     SOLENOS_PERSONALITY_RUNTIME_HEADINGS,
@@ -32,8 +33,14 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         assert required_fields.issubset(contract), trait
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in runtime
-        # The compact runtime carries one high-signal anchor for each required
-        # dimension; the full lists remain complete in the canonical test oracle.
+        anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
+        assert set(anchors) == {
+            "observable_behaviors",
+            "required_context",
+            "prohibited_behaviors",
+            "violation_conditions",
+            "verification_cases",
+        }
         runtime_labels = {
             "observable_behaviors": "Behaviour: ",
             "required_context": "Context: ",
@@ -42,8 +49,8 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
             "verification_cases": "Test: ",
         }
         for field, label in runtime_labels.items():
-            anchor = min(contract[field], key=len)
-            assert label + anchor in runtime, (trait, field)
+            assert anchors[field] in contract[field], (trait, field)
+            assert label + anchors[field] in runtime, (trait, field)
         for field in required_fields:
             values = contract[field]
             assert values, (trait, field)
@@ -91,7 +98,7 @@ def test_every_personality_trait_rule_is_present_in_the_actual_assembled_qwen_sy
             ("violation_conditions", "Violation: "),
             ("verification_cases", "Test: "),
         ):
-            anchor = min(contract[field], key=len)
+            anchor = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait][field]
             assert label + anchor in system, (trait, field)
 
 
