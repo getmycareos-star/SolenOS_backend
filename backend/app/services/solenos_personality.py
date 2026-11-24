@@ -196,22 +196,28 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
 
 
 def _build_runtime_personality_constitution() -> str:
-    """Render the compact runtime rules from the complete machine-readable contract.
+    """Render the full operational dimensions in a context-bounded runtime kernel.
 
-    Context, prohibited behaviours, violation conditions, and verification cases
-    remain in the canonical acceptance data and deterministic/live test suite.
-    The inference prompt receives the concise rule needed to preserve evidence
-    capacity for actual care history.
+    The model receives each trait's behaviour, context, prohibitions, failure
+    conditions, and verification focus. The machine-readable source remains the
+    test oracle; this compact rendering prevents personality from becoming a
+    collection of tone-only slogans.
     """
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
         f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}",
-        "Apply all ten traits in every workflow.",
+        "Apply all ten traits in every workflow. These are behaviour requirements, not tone decoration.",
     ]
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
+        contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
-            SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["runtime_rule"],
+            contract["runtime_rule"],
+            "Observable: " + "; ".join(contract["observable_behaviors"]) + ".",
+            "Context: " + "; ".join(contract["required_context"]) + ".",
+            "Never: " + "; ".join(contract["prohibited_behaviors"]) + ".",
+            "Violation: " + "; ".join(contract["violation_conditions"]) + ".",
+            "Check: " + "; ".join(contract["verification_cases"]) + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
