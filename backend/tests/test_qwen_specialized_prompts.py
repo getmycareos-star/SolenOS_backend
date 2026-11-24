@@ -164,6 +164,20 @@ def test_workflow_ids_map_to_their_required_specialist_domains():
         messages = [{"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"}]
         assert select_specialized_domains(messages) == expected
 
+    # Exercise the actual selector for every classifier and internal API
+    # workflow, including intentional no-specialist cases. Static map equality
+    # alone cannot prove that runtime parsing selects the expected instructions.
+    all_runtime_workflows = (*ENABLED_WORKFLOWS, *sorted(INTERNAL_API_WORKFLOWS))
+    for workflow in all_runtime_workflows:
+        messages = [{"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"}]
+        selected = select_specialized_domains(messages)
+        expected = WORKFLOW_SPECIALISTS.get(workflow, ())
+        assert selected == expected, {
+            "workflow": workflow,
+            "expected_specialists": expected,
+            "selected_specialists": selected,
+        }
+
 
 def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_decision():
     accounted_for = set(WORKFLOW_SPECIALISTS) | set(WORKFLOWS_WITHOUT_SPECIALISTS)
