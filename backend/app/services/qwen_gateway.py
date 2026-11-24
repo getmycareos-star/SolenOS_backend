@@ -437,13 +437,18 @@ def qwen_chat(
     # explicit incomplete/invalid completion metadata is rejected.
     done = result.get("done")
     done_reason = result.get("done_reason")
-    if (done is not None and not isinstance(done, bool)) or done is False or str(done_reason or "").casefold() == "length":
+    invalid_done = done is not None and not isinstance(done, bool)
+    invalid_done_reason = done_reason is not None and not isinstance(done_reason, str)
+    generation_was_cut_off = isinstance(done_reason, str) and done_reason.casefold() == "length"
+    if invalid_done or invalid_done_reason or done is False or generation_was_cut_off:
         _mark_inference_unverified(model)
-        failure_category, failure_reason = "incomplete_model_response", (
-            "generation_not_completed" if done is False else
-            "generation_limit_reached" if str(done_reason or "").casefold() == "length" else
-            "invalid_completion_metadata"
-        )
+        failure_category = "incomplete_model_response"
+        if done is False:
+            failure_reason = "generation_not_completed"
+        elif generation_was_cut_off:
+            failure_reason = "generation_limit_reached"
+        else:
+            failure_reason = "invalid_completion_metadata"
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(
             status_code=502,
