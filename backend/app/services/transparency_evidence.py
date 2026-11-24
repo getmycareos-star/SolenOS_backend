@@ -44,6 +44,46 @@ def _is_expired(value: datetime | None, now: datetime) -> bool:
     return value <= now
 
 
+_REVISION_VALUE_FIELDS = frozenset({
+    "field", "asserted_value", "assertion_status", "epistemic_state",
+    "observed_at", "recorded_at", "occurred_at", "title", "description",
+    "status", "evidence_status", "epistemic_status", "source_label",
+    "event_time_text", "change_kind", "superseded_by_id", "withdrawn_at",
+})
+
+
+def _revision_state_summary(raw: str | None) -> dict[str, Any] | None:
+    if not raw:
+        return None
+    try:
+        value = __import__("json").loads(raw)
+    except (TypeError, ValueError):
+        return {"state_available": False}
+    if not isinstance(value, dict):
+        return {"state_available": False}
+    return {
+        key: (str(item)[:500] if isinstance(item, str) else item)
+        for key, item in value.items()
+        if key in _REVISION_VALUE_FIELDS and item is not None
+    }
+
+
+def _revision_changed_fields(before_raw: str | None, after_raw: str | None) -> list[str]:
+    def decode(raw):
+        if not raw:
+            return {}
+        try:
+            value = __import__("json").loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        return value if isinstance(value, dict) else {}
+    before, after = decode(before_raw), decode(after_raw)
+    return sorted(
+        key for key in set(before) | set(after)
+        if before.get(key) != after.get(key)
+    )
+
+
 def _count_by(db: Session, model, column, person_id: str) -> dict[str, int]:
     rows = (
         db.query(column, func.count(model.id))
@@ -108,6 +148,7 @@ def build_transparency_evidence(
         AnonymousSession.person_id == person_id,
         AnonymousSession.caregiver_id == caregiver_id,
         AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > now,
     ).first()
     items.append({
         "kind": "active_session",
@@ -458,6 +499,9 @@ def build_transparency_evidence(
                     "target_id": str(row.target_id),
                     "processing_status": row.processing_status,
                     "processing_attempts": row.processing_attempts,
+                    "original_text": row.original_text,
+                    "corrected_text": row.corrected_text,
+                    "reason": row.reason,
                     "actor_name": correction_actor_names.get(str(row.caregiver_id), "Another caregiver"),
                     "created_at": _iso(row.created_at),
                     "processed_at": _iso(row.processed_at),
@@ -470,6 +514,9 @@ def build_transparency_evidence(
                     "target_id": str(row.target_id),
                     "revision_number": row.revision_number,
                     "change_kind": row.change_kind,
+                    "changed_fields": _revision_changed_fields(row.before_state, row.after_state),
+                    "before_state": _revision_state_summary(row.before_state),
+                    "after_state": _revision_state_summary(row.after_state),
                     "changed_by": revision_actor_names.get(str(row.changed_by_caregiver_id), "SolenOS system" if not row.changed_by_caregiver_id else "Another caregiver"),
                     "changed_at": _iso(row.changed_at),
                     "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
