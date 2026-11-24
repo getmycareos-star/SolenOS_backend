@@ -397,7 +397,6 @@ def test_companion_retrieval_and_qwen_source_gate_exclude_caregiver_deleted_evid
                 type="note",
                 source_text=active_text,
                 uploaded_by_caregiver_id=caregiver_id,
-                evidence_status="available",
             ),
             Evidence(
                 id=deleted_id,
