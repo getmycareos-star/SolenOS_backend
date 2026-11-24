@@ -440,6 +440,116 @@ def daily_care_history(
 
 
 @router.post("/ask")
+DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS = 2200
+DAILY_CARE_MAX_OUTPUT_TOKENS = 384
+DAILY_CARE_MAX_QUESTION_CHARS = 1200
+
+def _truncate_daily_prompt_value(value: Any, max_string_chars: int) -> tuple[Any, bool]:
+    if isinstance(value, str) and len(value) > max_string_chars:
+        suffix = " [source excerpt truncated]"
+        return value[: max(0, max_string_chars - len(suffix))] + suffix, True
+    if isinstance(value, dict):
+        result = {}
+        truncated = False
+        for key, item in value.items():
+            result[key], item_truncated = _truncate_daily_prompt_value(item, max_string_chars)
+            truncated = truncated or item_truncated
+        return result, truncated
+    if isinstance(value, list) and len(value) > 12:
+        return value[:12], True
+    if isinstance(value, list):
+        result = []
+        truncated = False
+        for item in value:
+            bounded, item_truncated = _truncate_daily_prompt_value(item, max_string_chars)
+            result.append(bounded)
+            truncated = truncated or item_truncated
+        return result, truncated
+    return value, False
+
+
+def _daily_care_lcr_context_summary(context: dict[str, Any] | None) -> dict[str, Any]:
+    context = context if isinstance(context, dict) else {}
+    sources = context.get("sources") if isinstance(context.get("sources"), dict) else {}
+    source_summary = {}
+    for name, source in list(sources.items())[:12]:
+        if not isinstance(source, dict):
+            continue
+        source_summary[str(name)] = {
+            key: source.get(key)
+            for key in ("status", "count", "has_more", "error_code")
+            if source.get(key) is not None
+        }
+    return {
+        "schema_status": context.get("schema_status"),
+        "retrieval_completeness": context.get("retrieval_completeness"),
+        "answer_restriction": context.get("answer_restriction"),
+        "missing_required_sources": list(context.get("missing_required_sources") or [])[:8],
+        "failed_sources": list(context.get("failed_sources") or [])[:8],
+        "failed_optional_sources": list(context.get("failed_optional_sources") or [])[:8],
+        "sources": source_summary,
+    }
+
+
+def _fit_daily_care_prompt_context(
+    question: str,
+    records: list[dict[str, Any]],
+    lcr_context: dict[str, Any] | None,
+    proposals_requested: bool,
+    *,
+    budget_chars: int = DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS,
+) -> tuple[dict[str, Any], list[dict[str, Any]], int, bool]:
+    """Fit evidence to a hard prompt budget without hiding omissions or source truncation."""
+    if len(question) > DAILY_CARE_MAX_QUESTION_CHARS:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "daily_care_question_context_budget_exceeded",
+                "message": "Please shorten the question so Daily Care can preserve the relevant source information.",
+            },
+        )
+    source_summary = _daily_care_lcr_context_summary(lcr_context)
+    has_more = any(
+        source.get("has_more") is True
+        for source in (lcr_context or {}).get("sources", {}).values()
+        if isinstance(source, dict)
+    )
+    for max_string_chars in (900, 650, 450, 300, 200, 120):
+        bounded_records = []
+        any_source_text_truncated = False
+        for record in records:
+            bounded, was_truncated = _truncate_daily_prompt_value(record, max_string_chars)
+            if isinstance(bounded, dict) and was_truncated:
+                bounded["source_excerpt_truncated"] = True
+            bounded_records.append(bounded)
+            any_source_text_truncated = any_source_text_truncated or was_truncated
+        while bounded_records:
+            omitted = max(0, len(records) - len(bounded_records))
+            selection_truncated = omitted > 0 or any_source_text_truncated or has_more
+            prompt_payload = {
+                "question": question,
+                "retrieved_history": bounded_records,
+                "retrieval_metadata": {
+                    "matching_records_in_database": len(records),
+                    "records_sent_to_model": len(bounded_records),
+                    "records_omitted_from_model": omitted,
+                    "selection_truncated": selection_truncated,
+                    "source_text_truncated": any_source_text_truncated,
+                    "lcr_context": source_summary,
+                },
+                "lcr_proposals_requested": proposals_requested,
+            }
+            if len(json.dumps(prompt_payload, ensure_ascii=False)) <= budget_chars:
+                return prompt_payload, bounded_records, omitted, selection_truncated
+            bounded_records.pop()
+    raise HTTPException(
+        status_code=413,
+        detail={
+            "code": "daily_care_evidence_context_budget_exceeded",
+            "message": "The matching care information is too large to review safely in one answer. Narrow the date range or ask a more focused question.",
+        },
+    )
+
 async def ask_daily_care_qwen(
     payload: DailyCareQuestion,
     request: Request,
