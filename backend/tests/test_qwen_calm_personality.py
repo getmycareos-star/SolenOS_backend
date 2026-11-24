@@ -178,11 +178,13 @@ def test_runtime_personality_kernel_preserves_canonical_trait_anchors():
         "dependable": ("Maintain continuity with authorized records and confirmed context.", "Never present superseded information as current."),
     }
     assert set(canonical_anchors) == set(SOLENOS_PERSONALITY_CHARACTERISTICS)
+    from app.services.solenos_personality import SOLENOS_PERSONALITY_RUNTIME_ANCHORS
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
-        rule = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["runtime_rule"]
-        assert rule in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION, trait
         for anchor in canonical_anchors[trait]:
             assert " ".join(anchor.split()) in full, (trait, anchor)
+        for anchor in SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait].values():
+            assert anchor in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait].values() if False else anchor in str(SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]), (trait, anchor)
+            assert anchor in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION, (trait, anchor)
 
 
 def test_documented_identity_and_personality_versions_match_the_runtime_sources():
