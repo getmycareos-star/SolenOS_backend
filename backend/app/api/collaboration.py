@@ -3239,6 +3239,20 @@ def _humanize_model_context_line(line: str) -> str:
     return f"{label}: " + ("; ".join(parts) if parts else "no additional details recorded")
 
 
+def _should_include_evidence_lineage_in_prompt(user_text: str) -> bool:
+    """Include detailed lineage metadata only when the caregiver asks about provenance.
+
+    Lineage remains available in the retrieval receipt and response provenance.
+    Sending the full lineage graph on every evidence-backed question duplicates
+    audit metadata in the model prompt and can crowd out the care facts themselves.
+    """
+    return bool(re.search(
+        r"\\b(?:corroborat|independent source|source lineage|same source)\\b",
+        user_text or "",
+        re.IGNORECASE,
+    ))
+
+
 def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     """Resolve referential follow-ups from prior caregiver questions, never model replies.
 
@@ -9130,10 +9144,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 *freshness_context[:1],
                 *aggregate_context_lines,
             ]
-        if (not direct_care_history_prompt) and (source_evidence_ids or re.search(
-            r"\b(?:corroborat|independent source|source lineage|same source)\b",
-            user_text, re.IGNORECASE,
-        )):
+        if (
+            not direct_care_history_prompt
+            and _should_include_evidence_lineage_in_prompt(user_text)
+        ):
             model_context_lines.append(lineage_context_line)
         (
             included_model_context_lines,
