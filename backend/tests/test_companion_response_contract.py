@@ -2649,6 +2649,29 @@ def test_companion_rejects_unsupported_reassurance_even_without_explicit_distres
     )
 
 
+def test_unsupported_reassurance_guard_allows_explicit_limits_and_patient_nonclinical_language():
+    assert not collaboration._contains_unsupported_reassurance(
+        "I can't promise everything will be okay, but I can help explain what is known."
+    )
+    assert not collaboration._contains_unsupported_reassurance(
+        "There's not enough evidence to say she should be fine."
+    )
+    assert not collaboration._contains_unsupported_reassurance(
+        "Don't worry about repeating yourself; you don't need to start over."
+    )
+
+
+def test_companion_response_contract_rejects_unqualified_reassurance_but_not_qualified_uncertainty():
+    assert collaboration._caregiver_response_needs_revision(
+        "You keep asking me the same questions.",
+        "Don't worry about repeating yourself; you don't need to start over.",
+    ) is False
+    assert collaboration._caregiver_response_needs_revision(
+        "What might this new change in Mum's condition mean?",
+        "She should be fine.",
+    ) is True
+
+
 def test_companion_accepts_clear_uncertainty_instead_of_false_comfort():
     reply = (
         "I can't determine the cause from this information. Because this is a new change, "
