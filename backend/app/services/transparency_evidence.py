@@ -147,25 +147,35 @@ def build_transparency_evidence(
 
     if can_view_documents:
         uploads_available = _table_available(db, "evidence_uploads")
+        evidence_count = (
+            db.query(func.count(Evidence.id))
+            .filter(Evidence.person_id == person_id)
+            .scalar() or 0
+        )
         if uploads_available:
-            evidence_count = (
-                db.query(func.count(Evidence.id))
-                .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
-                .filter(Evidence.person_id == person_id)
-                .scalar() or 0
-            )
             document_rows = (
                 db.query(Evidence, EvidenceUpload)
-                .join(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
+                .outerjoin(EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id)
                 .filter(Evidence.person_id == person_id)
                 .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
                 .limit(MAX_RECENT_ITEMS + 1)
                 .all()
             )
         else:
-            evidence_count = 0
-            document_rows = []
+            document_rows = [
+                (row, None) for row in (
+                    db.query(Evidence)
+                    .filter(Evidence.person_id == person_id)
+                    .order_by(Evidence.uploaded_at.desc(), Evidence.id.desc())
+                    .limit(MAX_RECENT_ITEMS + 1)
+                    .all()
+                )
+            ]
         has_more = len(document_rows) > MAX_RECENT_ITEMS
+        missing_upload_metadata = (
+            sum(1 for _, upload in document_rows[:MAX_RECENT_ITEMS] if upload is None)
+            if uploads_available else None
+        )
         recent_documents = []
         for evidence, upload in document_rows[:MAX_RECENT_ITEMS]:
             recent_documents.append({
@@ -196,8 +206,8 @@ def build_transparency_evidence(
             "source_service": "evidence_evidence_uploads_capture_analyses",
             "scope": {"person_id": person_id},
             "observed_at": now.isoformat(),
-            "status": "available" if uploads_available else "partial",
-            "completeness": "recent_bounded_list" if has_more else ("metadata_complete" if uploads_available else "upload_metadata_unavailable"),
+            "status": "available" if uploads_available and not missing_upload_metadata else "partial",
+            "completeness": "partial" if not uploads_available or missing_upload_metadata else ("recent_bounded_list" if has_more else "metadata_complete"),
             "details": {
                 "evidence_count": int(evidence_count),
                 "recent_documents": recent_documents,
@@ -205,9 +215,10 @@ def build_transparency_evidence(
                 "has_more_recent_documents": has_more,
                 "extraction_status_counts": extraction_counts,
                 "upload_binary_metadata_available": uploads_available,
+                "records_missing_upload_metadata_in_returned_window": missing_upload_metadata,
             },
         })
-        coverage["documents"] = "partial" if has_more or not uploads_available else "complete_metadata"
+        coverage["documents"] = "partial" if has_more or not uploads_available or missing_upload_metadata else "complete_metadata"
 
     if can_view_lcr:
         assertion_status_counts = _count_by(db, CareAssertion, CareAssertion.assertion_status, person_id)
