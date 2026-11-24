@@ -1880,7 +1880,7 @@ def test_fresh_companion_session_retrieves_only_accepted_appointment_assertions(
 
     captured = {}
 
-    def fake_ollama(base, model, messages, options):
+    def fake_ollama(base, model, messages, options, audit_context=None):
         captured["messages"] = messages
         return "The caregiver reported that the person asked for help with dressing this morning."
 

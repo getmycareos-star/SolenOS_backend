@@ -211,6 +211,17 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
             other_headers = {"Authorization": "Bearer " + other.json()["access_token"]}
             person_id = owner.json()["person"]["id"]
 
+            # Date-relative retrieval must use a caregiver-configured timezone;
+            # UTC is not a valid substitute for an unknown local calendar.
+            from app.models.care import Caregiver
+            with test_session_local() as db:
+                caregiver = db.query(Caregiver).filter_by(
+                    id=owner.json()["caregiver"]["id"]
+                ).one()
+                caregiver.timezone = "America/New_York"
+                caregiver.timezone_configured = True
+                db.commit()
+
             created = client.post(
                 "/api/v1/appointment-workspaces",
                 headers=headers,
@@ -273,7 +284,7 @@ def test_postgres_appointment_outcome_review_retrieves_only_accepted_assertions_
 
             captured = {}
 
-            def fake_ollama(base, model, messages, options):
+            def fake_ollama(base, model, messages, options, audit_context=None):
                 captured["messages"] = messages
                 return "The caregiver reported that dressing required two-person assistance this morning."
 

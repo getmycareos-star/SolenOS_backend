@@ -98,7 +98,7 @@ from app.services.care_continuity import (
 router = APIRouter(tags=["community and companion"])
 
 # Railway's observed 4,096-token model window must leave room for system rules and output.
-COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
+COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 2600
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
     "INTERACTION: Keep intent, expressed emotion, capacity, urgency, information state, and conversation state distinct; "

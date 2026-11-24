@@ -595,7 +595,7 @@ def test_companion_receives_saved_document_evidence_and_filename(monkeypatch):
     captured = {}
     monkeypatch.setattr(collaboration_api, "_ollama_url", lambda: ("http://unused", "test-model"))
 
-    def fake_chat(_base, _model, messages, _options):
+    def fake_chat(_base, _model, messages, _options, _audit_context=None):
         captured["messages"] = messages
         return "The saved document says the follow-up date is not stated."
 
@@ -1087,7 +1087,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
 
         calls = []
         monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
-        def generated_reply(base, model, messages, options=None):
+        def generated_reply(base, model, messages, options=None, audit_context=None):
             calls.append(messages)
             return "Hi there. I'm here if you need help."
         monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
@@ -1268,7 +1268,7 @@ def test_companion_rejects_unrequested_saba_in_any_reply_without_saving(monkeypa
         monkeypatch.setattr(
             collaboration,
             "_ollama_chat",
-            lambda base, model, messages, options=None: "Saba, saba. I can help organize the appointment details.",
+            lambda base, model, messages, options=None, audit_context=None: "Saba, saba. I can help organize the appointment details.",
         )
         response = client.post(
             "/api/v1/conversation/message",

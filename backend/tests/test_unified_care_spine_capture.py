@@ -490,7 +490,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             # supplied to the model and cited in the response metadata.
             captured_prompts = []
 
-            def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms):
+            def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms, audit_context=None):
                 captured_prompts.append(messages)
                 return "The care record contains the saved caregiver report."
 
@@ -929,7 +929,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
 
         captured_prompts = []
 
-        def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms):
+        def fake_companion_inference(request_id, model, messages, options, retrieval_duration_ms, audit_context=None):
             captured_prompts.append(messages)
             return "The saved sleep reports include a correction and an unresolved report."
 

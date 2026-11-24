@@ -460,7 +460,8 @@ def test_companion_history_is_bounded_across_prior_sessions():
             db.add(person)
             db.flush()
             db.add(Caregiver(
-                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"
+                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a",
+                timezone="America/New_York", timezone_configured=True,
             ))
             db.flush()
             active = ConversationSession(
@@ -562,13 +563,16 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             person = Person(id="person-a", name="Care recipient")
             other_person = Person(id="person-b", name="Different care recipient")
             caregiver = Caregiver(
-                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a"
+                id="caregiver-a", name="Caregiver A", relationship="family", person_id="person-a",
+                timezone="America/New_York", timezone_configured=True,
             )
             caregiver_b = Caregiver(
-                id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a"
+                id="caregiver-b", name="Caregiver B", relationship="family", person_id="person-a",
+                timezone="America/New_York", timezone_configured=True,
             )
             caregiver_c = Caregiver(
-                id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b"
+                id="caregiver-c", name="Caregiver C", relationship="family", person_id="person-b",
+                timezone="America/New_York", timezone_configured=True,
             )
             # Flush parent rows before caregivers so this fixture remains valid
             # even when mapper relationship metadata is not available for ordering.

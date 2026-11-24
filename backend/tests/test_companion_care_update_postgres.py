@@ -64,7 +64,7 @@ def test_postgres_companion_persists_conversation_without_creating_care_updates(
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     captured = []
 
-    def fake_chat(base, model, messages, options=None):
+    def fake_chat(base, model, messages, options=None, audit_context=None):
         captured.append(messages)
         return "I can help explain what is already saved. This conversation does not change the care record."
 
@@ -131,7 +131,7 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     captured_prompts = []
 
-    def fake_chat(base, model, messages, options=None):
+    def fake_chat(base, model, messages, options=None, audit_context=None):
         captured_prompts.append(messages)
         return "I can explain what the saved care report says."
 
@@ -365,7 +365,7 @@ def test_postgres_companion_direct_event_context_marks_withdrawn_events_as_histo
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
     captured_prompts = []
 
-    def fake_chat(base, model, messages, options=None):
+    def fake_chat(base, model, messages, options=None, audit_context=None):
         captured_prompts.extend(messages)
         return "I can help explain the saved care information and its limits."
 

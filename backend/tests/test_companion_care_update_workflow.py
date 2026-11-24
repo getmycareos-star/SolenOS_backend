@@ -75,7 +75,7 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
     client = setup_client(monkeypatch, lambda text: {"observations": [{"source_quote": source}]})
     captured = []
 
-    def fake_chat(base, model, messages, options=None):
+    def fake_chat(base, model, messages, options=None, audit_context=None):
         captured.append(messages)
         return "I can help explain what is already saved. This conversation does not change the care record."
 
@@ -304,7 +304,7 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
     monkeypatch.setattr(
         collaboration,
         "_ollama_chat",
-        lambda base, model, messages, options=None: (
+        lambda base, model, messages, options=None, audit_context=None: (
             captured_prompts.append(messages)
             or "I can explain what the saved care report says."
         ),
