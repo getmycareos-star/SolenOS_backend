@@ -204,6 +204,59 @@ def _require_full_record_access(request: Request) -> None:
         )
 
 
+def _require_person_scoped_temporal_references(
+    db: Session,
+    person_id: str,
+    *,
+    evidence_ids: Optional[List[str]] = None,
+    fact_ids: Optional[List[str]] = None,
+    event_ids: Optional[List[str]] = None,
+) -> None:
+    """Reject temporal links that cross the authenticated person's boundary."""
+    normalized_evidence = {str(value) for value in (evidence_ids or []) if value}
+    normalized_facts = {str(value) for value in (fact_ids or []) if value}
+    normalized_events = {str(value) for value in (event_ids or []) if value}
+
+    if normalized_evidence:
+        found = {
+            str(value) for (value,) in db.query(EvidenceModel.id).filter(
+                EvidenceModel.person_id == str(person_id),
+                EvidenceModel.id.in_(normalized_evidence),
+            ).all()
+        }
+        if found != normalized_evidence:
+            raise HTTPException(
+                status_code=422,
+                detail="One or more evidence references are unavailable for this care record.",
+            )
+
+    if normalized_facts:
+        found = {
+            str(value) for (value,) in db.query(TemporalFactModel.id).filter(
+                TemporalFactModel.person_id == str(person_id),
+                TemporalFactModel.id.in_(normalized_facts),
+            ).all()
+        }
+        if found != normalized_facts:
+            raise HTTPException(
+                status_code=422,
+                detail="One or more temporal fact references are unavailable for this care record.",
+            )
+
+    if normalized_events:
+        found = {
+            str(value) for (value,) in db.query(CareEventModel.id).filter(
+                CareEventModel.person_id == str(person_id),
+                CareEventModel.id.in_(normalized_events),
+            ).all()
+        }
+        if found != normalized_events:
+            raise HTTPException(
+                status_code=422,
+                detail="One or more care-event references are unavailable for this care record.",
+            )
+
+
 def _require_person_and_linked_caregiver(
     db: Session, person_id: str, caregiver_id: Optional[str], *, caregiver_required: bool = True
 ) -> None:
@@ -2840,7 +2893,13 @@ def create_temporal_fact_endpoint(fact: TemporalFactCreate, request: Request, db
 
     _require_full_record_access(request)
     require_caregiver_permission(db, fact.person_id, session.caregiver_id, "add_evidence")
-    return create_temporal_fact(db, fact)
+    _require_person_scoped_temporal_references(
+        db, fact.person_id, evidence_ids=fact.evidence_ids,
+    )
+    if fact.created_by_caregiver_id and str(fact.created_by_caregiver_id) != str(session.caregiver_id):
+        raise HTTPException(status_code=403, detail="Temporal fact attribution must match the authenticated caregiver.")
+    authenticated_fact = fact.model_copy(update={"created_by_caregiver_id": session.caregiver_id})
+    return create_temporal_fact(db, authenticated_fact)
 
 
 @router.patch("/temporal/facts/{fact_id}", response_model=TemporalFactSchema)
@@ -2852,6 +2911,10 @@ def update_temporal_fact_endpoint(fact_id: str, update: TemporalFactUpdate, requ
 
     _require_full_record_access(request)
     require_caregiver_permission(db, existing.person_id, session.caregiver_id, "correct_records")
+    if "evidence_ids" in update.model_fields_set:
+        _require_person_scoped_temporal_references(
+            db, existing.person_id, evidence_ids=update.evidence_ids,
+        )
     result = update_temporal_fact(db, fact_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal fact not found")
@@ -2893,6 +2956,11 @@ def create_temporal_relation_endpoint(relation: TemporalRelationCreate, request:
 
     _require_full_record_access(request)
     require_caregiver_permission(db, relation.person_id, session.caregiver_id, "add_evidence")
+    _require_person_scoped_temporal_references(
+        db, relation.person_id,
+        fact_ids=[relation.fact_a_id, relation.fact_b_id],
+        evidence_ids=relation.evidence_ids,
+    )
     return create_temporal_relation(db, relation)
 
 
@@ -2910,6 +2978,11 @@ def create_reference_frame_endpoint(frame: TemporalReferenceFrameCreate, request
 
     _require_full_record_access(request)
     require_caregiver_permission(db, frame.person_id, session.caregiver_id, "add_evidence")
+    _require_person_scoped_temporal_references(
+        db, frame.person_id,
+        fact_ids=[frame.source_fact_id] if frame.source_fact_id else [],
+        event_ids=[frame.source_event_id] if frame.source_event_id else [],
+    )
     return create_temporal_reference_frame(db, frame.person_id, frame.name, frame.reference_time, frame.source_event_id, frame.source_fact_id)
 
 
@@ -2958,7 +3031,20 @@ def create_temporal_contradiction_endpoint(contradiction: TemporalContradictionC
 
     _require_full_record_access(request)
     require_caregiver_permission(db, contradiction.person_id, session.caregiver_id, "add_evidence")
-    return create_temporal_contradiction(db, contradiction)
+    _require_person_scoped_temporal_references(
+        db, contradiction.person_id,
+        fact_ids=[contradiction.fact_a_id, contradiction.fact_b_id],
+        evidence_ids=contradiction.evidence_ids,
+    )
+    if contradiction.resolved_by_caregiver_id and str(contradiction.resolved_by_caregiver_id) != str(session.caregiver_id):
+        raise HTTPException(status_code=403, detail="Temporal contradiction attribution must match the authenticated caregiver.")
+    return create_temporal_contradiction(
+        db,
+        contradiction.model_copy(update={
+            "resolved_by_caregiver_id": session.caregiver_id
+            if contradiction.resolved_by_caregiver_id else None
+        }),
+    )
 
 
 @router.patch("/temporal/contradictions/{contradiction_id}", response_model=TemporalContradictionSchema)
@@ -2970,7 +3056,20 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
 
     _require_full_record_access(request)
     require_caregiver_permission(db, existing.person_id, session.caregiver_id, "correct_records")
-    result = update_temporal_contradiction(db, contradiction_id, update)
+    if "evidence_ids" in update.model_fields_set:
+        _require_person_scoped_temporal_references(
+            db, existing.person_id, evidence_ids=update.evidence_ids,
+        )
+    if update.resolved_by_caregiver_id and str(update.resolved_by_caregiver_id) != str(session.caregiver_id):
+        raise HTTPException(status_code=403, detail="Temporal contradiction attribution must match the authenticated caregiver.")
+    result = update_temporal_contradiction(
+        db,
+        contradiction_id,
+        update.model_copy(update={
+            "resolved_by_caregiver_id": session.caregiver_id
+            if update.resolved_by_caregiver_id else None
+        }),
+    )
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
     return result
