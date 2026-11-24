@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.core.database import SessionLocal
 from app.main import app
@@ -165,3 +166,110 @@ def test_accepted_clarification_review_persists_immutable_receipt_on_postgres():
                 review_event.rationale = "Attempted review history rewrite"
                 db.commit()
             db.rollback()
+
+@pytest.mark.session_security
+def test_accepted_care_assertion_withdrawal_preserves_history_and_rejects_stale_or_foreign_requests_on_postgres():
+    suffix = uuid.uuid4().hex
+    with TestClient(app) as client:
+        session_response = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": f"Withdrawal caregiver {suffix}"},
+        )
+        assert session_response.status_code == 201, session_response.text
+        session = session_response.json()
+        person_id = session["person"]["id"]
+        caregiver_id = session["caregiver"]["id"]
+        headers = {"Authorization": f"Bearer {session['access_token']}"}
+
+        assertion_id = str(uuid.uuid4())
+        original_value = "Caregiver reports the person walks independently."
+        original_source = "The caregiver's original report: walks independently."
+        with SessionLocal() as db:
+            db.add(CareAssertion(
+                id=assertion_id,
+                person_id=person_id,
+                subject_type="functional",
+                subject_id=f"mobility-{suffix}",
+                field="mobility",
+                assertion_kind="current_state",
+                asserted_value=original_value,
+                source_label="Caregiver report",
+                source_text=original_source,
+                evidence_ids=[],
+                assertion_status="accepted",
+                epistemic_state="reported",
+                review_after_days=30,
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+
+        withdrawn = client.patch(
+            f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+            headers=headers,
+            json={
+                "assertion_status": "withdrawn",
+                "expected_assertion_status": "accepted",
+                "reason": "The caregiver confirmed this earlier report was inaccurate.",
+            },
+        )
+        assert withdrawn.status_code == 200, withdrawn.text
+        body = withdrawn.json()
+        assert body["assertion_status"] == "withdrawn"
+        assert body["updated_by_caregiver_id"] == caregiver_id
+        assert body["source_text"] == original_source
+        assert body["asserted_value"] == original_value
+        assert body["created_by_caregiver_id"] == caregiver_id
+        assert body["care_continuity_execution"]["stages"]["reconciliation"] == "committed"
+
+        with SessionLocal() as db:
+            persisted = db.query(CareAssertion).filter_by(id=assertion_id).one()
+            assert persisted.assertion_status == "withdrawn"
+            assert persisted.source_text == original_source
+            assert persisted.asserted_value == original_value
+            assert persisted.created_by_caregiver_id == caregiver_id
+            revisions = db.execute(text(
+                "SELECT revision_number, previous_payload, current_payload, revision_reason, changed_by_caregiver_id "
+                "FROM care_assertion_revisions WHERE person_id = :person_id AND assertion_id = :assertion_id"
+            ), {"person_id": person_id, "assertion_id": assertion_id}).mappings().all()
+            assert len(revisions) == 1
+            revision = revisions[0]
+            assert revision["revision_number"] == 1
+            assert revision["previous_payload"]["assertion_status"] == "accepted"
+            assert revision["current_payload"]["assertion_status"] == "withdrawn"
+            assert "earlier report was inaccurate" in revision["revision_reason"]
+            assert revision["changed_by_caregiver_id"] == caregiver_id
+
+        stale = client.patch(
+            f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+            headers=headers,
+            json={
+                "assertion_status": "withdrawn",
+                "expected_assertion_status": "accepted",
+                "reason": "A second attempt with an outdated displayed status.",
+            },
+        )
+        assert stale.status_code == 409, stale.text
+
+        foreign_session_response = client.post(
+            "/api/v1/sessions/anonymous",
+            json={"caregiver_name": f"Unrelated caregiver {suffix}"},
+        )
+        assert foreign_session_response.status_code == 201, foreign_session_response.text
+        foreign_headers = {"Authorization": f"Bearer {foreign_session_response.json()['access_token']}"}
+        foreign = client.patch(
+            f"/api/v1/care-continuity/assertions/{assertion_id}/status",
+            headers=foreign_headers,
+            json={
+                "assertion_status": "withdrawn",
+                "expected_assertion_status": "withdrawn",
+                "reason": "An unrelated caregiver must not alter this record.",
+            },
+        )
+        assert foreign.status_code == 404, foreign.text
+
+        with SessionLocal() as db:
+            revisions_after_retries = db.execute(text(
+                "SELECT revision_number FROM care_assertion_revisions "
+                "WHERE person_id = :person_id AND assertion_id = :assertion_id"
+            ), {"person_id": person_id, "assertion_id": assertion_id}).scalars().all()
+            assert revisions_after_retries == [1]
