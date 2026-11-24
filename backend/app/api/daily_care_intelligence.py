@@ -141,7 +141,10 @@ def _history_bundle(
     # Evidence is shared at the care-record boundary. Document text remains
     # separately permission-gated; caregivers without document access receive
     # non-document evidence only.
-    evidence_q = db.query(EvidenceModel).filter(EvidenceModel.person_id == person_id)
+    evidence_q = db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == person_id,
+        EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+    )
     if not can_view_documents:
         evidence_q = evidence_q.filter(EvidenceModel.type != "document")
     if query:
@@ -961,6 +964,7 @@ def review_daily_care_lcr_proposal(
         evidence_rows = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.id.in_(source_ids),
+            EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
         ).all() if source_ids else []
         evidence_ids = sorted(str(row.id) for row in evidence_rows)
         resolved_source_ids = set(event_ids) | set(evidence_ids)
