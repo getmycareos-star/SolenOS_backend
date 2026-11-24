@@ -73,6 +73,7 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
             "conversation_session_id": "session-123",
             "source_event_ids": ["event-1", "event-1", "", None],
             "source_evidence_ids": ["evidence-1"],
+            "source_refs": ["appointments:visit-1", "care_events:event-2"],
             "retrieval_coverage": {
                 "status": "complete",
                 "retrieval_projection_complete": True,
@@ -91,6 +92,7 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
         "source_event_ids": ["event-1"],
         "source_evidence_ids": ["evidence-1"],
     }
+    assert metadata["source_refs"] == ["appointments:visit-1", "care_events:event-2"]
     assert "untrusted_extra" not in metadata["retrieval_coverage"]
     serialized = json.dumps(metadata)
     assert "PRIVATE_SOURCE_TEXT_NOT_FOR_AUDIT" not in serialized
