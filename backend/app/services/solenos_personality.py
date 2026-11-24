@@ -273,25 +273,22 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
 
 
 def _build_runtime_personality_constitution() -> str:
-    """Build a compact runtime kernel from the full, testable trait contract.
-
-    Detailed context requirements, violation responses, and acceptance cases remain
-    in the machine-readable source and tests. Every inference receives each trait's
-    observable and prohibited behaviours without carrying the full test catalogue.
-    """
+    """Render only the compact, machine-checked anchors for all ten traits."""
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
         f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}",
         "All ten traits apply in every workflow.",
-        "## PRECEDENCE",
-        "Safety, factual integrity, dignity, privacy, authorization, and LCR authority take priority.",
+        SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
         "Calm never softens urgent guidance. Reassure through accuracy, never promised outcomes.",
-        "Uncertainty must not become confidence to reassure.",
     ]
-    for trait in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS:
-        lines.append(f"## {trait['heading']}")
-        lines.append("Behave: " + " ".join(trait["observable_behaviors"]))
-        lines.append("Avoid: " + " ".join(trait["prohibited_behaviors"]))
+    for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
+        lines.append(f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}")
+        anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
+        lines.append(f"Behaviour: {anchors['observable_behaviors']}")
+        lines.append(f"Context: {anchors['required_context']}")
+        lines.append(f"Prohibited: {anchors['prohibited_behaviors']}")
+        lines.append(f"Violation: {anchors['violation_conditions']}")
+        lines.append(f"Test: {anchors['verification_cases']}")
     return "\n".join(lines)
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
