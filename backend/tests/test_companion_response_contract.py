@@ -4134,7 +4134,7 @@ def test_direct_care_history_recall_marks_linked_evidence_read_failure_partial()
             return self
 
         def all(self):
-            if self.model is EvidenceModel:
+            if self.model is collaboration.EvidenceModel:
                 raise SQLAlchemyError("simulated linked evidence read failure")
             return [event] if self.model is CareEvent else []
 
