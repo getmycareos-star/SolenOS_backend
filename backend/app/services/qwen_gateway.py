@@ -444,6 +444,7 @@ def qwen_chat(
     first_attempt = True
     transient_http_retry_used = False
     attempt_count = 0
+    result = None
     try:
         while True:
             attempt_count += 1
@@ -563,7 +564,7 @@ def qwen_chat(
         # failure, not an uncaught server error and never a successful answer.
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, response_metadata=result, audit_id=audit_id)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, response_metadata=result if isinstance(result, dict) else None, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         _mark_inference_unverified(model)
