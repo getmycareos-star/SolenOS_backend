@@ -181,7 +181,16 @@ def build_transparency_evidence(
                 "binary_storage_backend": upload.storage_backend if upload else None,
                 "upload_record_available": bool(upload),
             })
-        extraction_rows = (\n            db.query(CaptureAnalysis.extraction_status, func.count(CaptureAnalysis.id))\n            .filter(\n                CaptureAnalysis.person_id == person_id,\n                CaptureAnalysis.source_evidence_id.is_not(None),\n            )\n            .group_by(CaptureAnalysis.extraction_status)\n            .all()\n        )\n        extraction_counts = {str(status or "unknown"): int(count) for status, count in extraction_rows}
+        extraction_rows = (
+            db.query(CaptureAnalysis.extraction_status, func.count(CaptureAnalysis.id))
+            .filter(
+                CaptureAnalysis.person_id == person_id,
+                CaptureAnalysis.source_evidence_id.is_not(None),
+            )
+            .group_by(CaptureAnalysis.extraction_status)
+            .all()
+        )
+        extraction_counts = {str(status or "unknown"): int(count) for status, count in extraction_rows}
         items.append({
             "kind": "documents_and_extraction",
             "source_service": "evidence_evidence_uploads_capture_analyses",
@@ -244,7 +253,12 @@ def build_transparency_evidence(
     if can_view_lcr and _table_available(db, "audit_log_events"):
         audit_query = db.query(AuditLogEvent).filter(AuditLogEvent.person_id == person_id)
         if not can_manage_members:
-            audit_query = audit_query.filter(or_(\n                AuditLogEvent.caregiver_id == caregiver_id,\n                AuditLogEvent.actor_id == caregiver_id,\n                AuditLogEvent.actor_id.like("system:%"),\n            ))\n        audit_count = audit_query.count()
+            audit_query = audit_query.filter(or_(
+                AuditLogEvent.caregiver_id == caregiver_id,
+                AuditLogEvent.actor_id == caregiver_id,
+                AuditLogEvent.actor_id.like("system:%"),
+            ))
+        audit_count = audit_query.count()
         audit_rows = (
             audit_query.order_by(AuditLogEvent.occurred_at.desc(), AuditLogEvent.id.desc())
             .limit(MAX_RECENT_ITEMS + 1)
@@ -306,7 +320,21 @@ def build_transparency_evidence(
             .all()
         )
         has_more_requests = len(requests) > MAX_RECENT_ITEMS
-        export_rows = []\n        export_count = 0\n        exports_have_more = False\n        if _table_available(db, "privacy_export_artifacts"):\n            export_query = db.query(PrivacyExportArtifact).filter(\n                PrivacyExportArtifact.person_id == person_id,\n                PrivacyExportArtifact.caregiver_id == caregiver_id,\n            )\n            export_count = export_query.count()\n            export_rows = (\n                export_query.order_by(PrivacyExportArtifact.created_at.desc())\n                .limit(MAX_RECENT_ITEMS + 1)\n                .all()\n            )\n            exports_have_more = len(export_rows) > MAX_RECENT_ITEMS
+        export_rows = []
+        export_count = 0
+        exports_have_more = False
+        if _table_available(db, "privacy_export_artifacts"):
+            export_query = db.query(PrivacyExportArtifact).filter(
+                PrivacyExportArtifact.person_id == person_id,
+                PrivacyExportArtifact.caregiver_id == caregiver_id,
+            )
+            export_count = export_query.count()
+            export_rows = (
+                export_query.order_by(PrivacyExportArtifact.created_at.desc())
+                .limit(MAX_RECENT_ITEMS + 1)
+                .all()
+            )
+            exports_have_more = len(export_rows) > MAX_RECENT_ITEMS
         items.append({
             "kind": "privacy_data_control_operations",
             "source_service": "data_subject_requests_privacy_export_artifacts",
