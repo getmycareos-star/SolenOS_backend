@@ -222,6 +222,10 @@ def _require_person_scoped_temporal_references(
             str(value) for (value,) in db.query(EvidenceModel.id).filter(
                 EvidenceModel.person_id == str(person_id),
                 EvidenceModel.id.in_(normalized_evidence),
+                or_(
+                    EvidenceModel.evidence_status.is_(None),
+                    func.lower(EvidenceModel.evidence_status) != "deleted_by_caregiver",
+                ),
             ).all()
         }
         if found != normalized_evidence:
