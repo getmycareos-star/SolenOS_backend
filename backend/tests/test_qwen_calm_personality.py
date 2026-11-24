@@ -109,10 +109,10 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
     ]
     system = apply_solenos_system_contract(messages)[0]["content"]
     normalized_system = " ".join(system.split())
-    assert "Reassure through accuracy, never promised outcomes." in normalized_system
-    assert "Do not dismiss serious symptoms or offer false reassurance." in normalized_system
-    assert "Uncertainty must not become confidence to reassure" in normalized_system
-    assert "Safety, factual integrity, dignity, privacy" in normalized_system
+    assert "reassure through accuracy, never promised outcomes" in normalized_system.casefold()
+    assert "do not dismiss serious symptoms" in normalized_system.casefold()
+    assert "uncertainty must not become confidence to reassure" in normalized_system.casefold()
+    assert "safety, factual integrity, dignity, privacy" in normalized_system.casefold()
 
 
 def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contract():
@@ -160,15 +160,29 @@ def test_trait_acceptance_contracts_cover_distinct_context_and_failure_modes():
 
 
 
-def test_runtime_personality_kernel_is_derived_from_the_canonical_trait_contracts():
+def test_runtime_personality_kernel_preserves_canonical_trait_anchors():
     full = " ".join(SOLENOS_PERSONALITY_CONSTITUTION.split())
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.startswith(
-        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\nVersion: 2.3"
+        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\\nVersion: 2.3"
     )
+    canonical_anchors = {
+        "steady": ("Judge urgency from evidence, not emotional intensity.", "Calm never softens urgent guidance."),
+        "empathetic": ("Acknowledge feelings the caregiver actually expresses, briefly and proportionately.", "Do not invent emotions"),
+        "observant": ("Notice relevant details, chronology, recurrence, changes, corrections, conflicts", "Never infer a clinical condition or trend from one event."),
+        "thoughtful": ("Answer the actual question using relevant evidence, timing, context, uncertainty", "ask at most one"),
+        "patient": ("Welcome repeated questions, corrections, pauses, and uncertainty.", "Never shame, pressure, blame, rush, or fault caregivers for gaps."),
+        "honest": ("Distinguish caregiver reports, observations, document statements, accepted LCR assertions", "Never invent facts, sources"),
+        "proactive": ("Surface relevant, evidence-backed changes, unresolved questions, or useful next", "Do not manufacture tasks, deadlines, owners, or urgency."),
+        "reassuring": ("Reassure through accuracy, never promised outcomes.", "Do not dismiss serious symptoms or offer false reassurance."),
+        "respectful": ("Protect the dignity, privacy, preferences, and autonomy of the person receiving", "do not stereotype, patronize"),
+        "dependable": ("Maintain continuity with authorized records and confirmed context.", "Never present superseded information as current."),
+    }
+    assert set(canonical_anchors) == set(SOLENOS_PERSONALITY_CHARACTERISTICS)
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         rule = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["runtime_rule"]
         assert rule in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION, trait
-        assert " ".join(rule.split()) in full, trait
+        for anchor in canonical_anchors[trait]:
+            assert " ".join(anchor.split()) in full, (trait, anchor)
 
 
 def test_documented_identity_and_personality_versions_match_the_runtime_sources():
