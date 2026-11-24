@@ -269,6 +269,77 @@ def build_distinct_event_aggregate(
     }
 
 
+_SOURCE_ATTRIBUTION_RE = re.compile(
+    r"\\b(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
+    r"[A-Z][A-Za-z'’-]{1,30})\\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated)\\b",
+    re.IGNORECASE,
+)
+_CLAIM_ATTRIBUTION_RE = re.compile(
+    r"\\b(?:according to|reported by|observed by|documented by|"
+    r"(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
+    r"[A-Z][A-Za-z'’-]{1,30})\\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated))\\b",
+    re.IGNORECASE,
+)
+_CLAIM_NEGATION_RE = re.compile(
+    r"\\b(?:no|not|never|without|didn't|doesn't|wasn't|weren't|isn't|aren't|"
+    r"cannot|can't|denies|denied|negative|neither|nor)\\b",
+    re.IGNORECASE,
+)
+_SOURCE_NEGATION_RE = _CLAIM_NEGATION_RE
+_CLAIM_UNCERTAINTY_RE = re.compile(
+    r"\\b(?:may|might|could|possibly|possible|possibly|uncertain|unclear|"
+    r"not sure|suspected|suspect|appears|appeared|seems|seemed|perhaps|likely|unlikely)\\b",
+    re.IGNORECASE,
+)
+_SOURCE_UNCERTAINTY_RE = _CLAIM_UNCERTAINTY_RE
+
+
+def _claim_preserves_source_qualifiers(statement: str, source: dict[str, Any]) -> bool:
+    """Do not strip attribution, negation, or uncertainty from a source passage."""
+    source_text = str(source.get("source_text") or "")
+    status = " ".join(str(source.get(key) or "") for key in (
+        "record_status", "epistemic_status", "source_attribution",
+    )).casefold()
+    related = source.get("related_evidence") or []
+    related_statuses = " ".join(
+        " ".join(str(item.get(key) or "") for key in (
+            "record_status", "epistemic_status", "source_attribution",
+        ))
+        for item in related if isinstance(item, dict)
+    ).casefold()
+    attribution_required = bool(
+        _SOURCE_ATTRIBUTION_RE.search(source_text)
+        or any(term in status for term in ("reported", "observed", "documented", "unverified"))
+        or any(term in related_statuses for term in ("reported", "observed", "documented", "unverified"))
+        or (source.get("reported_by") and str(source.get("record_status") or "").casefold() not in {"verified", "confirmed"})
+    )
+    if attribution_required and not _CLAIM_ATTRIBUTION_RE.search(statement):
+        return False
+
+    normalized_source = _normalise(source_text)
+    normalized_claim = _normalise(statement)
+    search_from = 0
+    while normalized_claim:
+        position = normalized_source.find(normalized_claim, search_from)
+        if position < 0:
+            return False
+        prefix = normalized_source[:position]
+        # Evaluate only the current clause; a contrast such as "but" starts a
+        # new proposition and must not inherit an earlier negation or hedge.
+        clause_prefix = re.split(
+            r"[.!?;]\\s*|\\b(?:but|however|although|whereas)\\b",
+            prefix,
+        )[-1]
+        if _SOURCE_NEGATION_RE.search(clause_prefix) and not _CLAIM_NEGATION_RE.search(statement):
+            search_from = position + 1
+            continue
+        if _SOURCE_UNCERTAINTY_RE.search(clause_prefix) and not _CLAIM_UNCERTAINTY_RE.search(statement):
+            search_from = position + 1
+            continue
+        return True
+    return False
+
+
 def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], validated_aggregates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Link only statements whose wording occurs in a saved source.
 
@@ -310,7 +381,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
             for source in source_records:
                 source_text = str(source.get("source_text") or "")
                 normalized_source = _normalise(source_text)
-                if normalized_claim and normalized_claim in normalized_source:
+                if normalized_claim and normalized_claim in normalized_source and _claim_preserves_source_qualifiers(statement, source):
                     is_historical = str(source.get("record_status") or "").casefold() in historical_statuses
                     if not is_historical:
                         current_matches += 1
