@@ -6609,12 +6609,12 @@ def _build_companion_prompt_prefix(
     """Keep task text compact; the canonical contract owns shared safety and evidence rules."""
     return (
         f"SOLENOS_WORKFLOW_ID: {workflow}. Task: {guidance}"
-        f"{appointment_status_guidance}{empty_context_output_constraint}\\n"
+        f"{appointment_status_guidance}{empty_context_output_constraint}\n"
         f"{response_length_instruction} Use authorized supplied context only. "
         "Follow the shared SolenOS evidence, uncertainty, safety and action rules. "
-        "Return only a plain-language response.\\n\\n"
-        + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
-        + "Authorized context (may be empty):\\n"
+        "Return only a plain-language response.\n\n"
+        + ("\n".join(canonical_coverage_lines) + "\n\n" if canonical_coverage_lines else "")
+        + "Authorized context (may be empty):\n"
     )
 
 
