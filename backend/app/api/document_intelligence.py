@@ -1122,6 +1122,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 page_text,
                 source_event_id="",
                 source_evidence_id=str(evidence.id),
+                workflow_id="document_candidate_extraction",
             )
         except HTTPException:
             db.rollback()
