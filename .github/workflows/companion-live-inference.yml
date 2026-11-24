@@ -172,6 +172,14 @@ jobs:
         continue-on-error: true
         if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_all_qwen_workflows_live.py -q -s
+      - name: Upload ten-area live-Qwen input and response evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: solenos-qwen-ten-area-acceptance
+          path: ${{ runner.temp }}/solenos-qwen-ten-area-acceptance.json
+          if-no-files-found: warn
+          retention-days: 30
       - name: Run real Qwen Companion inference against PostgreSQL
         id: qwen_companion
         continue-on-error: true
