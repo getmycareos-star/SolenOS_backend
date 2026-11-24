@@ -2479,7 +2479,7 @@ def _run_companion_inference_with_metrics(
     """Log model-stage duration from the worker, even if the HTTP client disconnects."""
     started = _time.perf_counter()
     try:
-        reply = _ollama_chat("", model, messages, options, audit_context)
+        reply = _ollama_chat("", model, messages, options, audit_context=audit_context)
     except BaseException as exc:
         logger.warning(
             "solenos_companion_stage %s",
