@@ -270,37 +270,93 @@ Purpose: interpret event state transitions without erasing the audit trail.
 }
 
 
-# Match on existing workflow system instructions only. User content and source
-# documents are deliberately excluded so a quoted phrase cannot activate a mode.
-ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("lcr_retrieval", ("lcr context", "living care record context", "care history search", "retrieve care", "retrieved lcr", "companion context", "living_care_record", "care_history_search", "session-authorized records", "retrieved_history", "records are the sole authority", "supplied living care record")),
-    ("care_extraction", ("extract", "extraction", "candidate observation", "daily capture", "add record", "source quote", "daily care qwen support layer", "daily_capture", "add_record", "review-required candidate", "source text", "proposals are not facts")),
-    ("longitudinal_reasoning", ("longitudinal", "change intelligence", "what changed", "delta engine", "trend", "compare historical", "delta object", "delta_engine", "care_situation_change", "event chronology")),
-    ("reconciliation", ("contradiction", "uncertainty", "conflicting", "reconcile evidence", "information gap", "sources conflict", "preserve disagreements")),
-    ("document_intelligence", ("document", "ocr", "discharge summary", "uploaded file", "source pages", "document text", "document extraction")),
-    ("companion", ("companion", "caregiver question", "answer the caregiver", "conversational response", "supporting language assistant inside solenos")),
-    ("handoff_appointment", ("handoff", "appointment", "professional summary", "clinician summary", "visit preparation", "draft a care briefing", "professional_summary", "after_appointment")),
-    ("caregiver_continuity", ("open loop", "care coordination", "caregiver strain", "care coverage", "unanswered concern", "open_loops", "caregiver_strain_support", "care_coverage_gap", "incident_follow_through")),
-    ("medication_continuity", ("medication", "medicines", "prescription", "dose discrepancy", "treatment continuity", "medication_day")),
-    ("event_lifecycle", ("record lifecycle", "correction", "withdrawn", "superseded", "event status", "record_lifecycle", "care_instruction_change_tracker")),
+# Workflow IDs are emitted by backend-owned workflow builders, never copied from
+# caregiver text or source documents. They make specialist selection deterministic.
+WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
+    "daily_capture": ("care_extraction",),
+    "add_record": ("care_extraction", "event_lifecycle"),
+    "document": ("document_intelligence", "lcr_retrieval"),
+    "document_candidate_extraction": ("document_intelligence", "care_extraction"),
+    "living_care_record": ("lcr_retrieval", "companion"),
+    "care_history_search": ("lcr_retrieval", "companion"),
+    "care_situation_change": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+    "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+    "evidence_provenance": ("care_extraction", "reconciliation"),
+    "uncertainty_contradictions": ("lcr_retrieval", "reconciliation"),
+    "returning_caregiver": ("lcr_retrieval", "companion"),
+    "appointment": ("lcr_retrieval", "handoff_appointment"),
+    "after_appointment": ("lcr_retrieval", "handoff_appointment", "event_lifecycle"),
+    "handoff": ("lcr_retrieval", "handoff_appointment"),
+    "professional_summary": ("lcr_retrieval", "handoff_appointment"),
+    "open_loops": ("lcr_retrieval", "caregiver_continuity"),
+    "two_week_review": ("lcr_retrieval", "longitudinal_reasoning", "caregiver_continuity"),
+    "decision_outcome": ("lcr_retrieval", "caregiver_continuity", "event_lifecycle"),
+    "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
+    "care_coordination": ("lcr_retrieval", "caregiver_continuity"),
+    "companion": ("lcr_retrieval", "companion"),
+    "caregiver_feedback": ("lcr_retrieval", "caregiver_continuity"),
+    "care_transition": ("lcr_retrieval", "longitudinal_reasoning", "handoff_appointment"),
+    "incident_follow_through": ("lcr_retrieval", "caregiver_continuity", "event_lifecycle"),
+    "emergency_readiness": ("lcr_retrieval", "companion"),
+    "care_coverage_gap": ("lcr_retrieval", "caregiver_continuity"),
+    "care_instruction_change_tracker": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
+    "critical_information_completeness": ("lcr_retrieval", "caregiver_continuity", "reconciliation"),
+    "personal_preferences_distress_context": ("lcr_retrieval", "companion"),
+    "caregiver_strain_support": ("lcr_retrieval", "caregiver_continuity"),
+    "document_validity_renewal": ("document_intelligence", "event_lifecycle"),
+    "companion_care_update": ("care_extraction",),
+    "caregiver_orientation": ("lcr_retrieval", "companion"),
+}
+
+# A classifier is a meta-task. Its prompt contains the names of every workflow,
+# so keyword matching it would incorrectly activate several care specialists.
+META_TASK_MARKERS = ("SOLENOS_META_TASK: workflow_classification",)
+
+# Legacy workflow prompts are supported while callers are migrated to explicit
+# workflow IDs. Markers are intentionally task-specific; generic words such as
+# "document", "appointment", "medication", or "extract" are not sufficient.
+LEGACY_ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("lcr_retrieval", ("lcr context", "living care record context", "care history search", "retrieve care history", "retrieved lcr", "companion context", "session-authorized records", "retrieved_history")),
+    ("care_extraction", ("candidate observation", "daily capture", "add record", "source quote", "review-required candidate", "original source text")),
+    ("longitudinal_reasoning", ("longitudinal reasoning", "delta engine", "delta object", "care_situation_change", "compare current and prior", "trend assessment")),
+    ("reconciliation", ("uncertainty or contradictions", "uncertainty and contradictions", "conflicting information", "preserve disagreements", "reconcile evidence")),
+    ("document_intelligence", ("document extraction", "document text to review", "page-level provenance", "source pages", "uploaded document candidate")),
+    ("companion", ("solenos ai companion", "supporting language assistant inside solenos", "answer the caregiver's current question")),
+    ("handoff_appointment", ("care handoff", "professional-facing care summary", "clinician summary", "appointment briefing", "visit preparation")),
+    ("caregiver_continuity", ("care coverage gap", "caregiver strain support", "open_loops", "incident_follow_through")),
+    ("medication_continuity", ("medication-day", "medication continuity", "dose discrepancy", "conflicting medication instructions")),
+    ("event_lifecycle", ("record lifecycle", "correction lineage", "withdrawn assertion", "superseded assertion", "care_instruction_change_tracker")),
 )
 
 
 def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
-    """Select at most four task domains from workflow-owned system instructions."""
-    system_text = "\n".join(
+    """Select specialist responsibilities from backend-owned system metadata."""
+    system_text = "\\n".join(
         str(message.get("content") or "").casefold()
         for message in messages
         if isinstance(message, dict) and str(message.get("role", "")).casefold() == "system"
     )
-    if not system_text.strip():
+    if not system_text.strip() or any(marker.casefold() in system_text for marker in META_TASK_MARKERS):
         return ()
+
+    workflow_ids = re.findall(
+        r"solenos_workflow_id\\s*:\\s*([a-z0-9_]+)",
+        system_text,
+        flags=re.IGNORECASE,
+    )
+    if workflow_ids:
+        selected: list[str] = []
+        for workflow_id in workflow_ids:
+            for domain in WORKFLOW_SPECIALISTS.get(workflow_id.casefold(), ()):
+                if domain not in selected:
+                    selected.append(domain)
+        return tuple(selected[:4])
+
+    # Compatibility path for existing backend-owned prompts not yet tagged.
     selected = []
-    for domain, markers in ROUTES:
+    for domain, markers in LEGACY_ROUTES:
         if any(marker in system_text for marker in markers):
             selected.append(domain)
-    # Companion questions normally need retrieval discipline even when a legacy
-    # workflow prompt did not explicitly say "retrieve".
     if "companion" in selected and "lcr_retrieval" not in selected:
         selected.insert(0, "lcr_retrieval")
     return tuple(selected[:4])
@@ -312,9 +368,9 @@ def apply_specialized_intelligence(messages: list[dict]) -> list[dict]:
     domains = select_specialized_domains(copied)
     if not domains:
         return copied
-    instructions = "\n\n".join(SPECIALIZED_PROMPTS[name] for name in domains)
+    instructions = "\\n\\n".join(SPECIALIZED_PROMPTS[name] for name in domains)
     copied.append({
         "role": "system",
-        "content": "# ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES\n" + instructions,
+        "content": "# ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES\\n" + instructions,
     })
     return copied
