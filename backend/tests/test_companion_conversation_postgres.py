@@ -271,6 +271,7 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             reply=passed_reply,
             rejection_reasons=[],
             ai_generated=True,
+            commit_success=True,
             source_event_ids=[f"event-pass-{suffix}"],
             source_evidence_ids=[f"evidence-pass-{suffix}"],
             source_document_analysis_ids=[],
