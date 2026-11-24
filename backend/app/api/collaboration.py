@@ -6061,8 +6061,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_lcr_context_ids": source_lcr_context_ids,
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "retrieval_coverage": {
-            "status": lcr_context_coverage.get("status"),
-            "retrieval_projection_complete": lcr_context_coverage.get("retrieval_projection_complete"),
             "context_truncated": bool(shared_context_truncated),
         },
     }
