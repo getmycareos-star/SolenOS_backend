@@ -123,10 +123,10 @@ _specialist_workflows = set(WORKFLOW_SPECIALISTS)
 _unclassified_workflows = set(WORKFLOWS_WITHOUT_SPECIALISTS)
 if _specialist_workflows & _unclassified_workflows:
     raise RuntimeError("Qwen workflows cannot be both specialist-routed and specialist-free")
-if _specialist_workflows | _unclassified_workflows != _enabled_workflows:
+if not _enabled_workflows <= (_specialist_workflows | _unclassified_workflows):
     raise RuntimeError("Every enabled Qwen workflow must have exactly one routing decision")
-if any(workflow not in _enabled_workflows for workflow in _specialist_workflows | _unclassified_workflows):
-    raise RuntimeError("Qwen specialist routing contains an unsupported workflow")
+if not _unclassified_workflows <= _enabled_workflows:
+    raise RuntimeError("Specialist-free routing contains a workflow that is not enabled")
 if any(not domains or len(domains) > MAX_SPECIALISTS_PER_REQUEST for domains in WORKFLOW_SPECIALISTS.values()):
     raise RuntimeError("Qwen specialist routing exceeds the configured per-request cap")
 if any(set(domains) - set(SPECIALIZED_PROMPTS) for domains in WORKFLOW_SPECIALISTS.values()):
