@@ -83,7 +83,7 @@ from app.services.document_binary_storage import (
 from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
-from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records
+from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
@@ -5985,8 +5985,13 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
 
     reply = strip_internal_identifiers(reply)
     source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
+    claim_source_records: list[dict[str, Any]] = []
 
     def response_rejection_reasons(candidate: str) -> list[str]:
+        nonlocal claim_source_records
+        claim_source_records = _enrich_qwen_claim_source_records(
+            db, person_id, context_lines_to_source_records(context_lines)
+        )
         reasons = []
         if _companion_reply_needs_revision(candidate, response_length_policy.max_words):
             words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
@@ -6013,6 +6018,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             reasons.append("unsupported_operational_claim")
         if _contains_unsupported_record_reference(candidate, source_context):
             reasons.append("unsupported_record_reference")
+        provenance = build_claim_provenance(candidate, claim_source_records, validated_aggregates)
+        if unmatched_material_claims(provenance):
+            reasons.append("unmatched_material_care_claim")
         return reasons
 
     rejection_reasons = response_rejection_reasons(reply)
@@ -6067,9 +6075,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             status_code=503,
             detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
         )
-    claim_source_records = _enrich_qwen_claim_source_records(
-        db, person_id, context_lines_to_source_records(context_lines)
-    )
     claim_provenance = build_claim_provenance(
         reply, claim_source_records, validated_aggregates
     )
