@@ -176,16 +176,13 @@ def build_transparency_evidence(
         document_filter = or_(
             Evidence.type == "document",
             Evidence.source_type == "document",
-            EvidenceUpload.evidence_id.is_not(None) if uploads_available else False,
+            Evidence.evidence_kind.in_(("uploaded_document", "document_extraction")),
         )
-        evidence_count_query = db.query(func.count(Evidence.id)).filter(
-            Evidence.person_id == person_id
+        evidence_count = (
+            db.query(func.count(Evidence.id))
+            .filter(Evidence.person_id == person_id, document_filter)
+            .scalar() or 0
         )
-        if uploads_available:
-            evidence_count_query = evidence_count_query.outerjoin(
-                EvidenceUpload, EvidenceUpload.evidence_id == Evidence.id
-            )
-        evidence_count = evidence_count_query.filter(document_filter).scalar() or 0
         if uploads_available:
             document_rows = (
                 db.query(Evidence, EvidenceUpload)
@@ -251,11 +248,11 @@ def build_transparency_evidence(
         has_more_extractions = len(recent_extractions) > MAX_RECENT_ITEMS
         items.append({
             "kind": "documents_and_extraction",
-            "source_service": "evidence_evidence_uploads_capture_analyses",
+            "source_service": "evidence_uploads_and_capture_analyses",
             "scope": {"person_id": person_id},
             "observed_at": now.isoformat(),
-            "status": "available" if uploads_available and not missing_upload_metadata else "partial",
-            "completeness": "partial" if not uploads_available or missing_upload_metadata else ("recent_bounded_list" if has_more else "metadata_complete"),
+            "status": "available" if uploads_available and not missing_upload_metadata and not has_more_extractions else "partial",
+            "completeness": "partial" if not uploads_available or missing_upload_metadata or has_more_extractions else ("recent_bounded_list" if has_more else "metadata_complete"),
             "details": {
                 "evidence_count": int(evidence_count),
                 "recent_documents": recent_documents,
@@ -354,9 +351,10 @@ def build_transparency_evidence(
             ).all()
         } if correction_actor_ids else {}
 
+        revision_history_available = _table_available(db, "care_state_revisions")
         revision_rows = []
         has_more_revisions = False
-        if _table_available(db, "care_state_revisions"):
+        if revision_history_available:
             revision_rows = (
                 db.query(CareStateRevision)
                 .filter(CareStateRevision.person_id == person_id)
@@ -376,29 +374,40 @@ def build_transparency_evidence(
             ).all()
         } if revision_actor_ids else {}
 
-        proposal_query = db.query(AIOutputLCRProposal).filter(
-            AIOutputLCRProposal.person_id == person_id
-        )
-        if not can_manage_members:
-            proposal_query = proposal_query.filter(AIOutputLCRProposal.caregiver_id == caregiver_id)
-        proposal_count = proposal_query.count()
-        proposal_rows = (
-            proposal_query.order_by(AIOutputLCRProposal.created_at.desc(), AIOutputLCRProposal.id.desc())
-            .limit(MAX_RECENT_ITEMS + 1)
-            .all()
-        )
-        has_more_proposals = len(proposal_rows) > MAX_RECENT_ITEMS
+        proposal_history_available = _table_available(db, "ai_output_lcr_proposals")
+        decision_history_available = _table_available(db, "ai_output_lcr_decisions")
+        proposal_rows = []
+        proposal_count = None
+        has_more_proposals = False
+        if proposal_history_available:
+            proposal_query = db.query(AIOutputLCRProposal).filter(
+                AIOutputLCRProposal.person_id == person_id
+            )
+            if not can_manage_members:
+                proposal_query = proposal_query.filter(AIOutputLCRProposal.caregiver_id == caregiver_id)
+            proposal_count = proposal_query.count()
+            proposal_rows = (
+                proposal_query.order_by(AIOutputLCRProposal.created_at.desc(), AIOutputLCRProposal.id.desc())
+                .limit(MAX_RECENT_ITEMS + 1)
+                .all()
+            )
+            has_more_proposals = len(proposal_rows) > MAX_RECENT_ITEMS
         proposal_ids = [str(row.id) for row in proposal_rows[:MAX_RECENT_ITEMS]]
-        decision_rows = (
-            db.query(AIOutputLCRDecision)
-            .filter(
+        decision_count = None
+        decision_rows = []
+        has_more_decisions = False
+        if decision_history_available and proposal_ids:
+            decision_query = db.query(AIOutputLCRDecision).filter(
                 AIOutputLCRDecision.person_id == person_id,
                 AIOutputLCRDecision.proposal_id.in_(proposal_ids),
             )
-            .order_by(AIOutputLCRDecision.created_at.desc(), AIOutputLCRDecision.id.desc())
-            .limit(MAX_RECENT_ITEMS * 2)
-            .all()
-        ) if proposal_ids else []
+            decision_count = decision_query.count()
+            decision_rows = (
+                decision_query.order_by(AIOutputLCRDecision.created_at.desc(), AIOutputLCRDecision.id.desc())
+                .limit(MAX_RECENT_ITEMS * 2 + 1)
+                .all()
+            )
+            has_more_decisions = len(decision_rows) > MAX_RECENT_ITEMS * 2
         decision_actor_ids = {
             str(row.reviewer_caregiver_id) for row in decision_rows if row.reviewer_caregiver_id
         }
@@ -431,8 +440,12 @@ def build_transparency_evidence(
             "source_service": "care_assertions_care_events_corrections",
             "scope": {"person_id": person_id},
             "observed_at": now.isoformat(),
-            "status": "available",
-            "completeness": "aggregate_counts_and_recent_bounded_assertions",
+            "status": "partial" if (
+                not revision_history_available or not proposal_history_available or not decision_history_available
+            ) else "available",
+            "completeness": "partial" if (
+                not revision_history_available or not proposal_history_available or not decision_history_available
+            ) else "aggregate_counts_and_recent_bounded_assertions",
             "details": {
                 "care_event_count": int(event_count),
                 "assertion_status_counts": assertion_status_counts,
@@ -462,7 +475,12 @@ def build_transparency_evidence(
                     "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
                 } for row in revision_rows[:MAX_RECENT_ITEMS]],
                 "has_more_revisions": has_more_revisions,
-                "proposal_count": int(proposal_count),
+                "revision_history_status": "available" if revision_history_available else "unavailable",
+                "proposal_count": int(proposal_count) if proposal_count is not None else None,
+                "proposal_history_status": "available" if proposal_history_available else "unavailable",
+                "decision_count": int(decision_count) if decision_count is not None else None,
+                "decision_history_status": "available" if decision_history_available else "unavailable",
+                "has_more_decisions": has_more_decisions if decision_history_available else None,
                 "recent_proposals": [{
                     "proposal_id": str(row.id),
                     "proposal_type": row.proposal_type,
@@ -489,7 +507,11 @@ def build_transparency_evidence(
                 "has_more_assertions": has_more_assertions,
             },
         })
-        coverage["lcr"] = "partial" if (has_more_assertions or has_more_corrections or has_more_revisions or has_more_proposals) else "complete_aggregate_and_recent"
+        coverage["lcr"] = "partial" if (
+            has_more_assertions or has_more_corrections or has_more_revisions or has_more_proposals
+            or has_more_decisions or not revision_history_available
+            or not proposal_history_available or not decision_history_available
+        ) else "complete_aggregate_and_recent"
 
     if can_view_lcr and _table_available(db, "audit_log_events"):
         audit_query = db.query(AuditLogEvent).filter(AuditLogEvent.person_id == person_id)
