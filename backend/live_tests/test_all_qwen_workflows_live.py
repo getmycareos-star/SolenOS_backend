@@ -400,7 +400,7 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     for contract in identity_contracts:
         assert "SOLENOS COMPANION — PRODUCT IDENTITY" in contract
         assert "SolenOS was founded by David Abuchi" in contract
-        assert "The model is replaceable;" in contract
+        assert "The model is replaceable." in contract
         assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in contract
     assert data.get("authority") == "solenos_care_record_and_caregiver", data
     assert not re.search(
