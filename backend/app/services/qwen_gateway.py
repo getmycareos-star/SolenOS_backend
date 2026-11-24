@@ -152,7 +152,7 @@ def _enforce_prompt_context_budget(
     return estimate
 
 
-def _inference_audit_metadata(messages: list[dict]) -> dict:
+def _inference_audit_metadata(messages: list[dict], audit_context: dict | None = None) -> dict:
     """Build privacy-minimizing provenance for one gateway invocation."""
     system_text = "\n".join(
         str(message.get("content") or "")
@@ -165,7 +165,8 @@ def _inference_audit_metadata(messages: list[dict]) -> dict:
         if isinstance(message, dict) and str(message.get("role", "")).casefold() != "system"
     )
     workflow_match = re.search(r"(?im)^\s*SOLENOS_WORKFLOW_ID:\s*([a-z0-9_]+)", system_text)
-    return {
+    trusted_context = audit_context if isinstance(audit_context, dict) else {}
+    metadata = {
         "provider": "ollama",
         "transport": "native_chat",
         "workflow_id": workflow_match.group(1) if workflow_match else "unspecified",
@@ -174,6 +175,34 @@ def _inference_audit_metadata(messages: list[dict]) -> dict:
         "request_context_sha256": hashlib.sha256(context_text.encode("utf-8")).hexdigest(),
         "prompt_token_estimate_method": "utf8_bytes_div_3_5_plus_message_framing",
     }
+    for key in ("request_id", "person_id", "caregiver_id", "conversation_session_id", "job_id", "output_id"):
+        value = trusted_context.get(key)
+        if isinstance(value, str) and value.strip() and len(value) <= 160:
+            metadata[key] = value.strip()
+    source_keys = (
+        "source_event_ids", "source_evidence_ids", "source_document_analysis_ids",
+        "source_appointment_ids", "source_assertion_ids", "source_lcr_context_ids",
+        "source_freshness_assessment_ids",
+    )
+    source_refs = {}
+    for key in source_keys:
+        values = trusted_context.get(key)
+        if isinstance(values, (list, tuple)):
+            clean = list(dict.fromkeys(
+                value.strip() for value in values
+                if isinstance(value, str) and value.strip() and len(value) <= 160
+            ))[:100]
+            if clean:
+                source_refs[key] = clean
+    if source_refs:
+        metadata["source_references"] = source_refs
+    coverage = trusted_context.get("retrieval_coverage")
+    if isinstance(coverage, dict):
+        allowed_coverage = ("status", "retrieval_projection_complete", "page_limit_reached", "context_truncated")
+        metadata["retrieval_coverage"] = {
+            key: coverage[key] for key in allowed_coverage if key in coverage
+        }
+    return metadata
 
 
 def _persist_inference_metric(metric: AIInferenceMetric) -> bool:
@@ -196,6 +225,7 @@ def _begin_inference_metric(model: str, audit_metadata: dict) -> str | None:
     metric_id = str(uuid.uuid4())
     metric = AIInferenceMetric(
         id=metric_id,
+        person_id=audit_metadata.get("person_id"),
         outcome="started",
         metrics_json={**audit_metadata, "model": model, "invocation_state": "started"},
     )
@@ -244,6 +274,7 @@ def qwen_chat(
     timeout: float | None = None,
     response_format: dict | str | None = None,
     options: dict | None = None,
+    audit_context: dict | None = None,
 ) -> str:
     # Activate only specialist responsibilities explicitly signaled by the
     # workflow-owned system prompt; then apply the shared authority/safety contract.
@@ -260,7 +291,7 @@ def qwen_chat(
             },
         ) from exc
     messages = apply_solenos_system_contract(messages)
-    audit_metadata = _inference_audit_metadata(messages)
+    audit_metadata = _inference_audit_metadata(messages, audit_context=audit_context)
     started = time.monotonic()
     try:
         base, model, configured_timeout = get_ollama_config()
