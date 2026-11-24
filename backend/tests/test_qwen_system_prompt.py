@@ -1,4 +1,5 @@
 from app.services.qwen_system_prompt import (
+    SOLENOS_OPERATING_CONTRACT_MANIFEST,
     SOLENOS_QWEN_CORE_SYSTEM_PROMPT,
     SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
     SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
@@ -61,7 +62,7 @@ def test_shared_contract_preserves_workflow_instructions_and_identity_precedence
     result = apply_solenos_system_contract(messages)
     assert len(result) == 2
     content = result[0]["content"]
-    assert content.startswith(SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip())
+    assert content.startswith(SOLENOS_OPERATING_CONTRACT_MANIFEST + "\\n\\n" + SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip())
     assert "Return valid JSON only." in content
     assert "Do not paraphrase source quotations." in content
     assert content.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
@@ -135,7 +136,7 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "minimum-necessary, server-authorized context",
         "Never bypass access controls",
         "autonomy",
-        "Never disclose to unauthorized people",
+        "Never disclose information to unauthorized people",
         "or expose their information",
         "use care information for advertising",
         "For dementia, do not automatically",
