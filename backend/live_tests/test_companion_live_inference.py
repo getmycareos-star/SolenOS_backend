@@ -28,11 +28,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://"))
 if os.getenv("SOLENOS_RUN_LIVE_QWEN_EVAL") == "1" and not POSTGRES_DATABASE:
     raise RuntimeError("Live Companion Qwen acceptance requires PostgreSQL; refusing a skipped non-PostgreSQL run.")
-from app.models.care import Caregiver, CareEvent, Evidence
+from app.models.care import Caregiver, CareEvent, Correction, Evidence
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, CareRecordRelationship
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import Contradiction
 from app.services.care_continuity import next_best_questions
@@ -309,6 +309,96 @@ def test_live_qwen_companion_uses_authenticated_postgres_lcr_and_preserves_ident
             new_observation,
         )
 
+
+
+def test_live_qwen_companion_retrieves_the_corrected_lcr_event_without_promoting_original_wording(monkeypatch):
+    """Actual Qwen must receive correction lineage and answer from the corrected account."""
+    from app.services import qwen_gateway
+
+    with TestClient(app) as client:
+        caregiver = _create_session(client, "Live Qwen correction-lineage caregiver")
+        person_id = caregiver["person"]["id"]
+        caregiver_id = caregiver["caregiver"]["id"]
+        event_id = str(uuid.uuid4())
+        correction_id = str(uuid.uuid4())
+        relationship_id = str(uuid.uuid4())
+
+        db = TestingSessionLocal()
+        try:
+            db.add(CareEvent(
+                id=event_id,
+                person_id=person_id,
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime(2026, 10, 10, 9, 0, tzinfo=timezone.utc),
+                title="Original sleep observation",
+                description="Caregiver reported that Mum slept poorly.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+                time_provenance="caregiver_reported",
+            ))
+            db.flush()
+            db.add(Correction(
+                id=correction_id,
+                person_id=person_id,
+                target_type="care_event",
+                target_id=event_id,
+                original_text="Mum slept poorly.",
+                corrected_text="Caregiver did not observe Mum sleeping poorly.",
+                reason="The original report overstated what the caregiver actually observed.",
+                caregiver_id=caregiver_id,
+                processing_status="completed",
+                processing_attempts=1,
+            ))
+            db.add(CareRecordRelationship(
+                id=relationship_id,
+                person_id=person_id,
+                source_type="correction",
+                source_id=correction_id,
+                relationship_type="corrects",
+                target_type="care_event",
+                target_id=event_id,
+                provenance="Caregiver correction; original report retained.",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+        captured_messages = []
+        original_urlopen = qwen_gateway.urllib.request.urlopen
+
+        def capture_real_ollama_request(request, *args, **kwargs):
+            if str(getattr(request, "full_url", "")).endswith("/api/chat"):
+                payload = json.loads(request.data.decode("utf-8"))
+                captured_messages.append(payload.get("messages", []))
+            return original_urlopen(request, *args, **kwargs)
+
+        monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_real_ollama_request)
+        response = _ask(
+            client,
+            caregiver,
+            "What is the corrected account of the sleep observation, and what happened to the original report?",
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body.get("ai_generated") is True, body
+        assert event_id in body.get("source_event_ids", []), body
+        assert body.get("written_to_lcr") is False, body
+        assert body.get("persistence") == "conversation_only", body
+        assert captured_messages, "The request did not reach the configured Ollama chat endpoint."
+
+        serialized_prompt = "\n".join(
+            str(message.get("content") or "")
+            for message in captured_messages[-1]
+        )
+        assert "historical_event" in serialized_prompt
+        assert "Caregiver did not observe Mum sleeping poorly." in serialized_prompt
+        assert "Caregiver correction; original report retained." in serialized_prompt
+
+        answer = str(body.get("reply") or "").casefold()
+        assert any(term in answer for term in ("did not observe", "not observed", "correction", "corrected")), body
+        assert any(term in answer for term in ("original report", "earlier report", "previous report", "correction")), body
 
 
 def test_live_qwen_lcr_orientation_distinguishes_new_returning_and_unknown_history_without_writes(monkeypatch):
