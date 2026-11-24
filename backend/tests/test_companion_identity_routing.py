@@ -58,6 +58,10 @@ def test_care_questions_are_not_misclassified_as_product_identity(question):
             "Who made you?",
             "I'm SolenOS Companion, an AI companion developed as part of SolenOS. SolenOS was founded by David Abuchi to help family caregivers maintain continuity throughout the care journey.",
         ),
+        (
+            "Who is your creator?",
+            "I'm SolenOS Companion, an AI companion developed as part of SolenOS. SolenOS was founded by David Abuchi to help family caregivers maintain continuity throughout the care journey.",
+        ),
         ("Who founded SolenOS?", "SolenOS was founded by David Abuchi."),
         ("Are you a doctor?", "No. I'm an AI companion, not a healthcare professional or a replacement for professional medical judgment."),
         ("Are you human?", "No. I'm an AI companion, not a person."),
