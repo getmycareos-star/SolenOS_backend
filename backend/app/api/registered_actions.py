@@ -255,6 +255,7 @@ def approve_follow_up(person_id: str, payload: ApprovedActionCreate, request: Re
     evidence_rows = db.query(Evidence).filter(
         Evidence.person_id == scoped_person_id,
         Evidence.id.in_(evidence_ids),
+        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
     ).all()
     if {row.id for row in evidence_rows} != set(evidence_ids):
         raise HTTPException(status_code=422, detail="Every supporting evidence item must exist in this care record")
