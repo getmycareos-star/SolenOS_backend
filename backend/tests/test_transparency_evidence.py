@@ -23,8 +23,10 @@ from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
 
 TEST_POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")
-if TEST_POSTGRES_URL:
-    engine = create_engine(TEST_POSTGRES_URL, pool_pre_ping=True)
+COMPANION_POSTGRES_URL = os.getenv("SOLENOS_COMPANION_TEST_DATABASE_URL")
+POSTGRES_URL = TEST_POSTGRES_URL or COMPANION_POSTGRES_URL
+if POSTGRES_URL:
+    engine = create_engine(POSTGRES_URL, pool_pre_ping=True)
 else:
     engine = create_engine(
         "sqlite:///:memory:",
@@ -44,10 +46,13 @@ def override_get_db():
 
 def setup_function():
     if TEST_POSTGRES_URL:
+        # TEST_POSTGRES_URL is reserved for an isolated database this test owns.
         with engine.begin() as connection:
             connection.exec_driver_sql("DROP SCHEMA IF EXISTS public CASCADE")
             connection.exec_driver_sql("CREATE SCHEMA public")
-    Base.metadata.create_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+    elif not COMPANION_POSTGRES_URL:
+        Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_get_db
     main_module.SessionLocal = TestSessionLocal
 
@@ -55,7 +60,7 @@ def setup_function():
 def teardown_function():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
-    if not TEST_POSTGRES_URL:
+    if not POSTGRES_URL:
         Base.metadata.drop_all(bind=engine)
 
 
