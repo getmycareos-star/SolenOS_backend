@@ -122,7 +122,7 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
         }
         try:
             workflow_match = re.search(
-                r"SOLENOS_WORKFLOW_ID:\\s*([a-z0-9_]+)",
+                r"SOLENOS_WORKFLOW_ID:\s*([a-z0-9_]+)",
                 case["system"],
                 flags=re.IGNORECASE,
             )
