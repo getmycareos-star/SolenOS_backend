@@ -8243,16 +8243,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ).first()
     context_now = datetime.now(timezone.utc)
     active_roles = []
+    active_roles_truncated = False
     active_responsibilities = []
     responsibilities_truncated = False
     if caregiver_profile is not None:
-        active_roles = db.query(CaregiverRole).filter(
+        role_rows = db.query(CaregiverRole).filter(
             CaregiverRole.person_id == person_id,
             CaregiverRole.caregiver_id == caregiver_profile.id,
             CaregiverRole.is_current.is_(True),
             CaregiverRole.effective_start <= context_now,
             or_(CaregiverRole.effective_end.is_(None), CaregiverRole.effective_end > context_now),
         ).order_by(CaregiverRole.effective_start.desc()).limit(11).all()
+        active_roles_truncated = len(role_rows) > 10
+        active_roles = role_rows[:10]
         responsibility_rows = db.query(CaregiverResponsibility).filter(
             CaregiverResponsibility.person_id == person_id,
             or_(
@@ -8270,9 +8273,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 CaregiverResponsibility.effective_end.is_(None),
                 CaregiverResponsibility.effective_end > context_now,
             ),
-        ).order_by(CaregiverResponsibility.effective_start.desc()).limit(21).all()
-        responsibilities_truncated = len(responsibility_rows) > 20
-        active_responsibilities = responsibility_rows[:20]
+        ).order_by(CaregiverResponsibility.effective_start.desc()).limit(11).all()
+        responsibilities_truncated = len(responsibility_rows) > 10
+        active_responsibilities = responsibility_rows[:10]
     open_loop_rows = db.query(OpenLoopRecord).filter(
         OpenLoopRecord.person_id == person_id,
         OpenLoopRecord.status.in_(OPEN_STATES),
@@ -8284,17 +8287,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ),
         ),
     ).order_by(
+        OpenLoopRecord.deadline_at.is_(None).asc(),
         OpenLoopRecord.deadline_at.asc(),
         OpenLoopRecord.updated_at.desc(),
-    ).limit(21).all()
-    open_loops_truncated = len(open_loop_rows) > 20
-    assigned_open_loops = open_loop_rows[:20]
+    ).limit(9).all()
+    open_loops_truncated = len(open_loop_rows) > 8
+    assigned_open_loops = open_loop_rows[:8]
     caregiver_context = build_companion_caregiver_context(
         caregiver,
         access_grant,
         timezone_conflict=timezone_conflict,
         caregiver_profile=caregiver_profile,
-        active_roles=active_roles[:10],
+        active_roles=active_roles,
+        active_roles_truncated=active_roles_truncated,
         active_responsibilities=active_responsibilities,
         assigned_open_loops=assigned_open_loops,
         responsibilities_truncated=responsibilities_truncated,
@@ -9426,6 +9431,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "communication_style": caregiver_context.get("communication_style"),
             "caregiver_profile": None if greeting_only else caregiver_context.get("caregiver_profile"),
             "active_roles": [] if greeting_only else caregiver_context.get("active_roles", []),
+            "active_roles_status": "not_included_for_greeting" if greeting_only else caregiver_context.get("active_roles_status"),
+            "active_roles_truncated": False if greeting_only else caregiver_context.get("active_roles_truncated", False),
             "active_responsibilities": [] if greeting_only else caregiver_context.get("active_responsibilities", []),
             "active_responsibilities_status": "not_included_for_greeting" if greeting_only else caregiver_context.get("active_responsibilities_status"),
             "active_responsibilities_truncated": False if greeting_only else caregiver_context.get("active_responsibilities_truncated", False),
