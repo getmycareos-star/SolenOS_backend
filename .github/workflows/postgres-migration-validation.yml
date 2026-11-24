@@ -927,6 +927,80 @@ jobs:
           createdb -h localhost -U postgres solenos_freshness_existing
           createdb -h localhost -U postgres solenos_evidence_columns
           createdb -h localhost -U postgres solenos_messy_care_benchmark
+          createdb -h localhost -U postgres solenos_timezone_authority
+
+      - name: Verify legacy notification timezones do not become Companion timezone authority
+        env:
+          DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/solenos_timezone_authority
+        working-directory: backend
+        run: |
+          set -Eeuo pipefail
+          python -m alembic upgrade 20261124_01_caregiver_preferences
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import Session
+          from app.models.care import Caregiver, Person
+          from app.models.privacy_delivery import AuditLogEvent
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with Session(engine) as db:
+              legacy_person = Person(id="timezone-legacy-person", name="Legacy recipient")
+              explicit_person = Person(id="timezone-explicit-person", name="Explicit recipient")
+              legacy_caregiver = Caregiver(
+                  id="timezone-legacy-caregiver",
+                  name="Legacy caregiver",
+                  relationship="Family",
+                  person_id=legacy_person.id,
+                  timezone="America/Chicago",
+                  timezone_configured=True,
+              )
+              explicit_caregiver = Caregiver(
+                  id="timezone-explicit-caregiver",
+                  name="Explicit caregiver",
+                  relationship="Daughter",
+                  person_id=explicit_person.id,
+                  timezone="America/Los_Angeles",
+                  timezone_configured=True,
+              )
+              db.add_all([legacy_person, explicit_person, legacy_caregiver, explicit_caregiver])
+              db.flush()
+              db.add(AuditLogEvent(
+                  actor_id=explicit_caregiver.id,
+                  subject_id=explicit_person.id,
+                  person_id=explicit_person.id,
+                  caregiver_id=explicit_caregiver.id,
+                  action="caregiver.preferences.update",
+                  target_type="caregiver_preferences",
+                  target_id=explicit_caregiver.id,
+                  occurred_at=datetime.now(timezone.utc),
+                  outcome="allowed",
+                  request_id="timezone-authority-migration-test",
+                  policy_version="caregiver-preferences-v1",
+                  record_metadata={"updated_fields": ["timezone"]},
+              ))
+              db.commit()
+          engine.dispose()
+          PY
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine
+          from sqlalchemy.orm import Session
+          from app.models.care import Caregiver
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with Session(engine) as db:
+              legacy = db.query(Caregiver).filter_by(id="timezone-legacy-caregiver").one()
+              explicit = db.query(Caregiver).filter_by(id="timezone-explicit-caregiver").one()
+              assert legacy.timezone == "UTC", legacy.timezone
+              assert legacy.timezone_configured is False
+              assert explicit.timezone == "America/Los_Angeles", explicit.timezone
+              assert explicit.timezone_configured is True
+          engine.dispose()
+          print("CAREGIVER_TIMEZONE_PROVENANCE_MIGRATION=PASS")
+          PY
 
       - name: Run privacy request reviewer workflow tests against PostgreSQL
         env:
