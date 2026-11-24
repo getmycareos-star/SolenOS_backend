@@ -147,3 +147,22 @@ def test_gateway_extraction_entry_points_delegate_to_the_single_qwen_chat():
             for node in ast.walk(functions[name])
         )
         assert calls_gateway, f"{name} must delegate inference to qwen_chat"
+
+
+def test_gateway_extraction_consumers_are_explicitly_imported_from_the_gateway():
+    expected = {
+        "backend/app/api/v1.py": {"extract_review_candidates"},
+        "backend/app/api/document_intelligence.py": {"extract_review_candidates"},
+        "backend/app/services/qwen_background_worker.py": {"extract_review_candidates"},
+        "backend/app/services/companion_care_updates.py": {"extract_companion_care_candidates"},
+    }
+    for relative, required_symbols in expected.items():
+        tree = ast.parse((BACKEND_ROOT / relative).read_text(encoding="utf-8"))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "app.services.qwen_gateway":
+                imported.update(alias.name for alias in node.names)
+        assert required_symbols.issubset(imported), {
+            "file": relative,
+            "missing": sorted(required_symbols - imported),
+        }
