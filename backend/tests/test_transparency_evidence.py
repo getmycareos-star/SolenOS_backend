@@ -174,11 +174,13 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert by_kind["privacy_security_retention_policy"]["status"] == "unavailable"
     assert by_kind["connected_integrations"]["status"] == "unavailable"
 
+    # Caller-supplied identifiers cannot change the bearer session's record scope.
     wrong_scope = client.get(
         f"/api/v1/transparency/evidence?person_id={secrets.token_hex(12)}",
         headers=headers,
     )
-    assert wrong_scope.status_code == 403
+    assert wrong_scope.status_code == 200
+    assert wrong_scope.json()["scope"]["person_id"] == person_id
 
 
 def test_documents_only_caregiver_receives_document_evidence_but_not_lcr_or_member_roster():
