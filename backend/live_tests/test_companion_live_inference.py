@@ -1391,6 +1391,11 @@ def test_live_qwen_companion_identity_is_consistent_across_fresh_conversations()
             assert body.get("ai_generated") is True, body
             assert body.get("written_to_lcr") is False, body
             assert body.get("persistence") == "conversation_only", body
+            coverage = body.get("lcr_context_coverage") or {}
+            assert coverage.get("identity_question_context_skipped") is True, body
+            assert body.get("source_event_ids") == [], body
+            assert body.get("source_evidence_ids") == [], body
+            assert body.get("source_document_analysis_ids") == [], body
             session_id = body.get("session_id")
             assert session_id and session_id not in seen_sessions, body
             seen_sessions.add(session_id)
