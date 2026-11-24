@@ -5593,9 +5593,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 for term in medication_terms
             ]
             medication_evidence = (
-                db.query(EvidenceModel)
+                _active_person_evidence_query(db, person_id)
                 .filter(
-                    EvidenceModel.person_id == person_id,
                     EvidenceModel.evidence_kind == "caregiver_report",
                     EvidenceModel.epistemic_status == "caregiver_reported",
                     or_(*evidence_predicates),
@@ -5654,8 +5653,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
 
     if payload.evidence_ids:
-        evidence_rows = db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
+        evidence_rows = _active_person_evidence_query(db, person_id).filter(
             EvidenceModel.id.in_(payload.evidence_ids),
         ).all()
         by_id = {str(row.id): row for row in evidence_rows}
@@ -11030,8 +11028,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         *source_evidence_ids,
         *sorted(linked_evidence_ids),
     ]))
-    evidence_rows = db.query(EvidenceModel).filter(
-        EvidenceModel.person_id == person_id,
+    evidence_rows = _active_person_evidence_query(db, person_id).filter(
         EvidenceModel.id.in_(all_claim_evidence_ids or {"__no_matching_evidence__"}),
     ).all()
     evidence_by_id = {str(item.id): item for item in evidence_rows}
@@ -11082,8 +11079,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ))
     duplicate_count_by_hash = {}
     if source_text_hashes:
-        duplicate_rows = db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
+        duplicate_rows = _active_person_evidence_query(db, person_id).filter(
             EvidenceModel.source_text_sha256.in_(source_text_hashes),
         ).all()
         for duplicate in duplicate_rows:
