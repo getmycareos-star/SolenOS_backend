@@ -6049,12 +6049,30 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # Release the read transaction before model inference; prompt fitting below
     # performs preflight-only retries and does not hold database connections.
     db.rollback()
+    qwen_audit_context = {
+        "request_id": getattr(request.state, "request_id", None),
+        "person_id": person_id,
+        "caregiver_id": caregiver_id,
+        "source_event_ids": source_event_ids,
+        "source_evidence_ids": source_evidence_ids,
+        "source_document_analysis_ids": source_document_analysis_ids,
+        "source_appointment_ids": source_appointment_ids,
+        "source_assertion_ids": source_assertion_ids,
+        "source_lcr_context_ids": source_lcr_context_ids,
+        "source_freshness_assessment_ids": source_freshness_assessment_ids,
+        "retrieval_coverage": {
+            "status": lcr_context_coverage.get("status"),
+            "retrieval_projection_complete": lcr_context_coverage.get("retrieval_projection_complete"),
+            "context_truncated": bool(shared_context_truncated),
+        },
+    }
     reply, context_lines, prompt_context_lines, prompt_context_truncated = await _qwen_chat_with_bounded_context(
         prompt_prefix,
         payload.text.strip(),
         context_lines,
         options={"temperature": 0, "num_predict": response_token_budget},
         allow_output_budget_fallback=not is_critical_safety_message(payload.text),
+        audit_context=qwen_audit_context,
     )
     shared_context_truncated = shared_context_truncated or prompt_context_truncated
     internal_source_ids = {
@@ -6174,6 +6192,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 context_lines,
                 options={"temperature": 0, "num_predict": response_token_budget},
                 allow_output_budget_fallback=not is_critical_safety_message(payload.text),
+                audit_context=qwen_audit_context,
             )
         )
         shared_context_truncated = shared_context_truncated or repair_context_truncated
@@ -6471,6 +6490,7 @@ async def _qwen_chat_with_bounded_context(
     *,
     options: dict,
     allow_output_budget_fallback: bool = True,
+    audit_context: dict | None = None,
 ) -> tuple[str, list[str], list[str], bool]:
     """Fit authorized care context before inference without dropping source families unfairly.
 
@@ -6524,6 +6544,7 @@ async def _qwen_chat_with_bounded_context(
                         {"role": "user", "content": user_text},
                     ],
                     options=attempt_options,
+                    audit_context=audit_context,
                 )
             except HTTPException as exc:
                 if exc.status_code != 413:
