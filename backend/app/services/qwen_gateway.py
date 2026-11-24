@@ -21,6 +21,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException
 
 from app.core.database import SessionLocal
+from app.models import qwen_background_job as _qwen_background_job  # noqa: F401
 from app.models.ai_output_governance import AIInferenceMetric
 from app.services.qwen_system_prompt import (
     SOLENOS_OPERATING_CONTRACT_VERSION,
