@@ -1,7 +1,13 @@
 """Regression tests for the foundational calm-and-reassuring Companion behavior."""
 
-from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
-from app.services.qwen_system_prompt import apply_solenos_system_contract
+from app.services.solenos_identity import (
+    SOLENOS_IDENTITY_CONSTITUTION,
+    SOLENOS_IDENTITY_CONSTITUTION_VERSION,
+)
+from app.services.qwen_system_prompt import (
+    SOLENOS_QWEN_CORE_SYSTEM_PROMPT,
+    apply_solenos_system_contract,
+)
 from app.services.qwen_specialized_prompts import apply_specialized_intelligence
 
 
@@ -17,6 +23,27 @@ def test_calm_personality_is_product_owned_and_present_in_global_contract():
     assert "CALM AND REASSURING — FOUNDATIONAL PERSONALITY" in SOLENOS_IDENTITY_CONSTITUTION
     assert "Create calm through clarity" in SOLENOS_IDENTITY_CONSTITUTION
     assert "Never offer false comfort" in SOLENOS_IDENTITY_CONSTITUTION
+
+
+def test_personality_version_and_global_contract_are_consistent():
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "1.1"
+    assert "CALM THROUGH CLARITY" in SOLENOS_QWEN_CORE_SYSTEM_PROMPT
+    assert "CALM AND REASSURING — FOUNDATIONAL PERSONALITY" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Assess urgency independently" in SOLENOS_IDENTITY_CONSTITUTION
+
+
+def test_every_qwen_request_receives_personality_after_workflow_instructions():
+    result = apply_solenos_system_contract([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: daily_capture"},
+        {"role": "user", "content": "Please help me record this."},
+    ])
+    system = result[0]["content"]
+    assert system.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < system.index(
+        "SOLENOS COMPANION — PRODUCT IDENTITY"
+    )
+    assert system.endswith(SOLENOS_IDENTITY_CONSTITUTION)
+    assert "CALM AND REASSURING — FOUNDATIONAL PERSONALITY" in system
+    assert result[1]["content"] == "Please help me record this."
 
 
 def test_global_qwen_contract_enforces_steady_composed_patient_behavior():
