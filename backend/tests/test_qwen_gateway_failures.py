@@ -501,14 +501,24 @@ def test_actual_qwen_transport_applies_the_exact_route_for_every_enabled_workflo
     # Include internal production workflows such as companion care updates
     # and document candidate extraction, not only public assist enum values.
     all_routed_workflows = sorted(set(ENABLED_WORKFLOWS) | set(WORKFLOW_SPECIALISTS))
+    output_contract = {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}, "review_required": {"type": "boolean"}},
+        "required": ["answer", "review_required"],
+        "additionalProperties": False,
+    }
     for workflow in all_routed_workflows:
         captured.clear()
-        answer = qwen_gateway.qwen_chat([
-            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
-            {"role": "user", "content": "Use only the supplied synthetic evidence."},
-        ])
+        answer = qwen_gateway.qwen_chat(
+            [
+                {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}."},
+                {"role": "user", "content": "Use only the supplied synthetic evidence."},
+            ],
+            response_format=output_contract,
+        )
         assert answer == "Grounded response.", workflow
         payload = captured["payload"]
+        assert payload["format"] == output_contract, workflow
         assert payload["messages"], workflow
         system = payload["messages"][0]["content"]
         assert "GLOBAL AI OPERATING CONTRACT" in system, workflow
