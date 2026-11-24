@@ -1030,7 +1030,7 @@ def test_draft_persists_idempotently_and_supports_revision_and_approval(client, 
 
     calls = {"count": 0}
 
-    def grounded_generation(records, purpose, audience):
+    def grounded_generation(records, purpose, audience, audit_context=None):
         calls["count"] += 1
         source = next(row for row in records if row["source_id"] == "persisted-handoff-fact")
         return {
@@ -1190,7 +1190,7 @@ def test_source_change_after_preparation_marks_draft_stale_and_blocks_approval(c
             },
         )
 
-    def grounded_generation(records, purpose, audience):
+    def grounded_generation(records, purpose, audience, audit_context=None):
         source = next(row for row in records if row["source_id"] == "stale-handoff-fact")
         return {
             "status": "generated",
@@ -1592,7 +1592,7 @@ def test_new_persisted_source_after_preparation_marks_draft_stale(client, monkey
             },
         )
 
-    def grounded_generation(records, purpose, audience):
+    def grounded_generation(records, purpose, audience, audit_context=None):
         source = next(row for row in records if row["source_id"] == "handoff-before-new-source")
         return {
             "status": "generated",
