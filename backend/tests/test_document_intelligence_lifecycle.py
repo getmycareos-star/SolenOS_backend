@@ -125,7 +125,7 @@ def test_exact_duplicate_documents_reuse_one_accepted_lcr_assertion(monkeypatch)
     quote = "Patient walked 20 metres with a frame."
     conflicting_evidence_id = None
 
-    def deterministic_candidates(text, *, source_event_id, source_evidence_id=None):
+    def deterministic_candidates(text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         assert quote in text
         return {
             "observations": [{
@@ -297,7 +297,7 @@ def test_document_understanding_review_accept_reject_reload_and_cross_person(mon
         "The patient ate half of lunch during the observation period.",
     ]
 
-    def fake_extract(text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         assert text == source
         return {"observations": [
             {
@@ -605,7 +605,7 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
     source = "Discharge note: Patient walked 20 metres with a frame."
     quote = "Patient walked 20 metres with a frame."
 
-    def fake_extract(text_value, *, source_event_id, source_evidence_id=None):
+    def fake_extract(text_value, *, source_event_id, source_evidence_id=None, workflow_id=None):
         return {"observations": [{
             "subject": "Patient",
             "observation": "Patient walked 20 metres with a frame.",
@@ -666,7 +666,7 @@ def test_incomplete_document_blocks_interpretation_and_candidate_acceptance(monk
     )
     calls = []
 
-    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         calls.append(page_text)
         return {"observations": [], "open_questions": []}
 
@@ -742,7 +742,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
     quote = "The patient has not been taking Metformin 1000 mg twice daily. Event date 2026-10-12. Recorded on 2026-10-13."
     source = f"[Page 1]\nMedication reconciliation: {quote}"
 
-    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         return {"observations": [{
             "subject": "Metformin",
             "observation": quote,
@@ -854,7 +854,7 @@ def test_partial_document_intelligence_resumes_remaining_pages_without_replacing
     )
     processed_pages = []
 
-    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         quote = page_text.splitlines()[-1]
         page_number = int(re.search(r"page (\d+)", quote).group(1))
         processed_pages.append(page_number)
@@ -915,7 +915,7 @@ def test_document_candidate_overflow_is_preserved_and_revealed_in_review_batches
     )
     processed_pages = []
 
-    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         page_number = int(re.search(r"page (\d+)", page_text).group(1))
         processed_pages.append(page_number)
         observations = []
@@ -997,7 +997,7 @@ def test_document_medication_assertion_conflicts_with_existing_canonical_medicat
     second_quote = "Donepezil 20 mg once daily."
     source = "[Page 1]\nMedication list: " + quote
 
-    def fake_extract(page_text, *, source_event_id, source_evidence_id=None):
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None):
         selected_quote = second_quote if second_quote in page_text else quote
         return {
             "observations": [{
