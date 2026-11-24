@@ -4989,11 +4989,11 @@ def reconstruct_recorded_state_as_of(
                 "evidence_links": linked_evidence,
                 "reviewed_by_caregiver_id": (
                     str(row.reviewed_by_caregiver_id)
-                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_review_reviewer_ids else None
+                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_assessment_reviewer_ids else None
                 ),
                 "reviewer_scope_validation": (
                     "same_person_verified"
-                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_review_reviewer_ids
+                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_assessment_reviewer_ids
                     else "reviewer_not_verified"
                 ),
                 "created_at": row.created_at.isoformat() if row.created_at else None,
