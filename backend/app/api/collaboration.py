@@ -63,6 +63,8 @@ from app.models.uncertainty import OpenQuestionAnswerEvent
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
+from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
+from app.services.qwen_system_prompt import SOLENOS_OPERATING_CONTRACT_VERSION
 from app.models.time_location import Appointment
 from app.services.qwen_workflows import QwenWorkflow
 from app.services.qwen_gateway import (
@@ -6131,6 +6133,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
+    _record_companion_output_validation(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        request_id=companion_request_id,
+        reply=reply,
+        rejection_reasons=rejection_reasons,
+        source_event_ids=source_event_ids,
+        source_evidence_ids=source_evidence_ids,
+        source_document_analysis_ids=source_document_analysis_ids,
+        source_appointment_ids=source_appointment_ids,
+        source_assertion_ids=source_assertion_ids,
+        source_lcr_context_ids=source_lcr_context_ids,
+        source_freshness_assessment_ids=source_freshness_assessment_ids,
+    )
     if rejection_reasons:
         logger.warning("Qwen repaired response rejected by grounding validators: %s", ",".join(rejection_reasons))
         raise HTTPException(
@@ -6200,6 +6217,67 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_freshness_status": source_freshness_status,
         "provider_status": "available",
     }
+
+
+def _record_companion_output_validation(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    request_id: str | None,
+    reply: str,
+    rejection_reasons: list[str],
+    source_event_ids: list[str],
+    source_evidence_ids: list[str],
+    source_document_analysis_ids: list[str],
+    source_appointment_ids: list[str],
+    source_assertion_ids: list[str],
+    source_lcr_context_ids: list[str],
+    source_freshness_assessment_ids: list[str],
+) -> None:
+    """Persist a metadata-only safety decision; never store rejected model text."""
+    rejected = bool(rejection_reasons)
+    details = {
+        "request_id": request_id,
+        "workflow_id": "companion",
+        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+        "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
+        "response_sha256": hashlib.sha256((reply or "").encode("utf-8")).hexdigest(),
+        "response_length": len(reply or ""),
+        "rejection_reasons": list(dict.fromkeys(str(value)[:120] for value in rejection_reasons))[:30],
+        "source_references": {
+            "event_ids": list(dict.fromkeys(source_event_ids))[:100],
+            "evidence_ids": list(dict.fromkeys(source_evidence_ids))[:100],
+            "document_analysis_ids": list(dict.fromkeys(source_document_analysis_ids))[:100],
+            "appointment_ids": list(dict.fromkeys(source_appointment_ids))[:100],
+            "assertion_ids": list(dict.fromkeys(source_assertion_ids))[:100],
+            "lcr_context_ids": list(dict.fromkeys(source_lcr_context_ids))[:100],
+            "freshness_assessment_ids": list(dict.fromkeys(source_freshness_assessment_ids))[:100],
+        },
+    }
+    db.add(AISafetyCheck(
+        person_id=person_id,
+        check_name="companion_response_grounding",
+        check_version=SOLENOS_OPERATING_CONTRACT_VERSION,
+        result="rejected" if rejected else "passed",
+        risk_level="high" if rejected else "none",
+        details_json=details,
+    ))
+    if rejected:
+        db.add(AIOutputRejection(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            reason_code="companion_grounding_validation_failed",
+            reason_text=",".join(details["rejection_reasons"])[:2000] or "grounding_validation_failed",
+            rejected_by="safety_system",
+            policy_version=SOLENOS_OPERATING_CONTRACT_VERSION,
+            metadata_json=details,
+        ))
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Companion output rejection audit could not be persisted")
 
 
 def _stored_response_metadata(row: ConversationMessage) -> dict:
