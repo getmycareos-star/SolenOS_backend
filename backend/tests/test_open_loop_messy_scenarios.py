@@ -11,7 +11,8 @@ from fastapi.testclient import TestClient
 
 from test_open_loops import (
     create_loop,
-    session,
+    current_loop_version,
+    session, 
     setup_function as setup_open_loop_db,
     teardown_function as teardown_open_loop_db,
 )
@@ -49,7 +50,7 @@ def test_mw01_conflicting_family_and_clinic_dates_remain_explicitly_unresolved(c
     assert loop["status"] == "open"
     assert loop["outcome_status"] != "outcome_verified"
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                         json={"text": "Looks settled", "evidence": [{"kind": "note"}]})
+                         json={"text": "Looks settled", "evidence": [{"kind": "note"}], "expected_version": loop["version"]})
     assert closed.status_code == 409
 
 
@@ -59,7 +60,7 @@ def test_mw02_partial_information_cannot_be_closed_as_complete(care_case):
                 "Family has page one; page two and the follow-up date are missing.",
                 missing_information=["page two", "follow-up date"])
     response = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                           json={"text": "We found one page", "evidence": [{"kind": "document"}]})
+                           json={"text": "We found one page", "evidence": [{"kind": "document"}], "expected_version": loop["version"]})
     assert response.status_code == 409
 
 
@@ -73,7 +74,7 @@ def test_mw03_action_taken_is_not_proof_of_intended_outcome(care_case):
     assert action.status_code == 200
     assert action.json()["outcome_status"] == "outcome_unknown"
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                         json={"text": "Call completed", "evidence": [{"kind": "call_log"}]})
+                         json={"text": "Call completed", "evidence": [{"kind": "call_log"}], "expected_version": current_loop_version(client, headers, loop["id"])})
     assert closed.status_code == 409
 
 
@@ -123,7 +124,8 @@ def test_mw07_abandoned_follow_up_is_review_state_not_resolution(care_case):
                 "No one has followed up and ownership is unclear.")
     patch = client.patch(f"/api/v1/open-loops/{loop['id']}", headers=headers,
                          json={"status": "review_abandoned",
-                               "reason": "No activity recorded; determine whether this is still needed."})
+                               "reason": "No activity recorded; determine whether this is still needed.",
+                               "expected_version": loop["version"]})
     assert patch.status_code == 200
     assert patch.json()["status"] == "review_abandoned"
     assert patch.json()["outcome_status"] != "outcome_verified"
@@ -140,7 +142,8 @@ def test_mw08_cancelled_prerequisite_does_not_unblock_dependent(care_case):
     assert edge.status_code == 200
     cancelled = client.post(f"/api/v1/open-loops/{prerequisite['id']}/cancel", headers=headers,
                             json={"text": "Provider cannot take the booking",
-                                  "evidence": [{"kind": "provider_message"}]})
+                                  "evidence": [{"kind": "provider_message"}],
+                                  "expected_version": prerequisite["version"]})
     assert cancelled.status_code == 200
     fetched = client.get(f"/api/v1/open-loops/{dependent['id']}", headers=headers).json()
     assert fetched["loop"]["status"] != "closed"
@@ -156,11 +159,13 @@ def test_mw09_reopened_loop_retains_reason_and_audit_history(care_case):
                                  "evidence": [{"kind": "delivery_message", "text": "Desk report"}]})
     assert response.status_code == 200
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                         json={"text": "Reviewed response", "evidence": [{"kind": "review"}]})
+                         json={"text": "Reviewed response", "evidence": [{"kind": "review"}],
+                               "expected_version": current_loop_version(client, headers, loop["id"])})
     assert closed.status_code == 200
     reopened = client.post(f"/api/v1/open-loops/{loop['id']}/reopen", headers=headers,
                            json={"text": "Recipient says parcel was not found; recheck",
-                                 "evidence": [{"kind": "caregiver_report"}]})
+                                 "evidence": [{"kind": "caregiver_report"}],
+                                 "expected_version": closed.json()["loop"]["version"]})
     assert reopened.status_code == 200
     history = client.get(f"/api/v1/open-loops/{loop['id']}/history", headers=headers).json()
     assert any(event["event_type"] == "reopened" for event in history)
@@ -174,7 +179,8 @@ def test_mw10_professional_input_without_source_document_cannot_be_closed(care_c
                            json={"text": "I think the nurse said Friday", "evidence": []})
     assert response.status_code == 422
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                         json={"text": "Family memory is enough", "evidence": [{"kind": "family_memory"}]})
+                         json={"text": "Family memory is enough", "evidence": [{"kind": "family_memory"}],
+                               "expected_version": current_loop_version(client, headers, loop["id"])})
     assert closed.status_code == 409
 
 
@@ -247,7 +253,8 @@ def test_mw15_incomplete_evidence_cannot_be_replaced_by_confident_wording(care_c
     assert reported.status_code == 200
     assert reported.json()["outcome_status"] == "outcome_reported"
     closed = client.post(f"/api/v1/open-loops/{loop['id']}/close", headers=headers,
-                         json={"text": "Definitely complete", "evidence": [{"kind": "assertion"}]})
+                         json={"text": "Definitely complete", "evidence": [{"kind": "assertion"}],
+                               "expected_version": current_loop_version(client, headers, loop["id"])})
     assert closed.status_code == 409
 
 
