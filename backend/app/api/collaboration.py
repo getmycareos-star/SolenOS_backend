@@ -7000,7 +7000,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"\b(?:i miss (?:her|him|them)|i(?:'m| am) grieving|"
         r"i feel like i(?:'m| am) losing (?:her|him|them)|"
         r"since (?:she|he|they) died|after (?:she|he|they) died|"
-        r"(?:she|he|they) passed away|i can't believe (?:she|he|they) are gone)\b",
+        r"(?:she|he|they) passed away|i can't believe (?:she|he|they) (?:are|is) gone)\b",
         text,
     )
     self_blame = re.search(
@@ -7036,7 +7036,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
         r"please correct (?:that|the time|the entry|the record)|"
         r"i(?:'m| am) correcting|that report was withdrawn|"
         r"this report was withdrawn|that entry was withdrawn|"
-        r"the earlier entry was corrected)\b",
+        r"the earlier entry was corrected|keep (?:the )?(?:earlier|original|previous) version visible|show both versions|preserve (?:the )?(?:earlier|original|previous) version)\b",
         text,
     )
     vague = re.fullmatch(
