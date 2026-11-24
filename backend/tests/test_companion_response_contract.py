@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 from contextlib import nullcontext
+from zoneinfo import ZoneInfo
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
@@ -61,6 +62,30 @@ def create_session(client):
     assert response.status_code == 201, response.text
     data = response.json()
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
+
+
+def test_greeting_context_uses_authenticated_caregiver_name_and_saved_local_time():
+    caregiver = SimpleNamespace(name="Mary Johnson", timezone="America/New_York")
+    local_now = datetime(2026, 11, 24, 9, 15, tzinfo=ZoneInfo("America/New_York"))
+
+    context = collaboration._trusted_companion_greeting_context(caregiver, now=local_now)
+
+    assert 'Authenticated caregiver first name: "Mary"' in context
+    assert "9:15 AM (morning)" in context
+    assert "America/New_York" in context
+
+
+def test_greeting_context_does_not_treat_default_utc_as_caregiver_local_time():
+    caregiver = SimpleNamespace(name="Mary Johnson", timezone="UTC")
+
+    context = collaboration._trusted_companion_greeting_context(
+        caregiver,
+        now=datetime(2026, 11, 24, 9, 15, tzinfo=timezone.utc),
+    )
+
+    assert 'Authenticated caregiver first name: "Mary"' in context
+    assert "local time" not in context.casefold()
+    assert "morning" not in context.casefold()
 
 
 def test_companion_rejects_fabricated_long_source_quotations():
