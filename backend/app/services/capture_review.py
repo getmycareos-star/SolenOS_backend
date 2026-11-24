@@ -664,7 +664,11 @@ def backfill_structured_daily_capture_observations(
     }
     evidence_rows = (
         db.query(Evidence)
-        .filter(Evidence.person_id == person_id, Evidence.id.in_(evidence_ids))
+        .filter(
+            Evidence.person_id == person_id,
+            Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
+        )
         .all()
         if evidence_ids else []
     )
