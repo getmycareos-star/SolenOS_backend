@@ -934,7 +934,6 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
                 "/api/v1/conversation/message",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
-                    "person_id": person_id,
                     "text": "What has been recorded about sleep?",
                     "client_turn_id": str(uuid.uuid4()),
                 },
