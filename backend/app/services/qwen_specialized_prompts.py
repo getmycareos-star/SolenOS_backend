@@ -307,6 +307,7 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "personal_preferences_distress_context": ("lcr_retrieval", "companion"),
     "caregiver_strain_support": ("lcr_retrieval", "caregiver_continuity"),
     "document_validity_renewal": ("document_intelligence", "event_lifecycle"),
+    "record_lifecycle": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
     "companion_care_update": ("care_extraction",),
     "caregiver_orientation": ("lcr_retrieval", "companion"),
 }
