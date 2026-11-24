@@ -1032,6 +1032,16 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 rationale="Bounded review interval for sleep evidence.",
                 created_by_caregiver_id=caregiver_id,
             )
+            foreign_freshness_policy = EvidenceFreshnessPolicy(
+                id=f"asof-foreign-freshness-policy-{suffix}",
+                person_id=other_person_id,
+                domain_key="sleep",
+                policy_version="freshness-v1",
+                max_age_days=30,
+                historical_after_days=90,
+                rationale="Other person's bounded review interval.",
+                created_by_caregiver_id=other_caregiver_id,
+            )
             completeness_policy = EvidenceCompletenessPolicy(
                 id=f"asof-completeness-policy-{suffix}",
                 person_id=person_id,
@@ -1041,6 +1051,16 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 required_fields=["source", "event_time"],
                 rationale="Required provenance for a longitudinal sleep answer.",
                 created_by_caregiver_id=caregiver_id,
+            )
+            foreign_completeness_policy = EvidenceCompletenessPolicy(
+                id=f"asof-foreign-completeness-policy-{suffix}",
+                person_id=other_person_id,
+                domain_key="sleep",
+                purpose_key="companion_response",
+                policy_version="completeness-v1",
+                required_fields=["source", "event_time"],
+                rationale="Other person's required provenance.",
+                created_by_caregiver_id=other_caregiver_id,
             )
             claim = CareAssertion(
                 id=f"asof-claim-{suffix}",
@@ -1074,6 +1094,22 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 created_by_caregiver_id=caregiver_id,
                 recorded_at=before + timedelta(minutes=30),
             )
+            foreign_claim = CareAssertion(
+                id=f"asof-foreign-claim-{suffix}",
+                person_id=other_person_id,
+                subject_type="care_recipient",
+                subject_id=other_person_id,
+                field="sleep",
+                assertion_kind="current_state",
+                asserted_value="Other caregiver report.",
+                source_label="Other caregiver report",
+                source_text="Other caregiver reported a sleep change.",
+                evidence_ids=[foreign_evidence.id],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=other_caregiver_id,
+                recorded_at=before,
+            )
             foreign_event = CareEvent(
                 id=f"asof-foreign-event-{suffix}",
                 person_id=other_person_id,
@@ -1087,8 +1123,9 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 time_provenance="caregiver_reported",
             )
             db.add_all([
-                evidence, foreign_evidence, freshness_policy, completeness_policy,
-                claim, claim_v2, foreign_event,
+                evidence, foreign_evidence, freshness_policy, foreign_freshness_policy,
+                completeness_policy, foreign_completeness_policy, claim, claim_v2,
+                foreign_claim, foreign_event,
             ])
             db.flush()
             db.add_all([
@@ -1134,7 +1171,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 EvidenceReviewRecord(
                     id=f"asof-review-foreign-{suffix}",
                     person_id=other_person_id,
-                    evidence_id=evidence.id,
+                    evidence_id=foreign_evidence.id,
                     review_type="reliability",
                     outcome="supported",
                     rationale="Cross-person review must not appear.",
@@ -1188,8 +1225,8 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 EvidenceClaimAssessment(
                     id=f"asof-claim-assessment-foreign-{suffix}",
                     person_id=other_person_id,
-                    claim_id=claim.id,
-                    claim_version=4,
+                    claim_id=foreign_claim.id,
+                    claim_version=1,
                     status="supported",
                     rationale="Cross-person assessment must not appear.",
                     policy_version="claim-v1",
@@ -1229,7 +1266,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     id=f"asof-freshness-foreign-{suffix}",
                     person_id=other_person_id,
                     evidence_id=foreign_evidence.id,
-                    policy_id=freshness_policy.id,
+                    policy_id=foreign_freshness_policy.id,
                     policy_version="freshness-v1",
                     freshness_status="current",
                     source_time=before,
@@ -1299,16 +1336,16 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 EvidenceCompletenessAssessment(
                     id=f"asof-completeness-foreign-{suffix}",
                     person_id=other_person_id,
-                    policy_id=completeness_policy.id,
+                    policy_id=foreign_completeness_policy.id,
                     policy_version="completeness-v1",
                     subject_type="evidence",
-                    subject_id=evidence.id,
+                    subject_id=foreign_evidence.id,
                     assessment_status="complete",
                     required_fields=["source", "event_time"],
                     satisfied_fields=["source", "event_time"],
                     missing_fields=[],
                     field_evidence_json="{}",
-                    evidence_ids=[evidence.id],
+                    evidence_ids=[foreign_evidence.id],
                     rationale="Cross-person assessment must not appear.",
                     assessment_basis="linked_source_coverage_only",
                     semantic_sufficiency="not_automatically_verified",
