@@ -115,8 +115,9 @@ def build_companion_caregiver_context(
     """Return a JSON-safe context for one authenticated caregiver/person pair.
 
     A database default of UTC is not treated as a caregiver-confirmed local
-    timezone. The caregiver must have explicitly configured it. Conflicting
-    legacy notification settings suppress local-time claims until reconciled.
+    timezone. The caregiver must have explicitly configured it. Notification
+    delivery timezone settings are independent and never establish or override
+    the Companion timezone.
     """
     caregiver_id = str(getattr(caregiver, "id", "") or "")
     person_id = str(getattr(caregiver, "person_id", "") or "")
