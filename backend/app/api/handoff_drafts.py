@@ -983,6 +983,16 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
             "unknown_source_count": 1,
         }
     source_records = snapshot.get("source_records", [])
+    event_source_ids = [
+        str(item.get("source_id"))
+        for item in source_records
+        if isinstance(item, dict)
+        and item.get("source_table") == "care_events"
+        and item.get("source_id")
+    ]
+    correction_lineage_by_event = _care_event_correction_fingerprint_snapshots(
+        db, draft.person_id, event_source_ids,
+    )
     stale = []
     unknown = []
     try:
@@ -1032,8 +1042,9 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     "recorded_at": _iso(row.recorded_at), "updated_by_caregiver_id": row.updated_by_caregiver_id,
                 } for row in assertion_rows if str(row.source_event_id or "") == str(event.id) or any(str(value) in [str(evidence_id) for evidence_id in evidence_ids] for value in (row.evidence_ids or []))]
                 observation_snapshot = _evidence_observation_snapshot(db, draft.person_id, evidence_ids)
-                correction_lineage = _care_event_correction_fingerprint_snapshot(
-                    db, draft.person_id, str(event.id),
+                correction_lineage = correction_lineage_by_event.get(
+                    source_id,
+                    {"status": "unavailable", "corrections": [], "relationships": []},
                 )
                 if correction_lineage.get("status") != "checked":
                     unknown.append(f"{source_table}:{source_id}:correction_lineage")
@@ -1120,8 +1131,9 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 # Use the same canonical JSONList representation as the snapshot writer.
                 fingerprint_row = _normalize_reflected_fingerprint_row(dict(row))
                 if source_table == "care_events":
-                    correction_lineage = _care_event_correction_fingerprint_snapshot(
-                        db, draft.person_id, source_id,
+                    correction_lineage = correction_lineage_by_event.get(
+                        source_id,
+                        {"status": "unavailable", "corrections": [], "relationships": []},
                     )
                     if correction_lineage.get("status") != "checked":
                         unknown.append(f"{source_table}:{source_id}:correction_lineage")
