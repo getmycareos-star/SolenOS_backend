@@ -50,7 +50,15 @@ def _create_session(client: TestClient, label: str) -> dict:
         json={"caregiver_name": label},
     )
     assert response.status_code == 201, response.text
-    return response.json()
+    session = response.json()
+    preferences = client.patch(
+        "/api/v1/caregiver/preferences",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"timezone": "America/New_York"},
+    )
+    assert preferences.status_code == 200, preferences.text
+    assert preferences.json()["timezone_configured"] is True
+    return session
 
 
 def _record_daily_care(client: TestClient, session: dict, detail: str) -> str:
