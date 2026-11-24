@@ -2540,7 +2540,7 @@ def test_daily_care_handoff_fingerprint_changes_when_correction_lineage_changes(
         assert before_lineage["corrections"] == []
 
         correction = Correction(
-            id="handoff-lineage-fingerprint-correction",
+            id=str(uuid.uuid4()),
             person_id=person_id,
             target_type="care_event",
             target_id=event.id,
@@ -2568,7 +2568,7 @@ def test_daily_care_handoff_fingerprint_changes_when_correction_lineage_changes(
         correction.processing_attempts = 1
         db.flush()
         db.add(CareRecordRelationship(
-            id="handoff-lineage-fingerprint-relationship",
+            id=str(uuid.uuid4()),
             person_id=person_id,
             source_type="correction",
             source_id=correction.id,
