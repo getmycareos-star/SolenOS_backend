@@ -2264,3 +2264,90 @@ def test_qwen_support_workflow_marks_corrected_event_as_historical(monkeypatch):
     finally:
         teardown()
 
+
+
+def test_anchored_lcr_event_assistance_fits_bounded_qwen_context(monkeypatch):
+    client, token, person_id, caregiver_id, _, _ = setup_client(monkeypatch)
+    try:
+        import os
+        import app.api.collaboration as collaboration
+        from app.services.qwen_gateway import (
+            _estimate_prompt_tokens,
+            apply_solenos_system_contract,
+            apply_specialized_intelligence,
+        )
+
+        now = datetime.now(timezone.utc)
+        anchored_id = "anchored-lcr-event-context-budget"
+        db = TestingSessionLocal()
+        try:
+            db.add(CareEvent(
+                id=anchored_id,
+                person_id=person_id,
+                event_type="daily_observation",
+                status="recorded",
+                occurred_at=now,
+                recorded_at=now,
+                title="Sleep change",
+                description="The caregiver reports that sleep has worsened and the person woke repeatedly overnight.",
+                created_by_caregiver_id=caregiver_id,
+            ))
+            for index in range(40):
+                db.add(CareEvent(
+                    id=f"historical-sleep-event-{index}",
+                    person_id=person_id,
+                    event_type="daily_observation",
+                    status="recorded",
+                    occurred_at=now - timedelta(days=index + 1),
+                    recorded_at=now - timedelta(days=index + 1),
+                    title=f"Sleep observation {index}",
+                    description=(
+                        "Caregiver report: sleep was interrupted overnight and the person woke several times. "
+                        "This is a historical report, not a verified clinical finding. " * 3
+                    ),
+                    created_by_caregiver_id=caregiver_id,
+                ))
+            db.commit()
+        finally:
+            db.close()
+
+        captured = []
+
+        def fake_qwen(messages, **kwargs):
+            captured.append(messages)
+            return "The saved caregiver report describes repeated waking overnight. The record does not establish a cause."
+
+        monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "workflow": "living_care_record",
+                "source_event_id": anchored_id,
+                "text": (
+                    "Interpret this newly saved caregiver-reported event using only its authorized "
+                    "Living Care Record context. Preserve source attribution and uncertainty."
+                ),
+            },
+        )
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert anchored_id in result["source_event_ids"]
+        assert result["written_to_lcr"] is False
+        prompt_messages = apply_solenos_system_contract(
+            apply_specialized_intelligence(captured[-1])
+        )
+        estimate = _estimate_prompt_tokens(prompt_messages)
+        num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
+        num_predict = max(64, min(int(os.getenv("OLLAMA_NUM_PREDICT", "96")), 1024))
+        input_budget = max(0, num_ctx - num_predict - 128)
+        assert estimate <= input_budget, {
+            "estimated_prompt_tokens": estimate,
+            "input_token_budget": input_budget,
+        }
+        prompt_text = "\\n".join(message["content"] for message in prompt_messages)
+        assert f"Recorded care event [{anchored_id}]" in prompt_text
+        assert "Recorded appointment [" not in prompt_text
+        assert "document_extractions" not in prompt_text
+    finally:
+        teardown()
