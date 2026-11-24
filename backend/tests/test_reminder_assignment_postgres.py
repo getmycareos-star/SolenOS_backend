@@ -66,6 +66,25 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         },
     )
     assert evidence.status_code == 200, evidence.text
+    open_loop_id = f"shared-action-{suffix}"
+    with SessionLocal() as db:
+        db.add(OpenLoopRecord(
+            id=open_loop_id,
+            person_id=person_id,
+            caregiver_id=primary_id,
+            loop_type="follow_up",
+            title="Call the clinic to confirm the appointment details",
+            description="The saved caregiver report records a request for a follow-up call.",
+            status="open",
+            source_fingerprint=f"shared-action-fingerprint-{suffix}",
+            source_type="caregiver_report",
+            source_id=evidence.json()["id"],
+            evidence=[{"evidence_id": evidence.json()["id"]}],
+            request_text="Call the clinic to confirm the appointment details.",
+            version=1,
+        ))
+        db.commit()
+
     action_due_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     approved_action = client.post(
         f"/api/v1/registered-actions/{person_id}/approve",
@@ -73,7 +92,8 @@ def test_postgres_reminder_assignment_history_and_due_notification_recipient():
         json={
             "explicit_approval": True,
             "idempotency_key": f"shared-action-{suffix}",
-            "suggestion_id": f"open-loop:shared-action-{suffix}",
+            "suggestion_id": f"open_loop_records:{open_loop_id}",
+            "suggestion_version": 1,
             "title": "Call the clinic to confirm the appointment details",
             "action_type": "call",
             "rationale": "The saved caregiver report records a request for a follow-up call.",
