@@ -9292,7 +9292,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     if value.get("status") == "partial" or value.get("returned_history_complete") is False
                     else None
                 ),
-                "has_more": bool(value.get("has_more"),
+                "has_more": bool(value.get("has_more")),
             }
             for name, value in sorted(source_coverage.items())
             if (
