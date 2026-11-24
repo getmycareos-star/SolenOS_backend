@@ -184,7 +184,7 @@ def test_each_runtime_workflow_leaves_its_configured_budget_for_care_evidence():
         if "companion" in domains:
             evidence_chars, output_tokens = 3000, 256
         elif workflow == "daily_care_intelligence":
-            evidence_chars, output_tokens = 1800, 320
+            evidence_chars, output_tokens = 1800, 256
         elif workflow == "delta_engine":
             evidence_chars, output_tokens = 1200, 512
         else:
