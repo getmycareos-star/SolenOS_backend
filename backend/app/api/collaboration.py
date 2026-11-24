@@ -6125,25 +6125,42 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             line for line in context_lines
             if not line.startswith(("Canonical LCR retrieval coverage: ", "Canonical LCR prompt coverage: "))
         ]
-    prompt_prefix = (
-        f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
-        "You are SolenOS Companion, the AI care-continuity companion inside SolenOS. The Living Care Record and caregiver "
-        "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
-        f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. "
-        "For material care facts, preserve exact source wording and its reporter, event time, negation, uncertainty, and reported/observed/verified status. "
-        "Do not paraphrase a care fact into a stronger or different assertion; use an explicitly attributed exact source quote when needed. "
-        "If exact support is unavailable, say the supplied information does not establish the fact. Never fabricate people, events, "
-        "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
-        "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
-        "Never expose internal record identifiers, UUIDs, source IDs or opaque keys; refer to records by human-readable titles, dates and statuses. "
-        f"RESPONSE LENGTH CONTRACT: {response_length_instruction} Preserve material source distinctions, uncertainty, conflicts and missing-history limits. "
-        "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
-        "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
-        "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
-        "Return only the helpful response text.\n\n"
-        + ("\n".join(canonical_coverage_lines) + "\n\n" if canonical_coverage_lines else "")
-        + "Authorized context (may be empty):\n"
-    )
+    if focused_event_assist:
+        # This post-save interpretation is deliberately narrow. The gateway
+        # appends the shared operating and specialist contracts; repeating
+        # those rules here made first-visit requests exceed the 4K context
+        # window even after all optional record context had been removed.
+        prompt_prefix = (
+            f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
+            "You are SolenOS Companion. The caregiver and Living Care Record remain authoritative. "
+            f"Task: {guidance} Use only supplied, authorized context. "
+            "Preserve exact source wording, reporter, event and recorded times, negation, uncertainty, conflicts and corrections. "
+            "Separate caregiver reports from verified information. Do not infer diagnosis or cause, strengthen a claim, or invent details. "
+            "State when the available history is incomplete. Never write to the Care Record or claim a record change. "
+            "Use concise, plain English and return only the helpful response.\\n\\n"
+            + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
+            + "Authorized context (may be empty):\\n"
+        )
+    else:
+        prompt_prefix = (
+            f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
+            "You are SolenOS Companion, the AI care-continuity companion inside SolenOS. The Living Care Record and caregiver "
+            "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
+            f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. "
+            "For material care facts, preserve exact source wording and its reporter, event time, negation, uncertainty, and reported/observed/verified status. "
+            "Do not paraphrase a care fact into a stronger or different assertion; use an explicitly attributed exact source quote when needed. "
+            "If exact support is unavailable, say the supplied information does not establish the fact. Never fabricate people, events, "
+            "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
+            "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
+            "Never expose internal record identifiers, UUIDs, source IDs or opaque keys; refer to records by human-readable titles, dates and statuses. "
+            f"RESPONSE LENGTH CONTRACT: {response_length_instruction} Preserve material source distinctions, uncertainty, conflicts and missing-history limits. "
+            "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
+            "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
+            "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
+            "Return only the helpful response text.\\n\\n"
+            + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
+            + "Authorized context (may be empty):\\n"
+        )
     # Release the read transaction before model inference; prompt fitting below
     # performs preflight-only retries and does not hold database connections.
     db.rollback()
