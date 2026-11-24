@@ -1,9 +1,10 @@
 import asyncio
 import json
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Table, Text, UniqueConstraint, create_engine, func, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
