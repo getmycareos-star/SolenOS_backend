@@ -40,6 +40,8 @@ def test_personality_and_product_identity_versions_are_independently_versioned()
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.3"
     assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.2"
     assert "Version: 2.3" in SOLENOS_PERSONALITY_CONSTITUTION
+    from app.services.solenos_personality import SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
+    assert "Version: 2.3" in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
 
 
 def test_every_qwen_request_receives_the_complete_personality_after_workflow_instructions():
