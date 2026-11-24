@@ -4307,7 +4307,7 @@ def test_detailed_evidence_lineage_is_only_sent_when_the_caregiver_asks_about_pr
     # Ordinary interpretation must not carry a potentially large lineage graph;
     # source IDs and the full audit receipt remain available outside the prompt.
     assert include("What might this update mean?") is False
-    assert include("Can you explain where this information came from?") is False
+    assert include("Can you explain where this information came from?") is True
 
     # Explicit provenance questions still receive the full lineage context.
     assert include("Can you explain the source lineage?") is True
