@@ -68,15 +68,24 @@ def test_workflow_classifier_does_not_load_specialists_from_its_workflow_list():
 
 def test_explicit_solenos_workflow_ids_activate_their_specialists():
     cases = {
-        "open_loops care_coverage_gap": "caregiver_continuity",
-        "medication_day": "medication_continuity",
-        "record_lifecycle": "event_lifecycle",
-        "delta_engine care_situation_change": "longitudinal_reasoning",
-        "living_care_record care_history_search": "lcr_retrieval",
+        "daily_capture": ("care_extraction",),
+        "daily_care_intelligence": ("lcr_retrieval", "longitudinal_reasoning", "care_extraction"),
+        "care_claim_extraction": ("care_extraction",),
+        "care_understanding": ("care_extraction",),
+        "document_candidate_extraction": ("document_intelligence", "care_extraction"),
+        "open_loops": ("lcr_retrieval", "caregiver_continuity"),
+        "medication_day": ("lcr_retrieval", "medication_continuity", "reconciliation"),
+        "record_lifecycle": ("lcr_retrieval", "event_lifecycle", "reconciliation"),
+        "delta_engine": ("lcr_retrieval", "longitudinal_reasoning", "reconciliation"),
+        "living_care_record": ("lcr_retrieval", "companion"),
+        "handoff": ("lcr_retrieval", "handoff_appointment"),
+        "caregiver_orientation": ("lcr_retrieval", "companion"),
     }
     for workflow, expected in cases.items():
-        selected = select_specialized_domains([{"role": "system", "content": workflow}])
-        assert expected in selected
+        selected = select_specialized_domains([
+            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"}
+        ])
+        assert selected == expected
 
 
 def test_no_specialist_is_loaded_for_unclassified_generic_inference():
