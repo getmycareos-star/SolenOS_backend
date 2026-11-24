@@ -6302,17 +6302,22 @@ def _care_history_recall_context_lines(
             item for item in linked_corrections
             if item["processing_status"].casefold() == "completed" and not item["linked_to_original"]
         ]
+        pending_statuses = {"pending", "processing", "retrying", "retry_scheduled"}
         pending = [
             item for item in linked_corrections
-            if item["processing_status"].casefold() != "completed"
+            if item["processing_status"].casefold() in pending_statuses
+        ]
+        unresolved_corrections = [
+            item for item in linked_corrections
+            if item["processing_status"].casefold() not in {"completed", *pending_statuses}
         ]
         event_status = str(row.status or "").casefold()
         if event_status in {"withdrawn", "superseded", "invalidated", "retracted", "deleted"}:
             information_status = "historical_event"
             interpretation_limit = "This original caregiver report was withdrawn or superseded. Keep it as history, not as the current account."
-        elif not correction_lookup_complete or completed_unlinked:
+        elif not correction_lookup_complete or completed_unlinked or unresolved_corrections:
             information_status = "event_currentness_unknown"
-            interpretation_limit = "Correction history could not be fully checked. Do not present this original report as the latest account."
+            interpretation_limit = "Correction history could not be fully checked or a correction failed. Do not present this original report as the latest account."
         elif pending:
             information_status = "event_correction_pending"
             interpretation_limit = "A caregiver correction is still processing. The original wording remains historical until the correction is applied."
