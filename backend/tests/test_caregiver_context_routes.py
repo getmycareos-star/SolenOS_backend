@@ -718,6 +718,33 @@ def test_change_item_appends_same_person_fact_revision():
               "provenance_id": provenance.json()["id"]},
     )
     assert second.status_code == 201, second.text
+
+    # The canonical current fact and both append-only revision projections
+    # must describe the same saved correction, not merely a fabricated audit value.
+    facts_table = Base.metadata.tables["care_facts"]
+    db = TestingSessionLocal()
+    try:
+        current_fact_value = db.execute(
+            select(facts_table.c.fact_value).where(
+                facts_table.c.id == fact.json()["id"],
+                facts_table.c.person_id == session["person"]["id"],
+            )
+        ).scalar_one()
+        assert current_fact_value == "needs daily support with supervision"
+    finally:
+        db.close()
+
+    stale = client.post(
+        "/api/v1/care-continuity/record-change-items",
+        headers=headers,
+        json={"change_set_id": change_set.json()["id"], "target_type": "care_fact",
+              "target_id": fact.json()["id"], "operation": "update",
+              "before_value": {"fact_value": "needs daily support"},
+              "after_value": {"fact_value": "stale overwrite"},
+              "provenance_id": provenance.json()["id"]},
+    )
+    assert stale.status_code == 409, stale.text
+
     revisions = client.get("/api/v1/care-continuity/fact-revisions", headers=headers)
     assert revisions.status_code == 200, revisions.text
     assert [row["revision_number"] for row in revisions.json()] == [3, 2, 1]
