@@ -5105,7 +5105,17 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             for evidence_id in canonical.get("evidence_ids") or []:
                 evidence_id = str(evidence_id)
                 previous = evidence_event_lineage.get(evidence_id)
-                if previous is None or lineage["correction_lineage_status"] != "checked":
+                currentness_rank = {
+                    "caregiver_reported": 0,
+                    "historical_event": 1,
+                    "event_correction_pending": 2,
+                    "event_currentness_unknown": 3,
+                    "unprocessed_capture": 3,
+                }
+                if previous is None or (
+                    currentness_rank.get(lineage["information_status"], 3)
+                    > currentness_rank.get(previous["information_status"], 3)
+                ):
                     evidence_event_lineage[evidence_id] = lineage
 
         for event in events:
