@@ -3592,7 +3592,7 @@ def test_appointment_brief_includes_old_event_when_its_correction_is_recent(clie
     test_client, owner, _ = client
     headers = {"Authorization": f"Bearer {owner['access_token']}"}
     now = datetime.now(timezone.utc)
-    event_id = "appointment-recent-correction-old-event"
+    event_id = str(uuid.uuid4())
     correction_id = "appointment-recent-correction"
     with TestSessionLocal() as db:
         db.add(Appointment(
