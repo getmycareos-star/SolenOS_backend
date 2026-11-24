@@ -210,3 +210,60 @@ def test_shared_enforcement_precedes_identity_and_cannot_be_weakened_by_speciali
     identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert specialist_index < enforcement_index < personality_index < identity_index
     assert "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item" in system
+
+
+LIVE_PERSONALITY_SCENARIO_COVERAGE = {
+    "steady": (
+        "test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_or_reasking",
+        "test_live_qwen_anger_loneliness_medication_uncertainty_and_future_fear",
+    ),
+    "empathetic": (
+        "test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led",
+    ),
+    "observant": (
+        "test_live_qwen_reconstructs_three_month_sleep_history_from_paraphrased_events",
+        "test_live_qwen_companion_retrieves_the_corrected_lcr_event_without_promoting_original_wording",
+    ),
+    "thoughtful": (
+        "test_live_qwen_respects_low_capacity_caregiver_response_contract",
+        "test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source",
+    ),
+    "patient": (
+        "test_live_qwen_adapts_to_overload_pushback_and_distress_without_fabricating_or_reasking",
+        "test_live_qwen_grief_self_blame_and_positive_moments_remain_caregiver_led",
+    ),
+    "honest": (
+        "test_live_qwen_companion_retrieves_the_corrected_lcr_event_without_promoting_original_wording",
+        "test_live_qwen_surfaces_only_the_source_validated_professional_question",
+    ),
+    "proactive": (
+        "test_live_qwen_surfaces_only_the_source_validated_professional_question",
+        "test_live_qwen_handoff_draft_selects_an_exact_daily_care_lcr_source",
+    ),
+    "reassuring": (
+        "test_live_qwen_anger_loneliness_medication_uncertainty_and_future_fear",
+        "test_live_qwen_overwhelm_response_after_mixed_care_history",
+    ),
+    "respectful": (
+        "test_live_qwen_support_reads_shared_lcr_without_peer_document_leakage",
+        "test_live_qwen_concurrent_authenticated_companion_requests_remain_person_scoped",
+    ),
+    "dependable": (
+        "test_live_qwen_companion_retrieves_the_corrected_lcr_event_without_promoting_original_wording",
+        "test_live_qwen_companion_retrieves_a_paraphrased_event_from_the_second_history_page",
+    ),
+}
+
+
+def test_all_ten_personality_characteristics_have_live_qwen_scenario_coverage():
+    repository_root = Path(__file__).resolve().parents[2]
+    live_suite = repository_root / "backend" / "live_tests" / "test_companion_live_inference.py"
+    workflow = repository_root / ".github" / "workflows" / "companion-live-inference.yml"
+    live_source = live_suite.read_text(encoding="utf-8")
+    workflow_source = workflow.read_text(encoding="utf-8")
+    assert "backend/live_tests/test_companion_live_inference.py" in workflow_source
+    assert set(LIVE_PERSONALITY_SCENARIO_COVERAGE) == set(SOLENOS_PERSONALITY_CHARACTERISTICS)
+    for trait, scenarios in LIVE_PERSONALITY_SCENARIO_COVERAGE.items():
+        assert SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["verification_cases"], trait
+        for scenario in scenarios:
+            assert f"def {scenario}(" in live_source, (trait, scenario)
