@@ -630,6 +630,11 @@ def _expanded_search_terms(terms: list[str]) -> list[str]:
 def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, str]:
     if source_name == "events":
         event_status = str(item.get("status") or "").casefold()
+        if item.get("correction_lineage_status") in {"unavailable_schema", "failed"}:
+            return (
+                "event_currentness_unknown",
+                "The correction history for this event could not be checked. Preserve the original report, but do not assume it is the latest account.",
+            )
         if item.get("superseded_by_corrections"):
             return (
                 "historical_event",
@@ -639,11 +644,6 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
             return (
                 "event_correction_pending",
                 "A caregiver correction has been saved but has not finished processing. The original report remains in history; do not present it as the final current account until the correction is applied.",
-            )
-        if item.get("correction_lineage_status") in {"unavailable_schema", "failed"}:
-            return (
-                "event_currentness_unknown",
-                "The correction history for this event could not be checked. Preserve the original report, but do not assume it is the latest account.",
             )
         if event_status in {"invalidated", "superseded", "retracted", "withdrawn", "deleted"}:
             return (
