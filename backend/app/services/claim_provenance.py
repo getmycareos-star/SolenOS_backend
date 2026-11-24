@@ -270,25 +270,25 @@ def build_distinct_event_aggregate(
 
 
 _SOURCE_ATTRIBUTION_RE = re.compile(
-    r"\\b(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
-    r"[A-Z][A-Za-z'’-]{1,30})\\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated)\\b",
+    r"\b(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
+    r"[A-Z][A-Za-z'’-]{1,30})\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated)\b",
     re.IGNORECASE,
 )
 _CLAIM_ATTRIBUTION_RE = re.compile(
-    r"\\b(?:according to|reported by|observed by|documented by|"
+    r"\b(?:according to|reported by|observed by|documented by|"
     r"(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
-    r"[A-Z][A-Za-z'’-]{1,30})\\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated))\\b",
+    r"[A-Z][A-Za-z'’-]{1,30})\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated))\b",
     re.IGNORECASE,
 )
 _CLAIM_NEGATION_RE = re.compile(
-    r"\\b(?:no|not|never|without|didn't|doesn't|wasn't|weren't|isn't|aren't|"
-    r"cannot|can't|denies|denied|negative|neither|nor)\\b",
+    r"\b(?:no|not|never|without|didn't|doesn't|wasn't|weren't|isn't|aren't|"
+    r"cannot|can't|denies|denied|negative|neither|nor)\b",
     re.IGNORECASE,
 )
 _SOURCE_NEGATION_RE = _CLAIM_NEGATION_RE
 _CLAIM_UNCERTAINTY_RE = re.compile(
-    r"\\b(?:may|might|could|possibly|possible|possibly|uncertain|unclear|"
-    r"not sure|suspected|suspect|appears|appeared|seems|seemed|perhaps|likely|unlikely)\\b",
+    r"\b(?:may|might|could|possibly|possible|possibly|uncertain|unclear|"
+    r"not sure|suspected|suspect|appears|appeared|seems|seemed|perhaps|likely|unlikely)\b",
     re.IGNORECASE,
 )
 _SOURCE_UNCERTAINTY_RE = _CLAIM_UNCERTAINTY_RE
@@ -327,7 +327,7 @@ def _claim_preserves_source_qualifiers(statement: str, source: dict[str, Any]) -
         # Evaluate only the current clause; a contrast such as "but" starts a
         # new proposition and must not inherit an earlier negation or hedge.
         clause_prefix = re.split(
-            r"[.!?;]\\s*|\\b(?:but|however|although|whereas)\\b",
+            r"[.!?;]\s*|\b(?:but|however|although|whereas)\b",
             prefix,
         )[-1]
         if _SOURCE_NEGATION_RE.search(clause_prefix) and not _CLAIM_NEGATION_RE.search(statement):
