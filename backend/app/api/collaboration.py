@@ -5466,6 +5466,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "conflicts", "contradictions", "uncertainties", "uncertainty_assessments",
             "open_questions",
         }
+        if not can_view_documents:
+            # Evidence and observation rows can contain original document text.
+            # Do not add them to a focused model context without document access.
+            focused_event_sources.discard("evidence")
+            focused_event_sources.discard("evidence_observations")
         focused_event_query = (
             f"{anchored_event.title or ''} {anchored_event.description or ''}".strip()[:1000]
             if focused_event_assist else None
@@ -5522,7 +5527,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         canonical_sources = (
             (
                 "living_record", "events", "evidence", "evidence_observations",
-                "facts", "assertions", "corrections", "conflicts", "contradictions",
+                "evidence_freshness_assessments", "facts", "assertions", "corrections", "conflicts", "contradictions",
                 "uncertainties", "uncertainty_assessments", "open_questions",
             )
             if focused_event_assist else (
