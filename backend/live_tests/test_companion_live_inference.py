@@ -393,8 +393,9 @@ def test_live_qwen_companion_retrieves_the_corrected_lcr_event_without_promoting
             for message in captured_messages[-1]
         )
         assert "historical_event" in serialized_prompt
+        assert "original_text" in serialized_prompt
+        assert "linked_to_original" in serialized_prompt
         assert "Caregiver did not observe Mum sleeping poorly." in serialized_prompt
-        assert "Caregiver correction; original report retained." in serialized_prompt
 
         answer = str(body.get("reply") or "").casefold()
         assert any(term in answer for term in ("did not observe", "not observed", "correction", "corrected")), body
