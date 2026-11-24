@@ -231,6 +231,17 @@ def test_accepted_care_assertion_withdrawal_preserves_history_and_rejects_stale_
             for item in current_care.json().get("items", [])
         ), "withdrawn assertions must remain in history but disappear from the current-care projection"
 
+        assertion_history = client.get(
+            f"/api/v1/care-continuity/assertions/{person_id}",
+            headers=headers,
+        )
+        assert assertion_history.status_code == 200, assertion_history.text
+        withdrawn_row = next(item for item in assertion_history.json() if item["id"] == assertion_id)
+        assert withdrawn_row["latest_revision"]["revision_reason"] == (
+            "Caregiver withdrew this care detail: The caregiver confirmed this earlier report was inaccurate."
+        )
+        assert withdrawn_row["latest_revision"]["changed_by_caregiver_id"] == caregiver_id
+
         with SessionLocal() as db:
             persisted = db.query(CareAssertion).filter_by(id=assertion_id).one()
             assert persisted.assertion_status == "withdrawn"
