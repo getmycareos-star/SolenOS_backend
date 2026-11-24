@@ -549,8 +549,9 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
         "statement_count": len(claims),
         "unmatched_statement_count": unmatched,
         "matching_limit": (
-            "Exact source wording is matched to that source only. A numerical incident claim is supported only when it matches a complete, bounded count of distinct, dated, explicitly matching care-event records. "
-            "Neither method establishes clinical truth or independent corroboration. Other paraphrases remain unsupported."
+            "Exact source wording is matched to that source only. A short quotation is accepted only when it is an exact source substring and its framing explicitly preserves attribution. "
+            "A numerical incident claim is supported only when it matches a complete, bounded count of distinct, dated, explicitly matching care-event records. "
+            "These methods do not establish clinical truth, semantic entailment beyond the matched passage, or independent corroboration. Other paraphrases remain unsupported."
         ),
         "validated_aggregates": [
             {key: value for key, value in item.items() if key != "source_references"}
