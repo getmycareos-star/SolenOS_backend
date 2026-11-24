@@ -253,7 +253,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     finally:
         db.close()
 
-    def grounded_qwen(records, purpose, audience):
+    def grounded_qwen(records, purpose, audience, audit_context=None):
         daily = next((row for row in records if row["source_type"] == "daily_care_observation"), None)
         document = next((row for row in records if row["source_type"] == "document_extracted_text"), None)
         open_question = next((row for row in records if row["source_type"] == "open_question"), None)
