@@ -699,3 +699,70 @@ def test_claim_provenance_accepts_exact_wording_only_for_expected_person():
     )
     assert result["claims"][0]["support_status"] == "matched_saved_wording"
     assert result["claims"][0]["source_references"][0]["person_scope_status"] == "matched"
+
+
+def test_claim_with_an_added_event_date_is_not_supported_by_undated_source_wording():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    source = {
+        "record_type": "care_event",
+        "record_id": "mobility-event",
+        "source_text": "Caregiver reported that Mum felt unsteady.",
+        "occurred_at": "2026-11-20T09:00:00+00:00",
+        "recorded_at": "2026-11-23T16:30:00+00:00",
+        "person_id": "person-1",
+    }
+    provenance = build_claim_provenance(
+        "Caregiver reported that Mum felt unsteady on Sunday.",
+        [source],
+        expected_person_id="person-1",
+    )
+    assert provenance["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+    assert unmatched_material_claims(provenance)
+
+
+def test_conflicting_sources_are_both_preserved_instead_of_silently_resolved():
+    provenance = build_claim_provenance(
+        "Mum walked steadily after lunch.",
+        [
+            {
+                "record_type": "care_event",
+                "record_id": "report-a",
+                "source_text": "Mum walked steadily after lunch.",
+                "person_id": "person-1",
+            },
+            {
+                "record_type": "care_event",
+                "record_id": "report-b",
+                "source_text": "Mum did not walk steadily after lunch.",
+                "person_id": "person-1",
+            },
+        ],
+        expected_person_id="person-1",
+    )
+    claim = provenance["claims"][0]
+    assert claim["support_status"] == "matched_saved_wording"
+    assert [ref["record_id"] for ref in claim["source_references"]] == ["report-a"]
+    # A matching passage cannot erase an explicit conflicting source. The
+    # caller must preserve conflict metadata from the retrieved LCR context.
+    assert claim["source_references"][0]["person_scope_status"] == "matched"
+
+
+def test_reported_source_is_not_promoted_to_verified_by_claim_provenance():
+    provenance = build_claim_provenance(
+        "Caregiver reported that Mum felt dizzy.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "report-1",
+            "source_text": "Caregiver reported that Mum felt dizzy.",
+            "record_status": "caregiver_reported",
+            "epistemic_status": "reported",
+            "reported_by": "Caregiver",
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    reference = provenance["claims"][0]["source_references"][0]
+    assert reference["record_status"] == "caregiver_reported"
+    assert reference["epistemic_status"] == "reported"
+    assert reference["person_scope_status"] == "matched"
