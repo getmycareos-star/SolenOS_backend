@@ -978,9 +978,16 @@ jobs:
               db.flush()
               db.add_all([legacy_caregiver, explicit_caregiver, overwritten_caregiver])
               db.flush()
+              earlier_notification_time = datetime(2026, 11, 19, tzinfo=timezone.utc)
               explicit_time = datetime(2026, 11, 20, tzinfo=timezone.utc)
-              notification_time = datetime(2026, 11, 21, tzinfo=timezone.utc)
+              later_notification_time = datetime(2026, 11, 21, tzinfo=timezone.utc)
               db.add_all([
+                  CareNotificationPreference(
+                      person_id=explicit_person.id,
+                      caregiver_id=explicit_caregiver.id,
+                      timezone_name="America/Chicago",
+                      updated_at=earlier_notification_time,
+                  ),
                   AuditLogEvent(
                       actor_id=explicit_caregiver.id,
                       subject_id=explicit_person.id,
@@ -1013,7 +1020,7 @@ jobs:
                       person_id=overwritten_person.id,
                       caregiver_id=overwritten_caregiver.id,
                       timezone_name="America/Chicago",
-                      updated_at=notification_time,
+                      updated_at=later_notification_time,
                   ),
               ])
               db.commit()
@@ -1025,18 +1032,29 @@ jobs:
           from sqlalchemy import create_engine
           from sqlalchemy.orm import Session
           from app.models.care import Caregiver
+          from app.models.notifications import CareNotificationPreference
 
           engine = create_engine(os.environ["DATABASE_URL"])
           with Session(engine) as db:
               legacy = db.query(Caregiver).filter_by(id="timezone-legacy-caregiver").one()
               explicit = db.query(Caregiver).filter_by(id="timezone-explicit-caregiver").one()
               overwritten = db.query(Caregiver).filter_by(id="timezone-overwritten-caregiver").one()
+              explicit_notification = db.query(CareNotificationPreference).filter_by(
+                  person_id="timezone-explicit-person",
+                  caregiver_id="timezone-explicit-caregiver",
+              ).one()
+              overwritten_notification = db.query(CareNotificationPreference).filter_by(
+                  person_id="timezone-overwritten-person",
+                  caregiver_id="timezone-overwritten-caregiver",
+              ).one()
               assert legacy.timezone == "UTC", legacy.timezone
               assert legacy.timezone_configured is False
               assert explicit.timezone == "America/Los_Angeles", explicit.timezone
               assert explicit.timezone_configured is True
+              assert explicit_notification.timezone_name == "America/Chicago"
               assert overwritten.timezone == "UTC", overwritten.timezone
               assert overwritten.timezone_configured is False
+              assert overwritten_notification.timezone_name == "America/Chicago"
           engine.dispose()
           print("CAREGIVER_TIMEZONE_PROVENANCE_MIGRATION=PASS")
           PY
