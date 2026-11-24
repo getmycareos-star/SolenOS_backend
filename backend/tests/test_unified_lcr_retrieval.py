@@ -1673,11 +1673,11 @@ def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match()
     try:
         _load_source_schema.cache_clear()
         now = datetime.now(UTC)
-        with connection.begin():
-            connection.execute(Person.__table__.insert(), {
+        with Session(bind=connection) as db:
+            db.execute(Person.__table__.insert(), {
                 "id": "person-wide-history", "name": "Care recipient"
             })
-            connection.execute(Caregiver.__table__.insert(), {
+            db.execute(Caregiver.__table__.insert(), {
                 "id": "caregiver-wide-history", "name": "Caregiver",
                 "relationship": "family", "person_id": "person-wide-history",
             })
@@ -1703,9 +1703,8 @@ def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match()
                 "evidence_ids": [],
                 "created_by_caregiver_id": "caregiver-wide-history",
             })
-            connection.execute(CareEvent.__table__.insert(), rows)
-
-        with Session(bind=connection) as db:
+            db.execute(CareEvent.__table__.insert(), rows)
+            db.commit()
             context = build_unified_lcr_context(
                 db, "person-wide-history", "caregiver-wide-history",
                 query="sleep severe worsening", limit_per_source=20,
