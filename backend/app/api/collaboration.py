@@ -7262,19 +7262,19 @@ def _is_companion_identity_question(user_text: str) -> bool:
     """Identify explicit product-identity questions that need no patient history."""
     normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", (user_text or "").casefold())).strip()
     patterns = (
-        r"\bwho (?:are|made|created|built|developed) you\b",
-        r"\bwhat (?:are|is) your (?:name|purpose|role|identity)\b",
-        r"\bwhat are you\b",
-        r"\bwho (?:founded|started|created) solenos\b",
-        r"\bwho is (?:the )?founder of solenos\b",
-        r"\bwho is your creator\b",
-        r"\bwho owns you\b",
-        r"\bare you (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai)\b",
-        r"\bdo you (?:remember|know) everything\b",
-        r"\bcan you make mistakes\b",
-        r"\bcan i trust everything you say\b",
-        r"\bwhat can you do\b",
-        r"\bwhat can'?t you do\b",
+        r"\bwho (?:are|made|created|built|developed) you$",
+        r"\bwhat (?:are|is) your (?:name|purpose|role|identity)$",
+        r"\bwhat are you$",
+        r"\bwho (?:founded|started|created) solenos$",
+        r"\bwho is (?:the )?founder of solenos$",
+        r"\bwho is your creator$",
+        r"\bwho owns you$",
+        r"\bare you (?:a )?(?:human|person|doctor|nurse|therapist|medical professional|healthcare professional|chatgpt|ai)$",
+        r"\bdo you (?:remember|know) everything$",
+        r"\bcan you make mistakes$",
+        r"\bcan i trust everything you say$",
+        r"\bwhat can you do$",
+        r"\bwhat can'?t you do$",
     )
     return any(re.search(pattern, normalized) for pattern in patterns)
 
