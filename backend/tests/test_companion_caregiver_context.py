@@ -375,3 +375,39 @@ def test_missing_notification_preferences_are_explicitly_unconfigured():
     context = build_companion_caregiver_context(_caregiver(), _grant())
     assert context["notification_preferences"]["configured"] is False
     assert context["notification_preferences"]["delivery_timezone_name"] is None
+
+
+
+def test_companion_context_marks_first_time_stage_from_server_supplied_history_state():
+    context = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(),
+        has_prior_conversation=False,
+    )
+    assert context["conversation_stage"] == "first_time"
+    identity = build_companion_prompt_identity_context(
+        context, "Margaret Williams", greeting_only=True,
+    )
+    assert identity["conversation_stage"] == "first_time"
+    assert identity["identity_context_status"] == "authenticated_caregiver_only"
+    assert "Margaret Williams" not in str(identity)
+
+
+def test_companion_context_marks_returning_stage_without_injecting_conversation_content():
+    context = build_companion_caregiver_context(
+        _caregiver(),
+        _grant(),
+        has_prior_conversation=True,
+    )
+    assert context["conversation_stage"] == "returning"
+    identity = build_companion_prompt_identity_context(
+        context, "Margaret Williams", greeting_only=True,
+    )
+    assert identity["conversation_stage"] == "returning"
+    assert "prior" not in str(identity).casefold()
+    assert "Margaret Williams" not in str(identity)
+
+
+def test_companion_context_keeps_conversation_stage_unknown_when_history_was_not_checked():
+    context = build_companion_caregiver_context(_caregiver(), _grant())
+    assert context["conversation_stage"] == "unknown"
