@@ -4,6 +4,7 @@ This is operational instruction, not a claim that the model is sentient or consc
 """
 
 from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
+from app.services.solenos_personality import SOLENOS_PERSONALITY_CONSTITUTION
 
 SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 # SOLENOS — GLOBAL AI OPERATING CONTRACT
@@ -60,6 +61,8 @@ def apply_solenos_system_contract(messages: list[dict]) -> list[dict]:
     combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip()
     if workflow_system:
         combined += "\n\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS\n" + "\n\n".join(workflow_system)
+    # The personality constitution follows task prompts so specialists cannot weaken it.
+    combined += "\n\n" + SOLENOS_PERSONALITY_CONSTITUTION
     # Product identity is appended last so task prompts cannot redefine it.
     combined += "\n\n" + SOLENOS_IDENTITY_CONSTITUTION
 
