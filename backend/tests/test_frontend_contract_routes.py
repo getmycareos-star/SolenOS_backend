@@ -1089,7 +1089,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://private-ollama", "qwen2.5:1.5b"))
         def generated_reply(base, model, messages, options=None, audit_context=None):
             calls.append(messages)
-            return "Hi there. I'm here if you need help."
+            return "Hi, I'm SolenOS Companion. I'm here if you need help."
         monkeypatch.setattr(collaboration, "_ollama_chat", generated_reply)
         headers = {"Authorization": f"Bearer {token}"}
         response = client.post(
@@ -1103,7 +1103,7 @@ def test_companion_greeting_uses_qwen_and_never_writes_greeting_to_lcr(monkeypat
         events = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert events.status_code == 200
         assert events.json() == []
-        assert response.json()["reply"] == "Hi there. I'm here if you need help."
+        assert response.json()["reply"] == "Hi, I'm SolenOS Companion. I'm here if you need help."
     finally:
         teardown()
 
