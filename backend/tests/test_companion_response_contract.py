@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.pool import StaticPool
+from contextlib import nullcontext
 
 from app.core.database import Base, get_db
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
@@ -4102,3 +4104,58 @@ def test_temporal_history_aggregator_does_not_upgrade_unsearchable_source_to_com
     assert merged["retrieval_projection_complete"] is False
     assert merged["history_coverage"] == "partial_search_coverage"
 
+
+
+def test_direct_care_history_recall_marks_linked_evidence_read_failure_partial():
+    event = SimpleNamespace(
+        id="evidence-read-failure-event",
+        person_id="authorized-person",
+        status="recorded",
+        created_by_caregiver_id="authorized-caregiver",
+        description="The caregiver recorded the medication dose this morning.",
+        event_type="daily_observation",
+        title="Medication dose",
+        occurred_at=datetime(2026, 1, 12, 8, 0, tzinfo=timezone.utc),
+        recorded_at=datetime(2026, 1, 12, 8, 5, tzinfo=timezone.utc),
+        evidence_ids=["linked-evidence-unavailable"],
+    )
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def filter(self, *args, **kwargs):
+            return self
+
+        def order_by(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
+
+        def all(self):
+            if self.model is EvidenceModel:
+                raise SQLAlchemyError("simulated linked evidence read failure")
+            return [event] if self.model is CareEvent else []
+
+    class Database:
+        def query(self, model):
+            return Query(model)
+
+        def begin_nested(self):
+            return nullcontext()
+
+    result = collaboration._care_history_recall_context_lines(
+        Database(),
+        "authorized-person",
+        "What did I record about the medication dose?",
+    )
+
+    assert len(result["event_lines"]) == 1
+    assert result["evidence_lines"] == []
+    assert result["correction_lineage_complete"] is True
+    assert result["evidence_lookup_complete"] is False
+    assert result["retrieval_complete"] is False
+    assert result["status"] == "partial"
+    assert result["has_more"] is True
+    assert "Linked source evidence could not be retrieved" in result["interpretation_limit"]
