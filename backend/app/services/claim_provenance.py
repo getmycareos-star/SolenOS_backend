@@ -388,28 +388,28 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
     }
 
 _MATERIAL_CARE_TERMS = re.compile(
-    r"\\b(?:fall|falls|fell|fallen|stumble|stumbled|unsteady|unsteadiness|"
+    r"\b(?:fall|falls|fell|fallen|stumble|stumbled|unsteady|unsteadiness|"
     r"mobility|walking|walked|dizzy|dizziness|pain|appetite|eating|ate|"
     r"sleep|slept|confus(?:ed|ion)|memory|behavio[u]?r|symptom|symptoms|"
     r"medication|medicine|dose|prescription|diagnos(?:is|ed)|dementia|"
     r"alzheimer|delirium|infection|fever|blood pressure|glucose|"
     r"appointment|test result|hospital|discharge|treatment|wound|"
     r"seizure|breathing|swelling|hydration|dehydration|weight loss|"
-    r"weight gain|blood sugar|oxygen level)\\b",
+    r"weight gain|blood sugar|oxygen level)\b",
     re.IGNORECASE,
 )
 _MATERIAL_ASSERTION_VERBS = re.compile(
-    r"\\b(?:is|are|was|were|has|have|had|shows?|indicates?|increased|"
+    r"\b(?:is|are|was|were|has|have|had|shows?|indicates?|increased|"
     r"decreased|improved|worsened|stopped|started|missed|takes?|taking|"
     r"needs?|requires?|uses?|reported|observed|documented|scheduled|"
     r"confirmed|completed|occurred|happened|experienced|became|remains?|"
-    r"continues?)\\b",
+    r"continues?)\b",
     re.IGNORECASE,
 )
 _NON_ASSERTIVE_OPENINGS = re.compile(
     r"^(?:if|when|please|call|ask|contact|seek|consider|you can|you may|"
     r"you should|do not|don't|never|i can|i can't|i cannot|it may help|"
-    r"it might help|would you|could you|can you|do you know|is there)\\b",
+    r"it might help|would you|could you|can you|do you know|is there)\b",
     re.IGNORECASE,
 )
 
