@@ -4769,7 +4769,7 @@ def evaluate_deployed_qwen(request: Request):
                 timeout=180.0,
                 options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
                 audit_context={
-                    "request_id": getattr(request.state, "request_id", None),
+                    "request_id": getattr(getattr(request, "state", None), "request_id", None),
                 },
             )
             checks = _production_qwen_answer_checks(case, answer)
@@ -5227,7 +5227,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
             audit_context={
                 "person_id": person_id,
                 "caregiver_id": caregiver_id,
-                "request_id": getattr(request.state, "request_id", None),
+                "request_id": getattr(getattr(request, "state", None), "request_id", None),
                 "source_evidence_ids": [payload.evidence_id],
             },
         )
@@ -5299,7 +5299,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         audit_context={
             "person_id": person_id,
             "caregiver_id": caregiver_id,
-            "request_id": getattr(request.state, "request_id", None),
+            "request_id": getattr(getattr(request, "state", None), "request_id", None),
             "source_evidence_ids": [payload.evidence_id],
         },
     )
@@ -6050,7 +6050,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     # performs preflight-only retries and does not hold database connections.
     db.rollback()
     qwen_audit_context = {
-        "request_id": getattr(request.state, "request_id", None),
+        "request_id": getattr(getattr(request, "state", None), "request_id", None),
         "person_id": person_id,
         "caregiver_id": caregiver_id,
         "source_event_ids": source_event_ids,
@@ -6207,7 +6207,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             db,
             person_id=person_id,
             caregiver_id=caregiver_id,
-            request_id=getattr(request.state, "request_id", None),
+            request_id=getattr(getattr(request, "state", None), "request_id", None),
             workflow_id=str(payload.workflow),
             reply=reply,
             rejection_reasons=rejection_reasons,
@@ -6283,7 +6283,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             db,
             person_id=person_id,
             caregiver_id=caregiver_id,
-            request_id=getattr(request.state, "request_id", None),
+            request_id=getattr(getattr(request, "state", None), "request_id", None),
             workflow_id=str(payload.workflow),
             reply=reply,
             rejection_reasons=[],
@@ -8245,7 +8245,7 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
 async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
     """Generate a context-grounded Companion response; ordinary chat never writes care facts."""
     companion_request_started = _time.perf_counter()
-    companion_request_id = getattr(request.state, "request_id", None)
+    companion_request_id = getattr(getattr(request, "state", None), "request_id", None)
     person_id, caregiver_id = _scope(request, db)
     can_view_documents = True
     try:
