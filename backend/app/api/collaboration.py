@@ -5938,6 +5938,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                 reasons.append("internal_term")
         if _contains_unrequested_saba(candidate, source_context):
             reasons.append("unrequested_token")
+        if _contains_unsupported_reassurance(candidate):
+            reasons.append("unsupported_reassurance")
+        if _contains_fabricated_empathy(candidate):
+            reasons.append("fabricated_empathy")
         if _contains_unsupported_care_claim(candidate, source_context):
             reasons.append("unsupported_care_claim")
         if _contains_unsupported_operational_claim(candidate, source_context, prompt_context_lines):
