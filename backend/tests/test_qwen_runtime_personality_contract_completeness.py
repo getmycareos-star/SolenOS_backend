@@ -88,3 +88,24 @@ def test_runtime_contract_preserves_product_boundaries_and_precedence():
     )
     for rule in required:
         assert rule in system
+
+
+def test_qwen_runtime_identity_contains_canonical_answers_and_model_transparency():
+    identity = SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    required = (
+        "Who are you?",
+        "Who made you?",
+        "Who founded SolenOS?",
+        "Are you human?",
+        "Are you a doctor?",
+        "Are you ChatGPT?",
+        "Who owns you?",
+        "Can you make mistakes?",
+        "Do you remember everything?",
+        "Which model powers you?",
+        "The model is replaceable.",
+        "Do not make unsupported legal ownership claims.",
+        "trusted runtime configuration",
+    )
+    for phrase in required:
+        assert phrase in identity
