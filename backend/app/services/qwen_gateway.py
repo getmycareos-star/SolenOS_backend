@@ -465,7 +465,7 @@ def extract_review_candidates(
     workflow_id: str = "care_claim_extraction",
 ) -> dict:
     """Return verbatim-grounded review candidates under the correct source workflow."""
-    if workflow_id not in {"care_claim_extraction", "daily_capture", "document_candidate_extraction"}:
+    if workflow_id not in {"care_claim_extraction", "daily_capture", "daily_capture_extraction", "document_candidate_extraction"}:
         raise ValueError("unsupported_candidate_extraction_workflow")
     bounded_source = (source_text or "").strip()
     if len(bounded_source) > 12_000:
