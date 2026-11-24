@@ -101,7 +101,6 @@ def build_companion_caregiver_context(
     access_grant,
     *,
     now: datetime | None = None,
-    timezone_conflict: bool = False,
     caregiver_profile=None,
     authenticated_account_id: str | None = None,
     active_roles=None,
@@ -168,9 +167,7 @@ def build_companion_caregiver_context(
     timezone_configured = bool(getattr(caregiver, "timezone_configured", False))
     timezone_status = "not_configured"
     local_now = None
-    if timezone_conflict:
-        timezone_status = "conflict"
-    elif timezone_configured and timezone_name:
+    if timezone_configured and timezone_name:
         try:
             zone = ZoneInfo(timezone_name)
             instant = now or datetime.now(timezone.utc)
