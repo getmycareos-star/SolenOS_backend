@@ -7116,14 +7116,20 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 reply.rfind("\n", 0, match.start()),
             ) + 1
             prefix = reply[sentence_start:match.start()].casefold().strip()
-            explicit_limit = re.search(
-                r"\b(?:not|no|never|cannot|can't|won't|wouldn't|don't|doesn't|"
-                r"isn't|aren't|unable to|not enough evidence to|not possible to|"
-                r"can't promise|cannot promise|can't confirm|cannot confirm)\b"
-                r"(?:\s+[\w']+){0,8}\s*$",
-                prefix,
+            explicit_limit_patterns = (
+                r"\b(?:i|we) (?:can't|cannot|won't|wouldn't) "
+                r"(?:promise|guarantee|say|confirm|tell|assure)"
+                r"(?: that)?(?: there (?:is|are))?\s*$",
+                r"\b(?:the|this|available) (?:record|notes?|information|evidence) "
+                r"(?:doesn't|does not|can't|cannot) "
+                r"(?:establish|show|confirm|prove|support)(?: that)?\s*$",
+                r"\b(?:i|we) (?:don't|do not) have (?:enough|any) "
+                r"(?:evidence|information|basis) to "
+                r"(?:say|confirm|tell|know)(?: that)?\s*$",
+                r"\b(?:there is|there's) no (?:evidence|information|basis) to "
+                r"(?:say|confirm|show|establish)(?: that)?\s*$",
             )
-            if explicit_limit:
+            if any(re.search(pattern, prefix) for pattern in explicit_limit_patterns):
                 continue
             return True
     return False
