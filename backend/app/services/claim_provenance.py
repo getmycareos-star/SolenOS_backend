@@ -100,7 +100,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             try:
                 payload = json.loads(text[text.index("{"):])
                 if isinstance(payload, dict):
-                    for key in ("id", "source_id", "event_id", "care_event_id", "evidence_id", "capture_analysis_id", "document_analysis_id", "appointment_id", "handoff_id", "care_handoff_id", "notification_id"):
+                    for key in ("source_id", "event_id", "care_event_id", "evidence_id", "capture_analysis_id", "document_analysis_id", "appointment_id", "handoff_id", "care_handoff_id", "notification_id", "id"):
                         if payload.get(key):
                             record_id = str(payload[key])
                             break
