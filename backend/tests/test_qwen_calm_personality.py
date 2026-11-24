@@ -61,7 +61,7 @@ def test_precedence_protects_safety_honesty_dignity_and_lcr_authority():
     constitution = SOLENOS_PERSONALITY_CONSTITUTION
     assert "## PRECEDENCE" in constitution
     assert "Safety, factual integrity, dignity, privacy, authorization" in constitution
-    assert "Uncertainty must not be converted into confidence to reassure" in constitution
+    assert "Uncertainty must not become confidence to reassure" in constitution
     assert "Proactivity must not create or persist a care fact or task without authorization" in constitution
     assert "Dependability means preserving correction history" in constitution
 
