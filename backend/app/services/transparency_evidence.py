@@ -107,7 +107,6 @@ def build_transparency_evidence(
         AnonymousSession.person_id == person_id,
         AnonymousSession.caregiver_id == caregiver_id,
         AnonymousSession.revoked_at.is_(None),
-        AnonymousSession.expires_at > now,
     ).first()
     items.append({
         "kind": "active_session",
