@@ -36,7 +36,15 @@ jobs:
           python-version: "3.11"
       - name: Identify the deployed production-code commit
         run: |
-          expected=$(git log -1 --format=%H HEAD -- backend/app/services/qwen_gateway.py backend/app/api/collaboration.py backend/app/api/handoff_drafts.py start-with-qwen.sh)
+          expected=$(git log -1 --format=%H HEAD -- \
+            backend/app/services/qwen_gateway.py \
+            backend/app/services/qwen_specialized_prompts.py \
+            backend/app/services/qwen_system_prompt.py \
+            backend/app/services/solenos_identity.py \
+            backend/app/services/solenos_personality.py \
+            backend/app/api/collaboration.py \
+            backend/app/api/handoff_drafts.py \
+            start-with-qwen.sh)
           test -n "$expected"
           echo "EXPECTED_DEPLOYMENT_COMMIT=$expected" >> "$GITHUB_ENV"
       - name: Wait for Railway to deploy this exact commit and finish model installation
