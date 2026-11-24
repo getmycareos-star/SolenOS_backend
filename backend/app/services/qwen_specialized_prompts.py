@@ -5,7 +5,7 @@ capabilities are not concatenated into a universal mega-prompt.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+import re
 
 # Keep these instructions operational and compact: retrieved care evidence and
 # output schemas must retain room in the model context.
