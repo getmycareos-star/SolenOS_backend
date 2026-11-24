@@ -364,7 +364,7 @@ def test_companion_prompt_receives_authenticated_caregiver_recipient_and_timezon
     assert context["identity_context_status"] == "authenticated"
     assert context["caregiver_display_name"] == "Mary"
     assert context["care_recipient_name"] == recipient_name
-    assert context["caregiver_relationship"] == "Family caregiver"
+    assert context["caregiver_relationship"] == "Family"
     assert context["caregiver_role"] == "primary"
     assert context["access_scope"] == "full_record"
     assert "view_lcr" in context["permitted_capabilities"]
