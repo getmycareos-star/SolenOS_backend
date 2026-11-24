@@ -7220,7 +7220,8 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
         r"(?:fine|okay|safe|stable)|"
         r"(?:he|she|they|it|mum|mom|dad|the person) will be (?:fine|okay|safe|stable))\b",
         r"\b(?:there(?:'s| is) nothing to worry about|nothing to worry about|"
-        r"no need to worry|there is no reason to worry|don't worry)\b",
+        r"no need to worry|there is no reason to worry|"
+        r"don't worry(?!\s+about\s+(?:repeating yourself|starting over|asking again)))\b",
         r"\b(?:(?:he|she|they|it|mum|mom|dad|the person) (?:is|are) "
         r"(?:safe|out of danger)|there (?:is|are) no (?:immediate )?(?:danger|risk))\b",
         r"\b(?:it(?:'s| is) probably nothing|probably nothing serious|"
@@ -7255,6 +7256,8 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 r"(?:evidence|information|basis) to "
                 r"(?:say|confirm|tell|know)(?: that)?(?: (?:he|she|they|it|mum|mom|dad|the person))?\s*$",
                 r"\b(?:there is|there's) no (?:evidence|information|basis) to "
+                r"(?:say|confirm|show|establish)(?: that)?\s*$",
+                r"\bthere(?:'s| is) not enough (?:evidence|information|basis) to "
                 r"(?:say|confirm|show|establish)(?: that)?\s*$",
             )
             if any(re.search(pattern, prefix) for pattern in explicit_limit_patterns):
