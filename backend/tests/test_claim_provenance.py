@@ -844,11 +844,11 @@ def test_reported_epistemic_status_does_not_override_pending_evidence_lifecycle(
 
 def test_completed_document_extraction_cannot_override_pending_original_evidence():
     provenance = build_claim_provenance(
-        "The document reports that Mum missed breakfast.",
+        "The document reports that Mum felt dizzy.",
         [{
             "record_type": "document_extraction",
             "record_id": "extraction-1",
-            "source_text": "The document reports that Mum missed breakfast.",
+            "source_text": "The document reports that Mum felt dizzy.",
             "record_status": "completed",
             "related_evidence": [{
                 "record_id": "evidence-1",
