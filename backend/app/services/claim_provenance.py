@@ -328,9 +328,9 @@ _SOURCE_ATTRIBUTION_RE = re.compile(
 )
 _CLAIM_ATTRIBUTION_RE = re.compile(
     r"\b(?:according to|reported by|observed by|documented by|"
-    r"(?:caregiver|family|patient|professional|clinician)[- ](?:reported|observed|documented)|"
+    r"(?:caregiver|family|patient|professional|clinician|document|note|record)[- ](?:reported|observed|documented)|"
     r"(?:was|were|is|are|has been|had been)\s+(?:reported|observed|documented|noted|recorded)|"
-    r"(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|"
+    r"(?:caregiver|family|patient|person|professional|clinician|doctor|nurse|staff|document|note|record|"
     r"[A-Z][A-Za-z'’-]{1,30})\s+(?:reported|reports|observed|documented|said|says|noted|recorded|stated))\b",
     re.IGNORECASE,
 )
@@ -396,9 +396,9 @@ def _claim_preserves_source_qualifiers(statement: str, source: dict[str, Any], m
 
 
 _ATTRIBUTED_QUOTE_FRAME_RE = re.compile(
-    r"^(?:(?:the )?(?:caregiver|family(?: member)?|patient|person|professional|clinician|doctor|nurse|staff)\s+(?:reported|observed|documented|said|noted|recorded|stated)|"
+    r"^(?:(?:the )?(?:caregiver|family(?: member)?|patient|person|professional|clinician|doctor|nurse|staff|document|note|record)\s+(?:reported|observed|documented|said|noted|recorded|stated|reports|says|describes|mentions)|"
     r"(?:caregiver|family|patient|professional|clinician)[- ](?:reported|observed|documented)|"
-    r"according to (?:the )?(?:caregiver|family|patient|professional|clinician))\s*:?$",
+    r"according to (?:the )?(?:caregiver|family|patient|professional|clinician|document|note|record))\s*:?$",
     re.IGNORECASE,
 )
 
@@ -552,23 +552,26 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
 
 _MATERIAL_CARE_TERMS = re.compile(
     r"\b(?:fall|falls|fell|fallen|stumble|stumbled|unsteady|unsteadiness|"
-    r"mobility|walking|walked|dizzy|dizziness|pain|appetite|eating|ate|"
-    r"sleep|slept|confus(?:ed|ion)|memory|behavio[u]?r|symptom|symptoms|"
+    r"balance|mobility|walking|walked|dizzy|dizziness|pain|appetite|eating|ate|"
+    r"sleep|slept|restless|waking|wake|insomnia|fatigue|tired|"
+    r"(?:quieter|restless|poor|rough|good)\s+night|"
+    r"confus(?:ed|ion)|memory|behavio[u]?r|symptom|symptoms|"
     r"medication|medicine|dose|prescription|diagnos(?:is|ed)|dementia|"
     r"alzheimer|delirium|infection|fever|blood pressure|glucose|"
     r"appointment|test result|hospital|discharge|treatment|wound|"
     r"seizure|breathing|swelling|hydration|dehydration|weight loss|"
-    r"weight gain|blood sugar|oxygen level)\b",
+    r"weight gain|blood sugar|oxygen level|urinary tract infection|uti|pneumonia)\b",
     re.IGNORECASE,
 )
 _MATERIAL_ASSERTION_VERBS = re.compile(
-    r"\b(?:is|are|was|were|has|have|had|shows?|indicates?|increased|"
-    r"decreased|improved|worsened|stopped|started|missed|takes?|taking|"
-    r"needs?|requires?|uses?|reported|observed|documented|scheduled|"
+    r"\b(?:is|are|was|were|has|have|had|felt|feels|slept|shows?|indicates?|"
+    r"increased|decreased|improved|worsened|stopped|started|missed|takes?|taking|"
+    r"needs?|requires?|uses?|reported|reports|observed|documented|scheduled|"
     r"confirmed|completed|occurred|happened|experienced|became|remains?|"
-    r"continues?)\b",
+    r"continues?|says?|states?|describes?|mentions?|includes?|contains?)\b",
     re.IGNORECASE,
 )
+
 _NON_ASSERTIVE_OPENINGS = re.compile(
     r"^(?:if|when|please|call|ask|contact|seek|consider|you can|you may|"
     r"you should|do not|don't|never|i can|i can't|i cannot|it may help|"
