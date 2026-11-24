@@ -4547,6 +4547,8 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
         assert '"date_format":"MM/DD/YYYY"' in prompt
         assert '"measurement_system":"us_customary"' in prompt
         assert '"communication_style":"concise"' in prompt
+        assert "never alter a recorded medication dose or clinical measurement" in prompt
+        assert "locale controls regional formatting only" in prompt
         assert "Do not expose care-recipient details in a greeting-only response" in prompt
         assert "PRIVATE_GREETING_SENTINEL" not in prompt
         assert "PRIVATE_GREETING_DETAIL" not in prompt
