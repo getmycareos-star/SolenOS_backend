@@ -10,6 +10,8 @@ from app.services.epistemic_contract import assertion_information_status
         ("reported", "accepted", "caregiver_reviewed_report"),
         ("reported", "caregiver_reviewed", "caregiver_reviewed_report"),
         ("observed", "caregiver_reviewed", "source_attributed_observation"),
+        ("inferred", "reported", "inferred_interpretation"),
+        ("inferred", "accepted", "inferred_interpretation"),
         ("inferred", "caregiver_reviewed", "inferred_interpretation"),
         ("verified", "accepted", "verified"),
         ("uncertain", "accepted", "uncertain"),
