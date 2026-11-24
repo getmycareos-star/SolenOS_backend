@@ -7061,7 +7061,7 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
         r"(?:he|she|they|it) will definitely be fine|"
         r"(?:he|she|they|it) should be fine|"
         r"(?:he|she|they|it) is probably okay|"
-        r"(?:he|she|they|it) seems? (?:fine|okay|stable))\b",
+        r"(?:he|she|they|it) seems? (?:fine|okay|stable)|seems? (?:fine|okay|stable))\b",
         r"\b(?:everything appears stable|appears stable|looks stable|"
         r"likely fine|probably okay|should be fine)\b",
     )
