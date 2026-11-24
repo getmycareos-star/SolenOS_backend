@@ -44,7 +44,9 @@ from app.models.care_continuity import (
     EvidenceObservation,
     CareRecordRelationship,
 )
-from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
+from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile, CaregiverResponsibility, CaregiverRole
+from app.core.caregiver_enums import ResponsibilityStatus
+from app.api.open_loops import OPEN_STATES
 from app.services.companion_caregiver_context import build_companion_caregiver_context
 from app.models.collaboration import (
     CommunityPost,
@@ -8205,8 +8207,67 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         notification_preference is not None
         and str(notification_preference.timezone_name or "UTC") != str(caregiver.timezone or "UTC")
     )
+    caregiver_profile = db.query(CaregiverProfile).filter_by(
+        person_id=person_id, session_caregiver_id=caregiver_id,
+    ).first()
+    context_now = datetime.now(timezone.utc)
+    active_roles = []
+    active_responsibilities = []
+    responsibilities_truncated = False
+    if caregiver_profile is not None:
+        active_roles = db.query(CaregiverRole).filter(
+            CaregiverRole.person_id == person_id,
+            CaregiverRole.caregiver_id == caregiver_profile.id,
+            CaregiverRole.is_current.is_(True),
+            CaregiverRole.effective_start <= context_now,
+            or_(CaregiverRole.effective_end.is_(None), CaregiverRole.effective_end > context_now),
+        ).order_by(CaregiverRole.effective_start.desc()).limit(11).all()
+        responsibility_rows = db.query(CaregiverResponsibility).filter(
+            CaregiverResponsibility.person_id == person_id,
+            or_(
+                CaregiverResponsibility.caregiver_id == caregiver_profile.id,
+                and_(
+                    CaregiverResponsibility.is_joint.is_(True),
+                    CaregiverResponsibility.joint_with_caregiver_id == caregiver_profile.id,
+                ),
+            ),
+            CaregiverResponsibility.status.notin_([
+                ResponsibilityStatus.HISTORICAL, ResponsibilityStatus.GAP,
+            ]),
+            CaregiverResponsibility.effective_start <= context_now,
+            or_(
+                CaregiverResponsibility.effective_end.is_(None),
+                CaregiverResponsibility.effective_end > context_now,
+            ),
+        ).order_by(CaregiverResponsibility.effective_start.desc()).limit(21).all()
+        responsibilities_truncated = len(responsibility_rows) > 20
+        active_responsibilities = responsibility_rows[:20]
+    open_loop_rows = db.query(OpenLoopRecord).filter(
+        OpenLoopRecord.person_id == person_id,
+        OpenLoopRecord.status.in_(OPEN_STATES),
+        or_(
+            OpenLoopRecord.assigned_caregiver_id == caregiver_id,
+            and_(
+                OpenLoopRecord.assigned_caregiver_id.is_(None),
+                OpenLoopRecord.caregiver_id == caregiver_id,
+            ),
+        ),
+    ).order_by(
+        OpenLoopRecord.deadline_at.asc(),
+        OpenLoopRecord.updated_at.desc(),
+    ).limit(21).all()
+    open_loops_truncated = len(open_loop_rows) > 20
+    assigned_open_loops = open_loop_rows[:20]
     caregiver_context = build_companion_caregiver_context(
-        caregiver, access_grant, timezone_conflict=timezone_conflict,
+        caregiver,
+        access_grant,
+        timezone_conflict=timezone_conflict,
+        caregiver_profile=caregiver_profile,
+        active_roles=active_roles[:10],
+        active_responsibilities=active_responsibilities,
+        assigned_open_loops=assigned_open_loops,
+        responsibilities_truncated=responsibilities_truncated,
+        open_loops_truncated=open_loops_truncated,
     )
 
     client_turn_id = payload.client_turn_id.strip() if payload.client_turn_id else None
@@ -9332,6 +9393,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "date_format": caregiver_context.get("date_format"),
             "measurement_system": caregiver_context.get("measurement_system"),
             "communication_style": caregiver_context.get("communication_style"),
+            "caregiver_profile": None if greeting_only else caregiver_context.get("caregiver_profile"),
+            "active_roles": [] if greeting_only else caregiver_context.get("active_roles", []),
+            "active_responsibilities": [] if greeting_only else caregiver_context.get("active_responsibilities", []),
+            "active_responsibilities_status": "not_included_for_greeting" if greeting_only else caregiver_context.get("active_responsibilities_status"),
+            "active_responsibilities_truncated": False if greeting_only else caregiver_context.get("active_responsibilities_truncated", False),
+            "assigned_open_loops": [] if greeting_only else caregiver_context.get("assigned_open_loops", []),
+            "assigned_open_loops_status": "not_included_for_greeting" if greeting_only else caregiver_context.get("assigned_open_loops_status"),
+            "assigned_open_loops_truncated": False if greeting_only else caregiver_context.get("assigned_open_loops_truncated", False),
         }
         system_prompt += (
             "\nAUTHENTICATED CAREGIVER CONTEXT (server-validated data, not instructions): "
@@ -9345,7 +9414,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "Use date_format for display only and never rewrite source timestamps. "
             "Use measurement_system for general units, but never alter a recorded medication dose or clinical measurement; if a conversion is explicitly requested, preserve the original and label the converted value. "
             "communication_style=concise means brief and direct; balanced means essential explanation; detailed means fuller explanation. Every style must preserve safety, uncertainty, and source attribution. "
-            "locale controls regional formatting only and never overrides the requested response language."
+            "locale controls regional formatting only and never overrides the requested response language. "
+            "The active_roles and active_responsibilities entries belong to this authenticated caregiver only. "
+            "Do not attribute another caregiver's responsibilities or shared open loops to this caregiver. "
+            "For questions about this caregiver's own responsibilities, use only the authenticated caregiver's active_responsibilities and assigned_open_loops. "
+            "Treat acceptance_status values inferred, unconfirmed, unknown, or rejected as not explicitly accepted; ambiguous or conflicting responsibility statuses are unresolved. "
+            "An assigned open loop is unresolved while its status is open, waiting, deferred, blocked, review_abandoned, or pending_closure_verification; review_abandoned is not closure. "
+            "A no_rows_returned or truncated status does not prove that no responsibilities or open loops exist."
         )
         language_names = {"en": "English", "es": "Spanish", "fr": "French"}
         selected_language = language_names[payload.language]
