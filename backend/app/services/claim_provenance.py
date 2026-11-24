@@ -139,9 +139,13 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                 record_payload = payload.get("record") if isinstance(payload.get("record"), dict) else payload
                 if isinstance(record_payload, dict):
                     source_status = (
-                        record_payload.get("epistemic_status")
-                        or record_payload.get("record_status")
+                        record_payload.get("record_status")
+                        or record_payload.get("assertion_status")
                         or record_payload.get("status")
+                    )
+                    epistemic_status = (
+                        record_payload.get("epistemic_status")
+                        or record_payload.get("epistemic_state")
                     )
                     source_attribution = (
                         record_payload.get("source_attribution")
@@ -149,6 +153,8 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                     )
                     if source_status is not None:
                         record_metadata["record_status"] = str(source_status)
+                    if epistemic_status is not None:
+                        record_metadata["epistemic_status"] = str(epistemic_status)
                     if source_attribution is not None:
                         record_metadata["source_attribution"] = str(source_attribution)
                     record_metadata["person_id"] = (
@@ -552,6 +558,7 @@ def build_claim_provenance(
                         "reported_by": source.get("reported_by"),
                         "entered_by": source.get("entered_by"),
                         "record_status": source.get("record_status"),
+                        "epistemic_status": source.get("epistemic_status"),
                         "source_lifecycle_status": source.get("source_lifecycle_status"),
                         # Preserve the lifecycle classification used for this exact
                         # match. Recomputing it from the un-enriched input pool below
