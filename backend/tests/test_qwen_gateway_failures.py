@@ -60,6 +60,43 @@ def test_qwen_inference_audit_metadata_hashes_content_without_persisting_it():
     assert source_text not in json.dumps(metadata)
 
 
+def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references():
+    metadata = qwen_gateway._inference_audit_metadata(
+        [
+            {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion."},
+            {"role": "user", "content": "PRIVATE_SOURCE_TEXT_NOT_FOR_AUDIT"},
+        ],
+        audit_context={
+            "request_id": "request-123",
+            "person_id": "person-123",
+            "caregiver_id": "caregiver-123",
+            "conversation_session_id": "session-123",
+            "source_event_ids": ["event-1", "event-1", "", None],
+            "source_evidence_ids": ["evidence-1"],
+            "retrieval_coverage": {
+                "status": "complete",
+                "retrieval_projection_complete": True,
+                "page_limit_reached": False,
+                "context_truncated": False,
+                "untrusted_extra": "must not be retained",
+            },
+            "source_text": "must not be retained",
+        },
+    )
+
+    assert metadata["request_id"] == "request-123"
+    assert metadata["person_id"] == "person-123"
+    assert metadata["caregiver_id"] == "caregiver-123"
+    assert metadata["source_references"] == {
+        "source_event_ids": ["event-1"],
+        "source_evidence_ids": ["evidence-1"],
+    }
+    assert "untrusted_extra" not in metadata["retrieval_coverage"]
+    serialized = json.dumps(metadata)
+    assert "PRIVATE_SOURCE_TEXT_NOT_FOR_AUDIT" not in serialized
+    assert "must not be retained" not in serialized
+
+
 def test_qwen_gateway_classifies_missing_model_separately(monkeypatch):
     configure_gateway(monkeypatch)
     attempts = {"count": 0}
