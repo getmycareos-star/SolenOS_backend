@@ -378,10 +378,12 @@ def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_
         assert source["candidate_count"] == 301
         assert source["has_more"] is True
         assert [item["id"] for item in source["items"]] == ["older-waking-event"]
+        assert source["correction_lineage_status"] == "unavailable_schema"
         assert context["history_coverage"] == "query_scanned_ranked_subset"
-        # The whole query scan can be complete while the overall LCR schema is
-        # partial. Those are deliberately separate claims.
+        # The source scan is complete while correction lineage is unavailable;
+        # scan completeness and currentness of the projection are separate claims.
         assert context["retrieval_scan_complete"] is True
+        assert context["retrieval_projection_complete"] is False
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
