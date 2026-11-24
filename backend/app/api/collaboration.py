@@ -4721,6 +4721,9 @@ def evaluate_deployed_qwen(request: Request):
                 # Keep the per-case budget aligned with the provider's 180-second cap.
                 timeout=180.0,
                 options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
+                audit_context={
+                    "request_id": getattr(request.state, "request_id", None),
+                },
             )
             checks = _production_qwen_answer_checks(case, answer)
             passed = all(checks.values())
