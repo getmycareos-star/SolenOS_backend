@@ -7290,6 +7290,8 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bcan i trust everything you say$",
         r"\bwhat can you do$",
         r"\bwhat can'?t you do$",
+        r"\bwhich model (?:powers|is powering) you$",
+        r"\bwhat model (?:powers|is powering) you$",
     )
     return any(re.search(pattern, normalized) for pattern in patterns)
 
@@ -7299,7 +7301,7 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
     if not _is_companion_identity_question(user_text):
         return None
     normalized = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' ]", " ", (user_text or "").casefold())).strip()
-    if re.search(r"\bwho (?:are|made|created|built|developed) you$", normalized):
+    if re.search(r"\bwho (?:are|made|created|built|developed) you$|\bwho is your creator$", normalized):
         if re.search(r"\bwho are you$", normalized):
             return "I'm SolenOS Companion, the AI care-continuity companion within SolenOS."
         return (
@@ -7339,6 +7341,12 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
             "change the Living Care Record. I can make mistakes, so important care information "
             "should be checked against its source."
         )
+    if re.search(r"\bwhich model (?:powers|is powering) you$|\bwhat model (?:powers|is powering) you$", normalized):
+        try:
+            _, configured_model, _ = get_ollama_config()
+        except HTTPException:
+            return "I don't have reliable information about the underlying model configured for this SolenOS session."
+        return f"This SolenOS environment is configured to use {configured_model} through Ollama."
     if re.search(r"\bwhat (?:is|are) your (?:name|purpose|role|identity)$|\bwhat are you$", normalized):
         return (
             "I'm SolenOS Companion, the AI care-continuity companion within SolenOS. "
