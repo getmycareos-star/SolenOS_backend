@@ -67,7 +67,10 @@ def test_user_content_cannot_replace_product_identity_or_model_boundaries():
 
 
 def test_personality_contract_defines_steady_patient_grounded_reassurance():
-    content = apply_solenos_system_contract([{"role": "user", "content": "I am worried."}])[0]["content"]
+    content = apply_solenos_system_contract([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion. Specialist task instructions."},
+        {"role": "user", "content": "I am worried."},
+    ])[0]["content"]
     assert "## STEADY" in content
     assert "## PATIENT" in content
     assert "## REASSURING THROUGH CLARITY" in content
