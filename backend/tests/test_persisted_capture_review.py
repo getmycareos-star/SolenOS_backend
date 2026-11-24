@@ -1040,6 +1040,7 @@ def test_assertion_acceptance_fails_closed_when_revision_history_is_unavailable(
             field="sleep",
             asserted_value="Caregiver reported poor sleep last night.",
             assertion_kind="historical_observation",
+            source_label="Caregiver report",
             assertion_status="reported",
             epistemic_state="reported",
             source_text="Caregiver reported poor sleep last night.",
