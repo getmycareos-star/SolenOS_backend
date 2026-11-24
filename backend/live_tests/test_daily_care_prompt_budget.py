@@ -107,5 +107,5 @@ def test_daily_care_rejects_oversized_question_instead_of_silently_truncating():
 
 
 def test_daily_care_output_ceiling_preserves_room_for_retrieved_evidence():
-    assert DAILY_CARE_MAX_OUTPUT_TOKENS == 384
-    assert DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS == 2200
+    assert DAILY_CARE_MAX_OUTPUT_TOKENS == 320
+    assert DAILY_CARE_PROMPT_CONTEXT_BUDGET_CHARS == 1800
