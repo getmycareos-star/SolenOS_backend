@@ -108,9 +108,9 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
 
 def test_full_and_runtime_identity_versions_are_aligned():
     from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION, SOLENOS_IDENTITY_CONSTITUTION_VERSION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.3"
-    assert "Version: 2.3" in SOLENOS_IDENTITY_CONSTITUTION
-    assert "Version: 2.3" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
+    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Version: 2.4" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 
 
 def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_personality():
