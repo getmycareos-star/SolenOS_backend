@@ -166,3 +166,41 @@ def test_gateway_extraction_consumers_are_explicitly_imported_from_the_gateway()
             "file": relative,
             "missing": sorted(required_symbols - imported),
         }
+
+
+def test_no_non_gateway_ollama_sdk_or_native_inference_endpoint_exists():
+    offenders = []
+    forbidden_endpoints = (
+        "/api/chat",
+        "/api/generate",
+        "/api/embed",
+        "/api/embeddings",
+    )
+    for source_path in APP_ROOT.rglob("*.py"):
+        if source_path == GATEWAY_PATH:
+            continue
+        relative = str(source_path.relative_to(BACKEND_ROOT))
+        source = source_path.read_text(encoding="utf-8")
+        if any(endpoint in source for endpoint in forbidden_endpoints):
+            offenders.append(f"{relative}: native Ollama inference endpoint")
+        if any(marker in source for marker in ("OLLAMA_BASE_URL", "OLLAMA_HOST")):
+            offenders.append(f"{relative}: Ollama runtime configuration")
+        tree = ast.parse(source, filename=relative)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            else:
+                continue
+            if any(module == "ollama" or module.startswith("ollama.") for module in modules):
+                offenders.append(f"{relative}: direct Ollama SDK import")
+                break
+    assert offenders == [], offenders
+
+
+def test_gateway_is_the_only_module_that_owns_ollama_runtime_configuration():
+    source = GATEWAY_PATH.read_text(encoding="utf-8")
+    assert "OLLAMA_BASE_URL" not in source or "OLLAMA_BASE_URL" in source
+    assert "get_ollama_config" in source
+    assert 'base + "/api/chat"' in source
