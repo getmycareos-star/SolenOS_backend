@@ -81,6 +81,39 @@ def test_capture_candidates_keep_only_verbatim_source_grounded_observations(monk
     assert "SOLENOS_WORKFLOW_ID: care_claim_extraction." in captured["messages"][0]["content"]
 
 
+def test_document_candidate_extraction_activates_document_specialist(monkeypatch):
+    captured = {}
+
+    def fake_qwen_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return json.dumps({"observations": [], "open_questions": []})
+
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", fake_qwen_chat)
+    result = qwen_gateway.extract_review_candidates(
+        "The discharge summary records a historical medication list.",
+        source_event_id="",
+        source_evidence_id="evidence-document",
+        workflow_id="document_candidate_extraction",
+    )
+
+    assert result["observations"] == []
+    assert "SOLENOS_WORKFLOW_ID: document_candidate_extraction." in captured["messages"][0]["content"]
+
+
+def test_candidate_extraction_rejects_unknown_workflow_before_model_call(monkeypatch):
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unsupported workflow must not invoke model")),
+    )
+    with pytest.raises(ValueError, match="unsupported_candidate_extraction_workflow"):
+        qwen_gateway.extract_review_candidates(
+            "Caregiver reports poor sleep.",
+            source_event_id="event-unknown",
+            workflow_id="invented_workflow",
+        )
+
+
 def test_capture_candidates_fail_closed_on_invalid_json(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "qwen_chat", lambda *args, **kwargs: "not-json")
 
