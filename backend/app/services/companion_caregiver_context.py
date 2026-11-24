@@ -8,6 +8,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.services.caregiver_permissions import caregiver_has_permission
+
 
 def _clean(value, *, limit: int = 120) -> str | None:
     if value is None:
@@ -133,7 +135,11 @@ def build_companion_caregiver_context(
         if isinstance(value, str) and value.strip()
     }) if isinstance(permissions, (list, tuple, set)) else []
     access_scope = _clean(getattr(access_grant, "access_scope", None), limit=40) or "unknown"
-    if access_scope != "documents_only" and "view_lcr" not in permissions:
+    # Keep Companion context construction aligned with the canonical permission
+    # evaluator. In particular, a member manager's explicit grant is valid even
+    # when its permission list is intentionally narrower; documents-only grants
+    # must never receive care-record context.
+    if not caregiver_has_permission(access_grant, "view_lcr"):
         raise ValueError("The authenticated caregiver is not permitted to view this care record")
 
     full_name = _clean(getattr(caregiver, "name", None), limit=160)
