@@ -49,7 +49,8 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
             "verification_cases": "Test: ",
         }
         for field, label in runtime_labels.items():
-            assert anchors[field] in contract[field], (trait, field)
+            contract_values = contract[field] if isinstance(contract[field], (tuple, list)) else (contract[field],)
+            assert any(anchors[field] in value for value in contract_values), (trait, field)
             assert label + anchors[field] in runtime, (trait, field)
         for field in required_fields:
             values = contract[field]
