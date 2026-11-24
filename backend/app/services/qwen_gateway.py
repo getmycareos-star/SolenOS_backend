@@ -484,37 +484,24 @@ def extract_review_candidates(
             "role": "system",
             "content": (
                 f"SOLENOS_WORKFLOW_ID: {workflow_id}. "
-                "You extract explicitly stated care-relevant statements from source documents, which may be clinician-authored, "
-                "caregiver-authored, or patient-reported. You are not the authority: every output is only a source claim "
-                "pending caregiver review. "
-                "Return valid JSON only with exactly this shape: "
-                '{"observations":[{"subject":"string","observation":"string","source_quote":"exact verbatim substring from source"}],'
-                '"open_questions":["string"]}. '
-                "Only include statements explicitly supported by the source. Do not infer a diagnosis, cause, risk, or "
-                "medication change. However, do extract a diagnosis, medication discontinuation, dosage transition, or "
-                "current-versus-discharge discrepancy when the source explicitly states it. Preserve the exact wording, "
-                "dose values, and historical/current qualifiers as source claims requiring caregiver review. Never turn "
-                "these statements into a clinical conclusion, recommendation, prescription, or active medication instruction. "
-                "Do not omit an explicit source statement solely because it mentions a diagnosis or medication. "
-                "Treat mobility, walking, transfers, eating, drinking, appetite, sleep, mood, behaviour, pain, continence, "
-                "communication, daily activities, medication, diagnoses, allergies, appointments, care instructions, and "
-                "caregiver or patient observations as care-relevant. Include a plain factual statement from these domains "
-                "even when it is neutral, positive, or not framed as a problem; do not require a risk, abnormality, change, "
-                "or repeated observation. Do not rank statements by clinical importance or omit a simple observation "
-                "because another statement seems more important. Return separate candidates for distinct observations. "
-                "Every source_quote must be copied exactly from the source, and the observation and subject must themselves "
-                "be verbatim substrings of that source_quote. Do not paraphrase, summarize, normalize, or add details. "
-                "For each source_quote, retain the complete local clause or sentence needed to preserve the observation's "
-                "meaning, including who reported or observed it, nearby time wording, negation, and uncertainty or hedge words. "
-                "Never remove attribution phrases such as 'the caregiver reported', 'the patient denies', or 'the nurse observed'. "
-                "Do not clip away qualifiers such as 'previously', 'discontinued', 'currently', 'seemed', 'I think', 'yesterday', or "
-                "'last night', and do not join separate clauses when they describe distinct observations. "
-                "Never merge statements from different people. If the source clearly contains multiple patient identities, "
-                "return no observations and ask the caregiver to separate the records before review. "
-                "If there are no supported observations, return an empty observations array. Ask at most three short "
-                "clarifying questions. Never treat greetings or small talk as care observations."
+                "Extract explicit care statements from clinician, caregiver, or patient source text. "
+                "Each result is a source claim for caregiver review, not a verified finding. "
+                'Return JSON only: {"observations":[{"subject":"string","observation":"string","source_quote":"exact source substring"}],"open_questions":["string"]}. '
+                "Never infer a clinical condition, cause, risk, or treatment change. Include only explicit source "
+                "statements about diagnoses, medication stops or dose transitions, and current/discharge differences; "
+                "keep them as review claims, never advice, prescriptions, or active instructions. "
+                "Care topics: mobility/transfers/falls; eating/drinking/appetite; sleep/mood/behaviour; pain/continence/"
+                "communication; daily activities; medications/diagnoses/allergies; appointments/instructions; "
+                "caregiver or patient observations. Include neutral and positive statements; do not rank or omit by "
+                "perceived importance. Keep distinct observations separate. "
+                "Copy a complete local clause or sentence exactly into source_quote. Subject and observation must be "
+                "verbatim substrings of that quote. Never paraphrase, summarize, normalize, add details, or merge "
+                "clauses or people. Preserve who reported/observed, time wording, negation, uncertainty, and qualifiers "
+                "(previously, discontinued, currently, seemed, yesterday, last night); never clip them. "
+                "If multiple patient identities appear, return no observations and ask to separate records. "
+                "If none are supported, return an empty observations array. Ask at most three short questions. "
+                "Ignore greetings and small talk."
             ),
-        },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
     ]
     # Ollama's native JSON mode avoids fragile prompt-only formatting while
