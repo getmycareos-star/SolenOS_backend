@@ -4865,8 +4865,23 @@ def reconstruct_recorded_state_as_of(
     assessment_rows = []
     authorized_review_reviewer_ids = set()
     authorized_assessment_reviewer_ids = set()
+    try:
+        review_history_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceReviewRecord.__tablename__)
+        } if schema_inspector.has_table(EvidenceReviewRecord.__tablename__) else set()
+    except Exception:
+        review_history_columns = set()
+    try:
+        claim_assessment_columns = {
+            column["name"] for column in schema_inspector.get_columns(EvidenceClaimAssessment.__tablename__)
+        } if schema_inspector.has_table(EvidenceClaimAssessment.__tablename__) else set()
+    except Exception:
+        claim_assessment_columns = set()
 
-    if schema_inspector.has_table(EvidenceReviewRecord.__tablename__):
+    if {
+        "id", "person_id", "evidence_id", "review_type", "outcome", "rationale",
+        "criteria", "policy_version", "reviewed_by_caregiver_id", "created_at",
+    }.issubset(review_history_columns):
         review_rows = (
             db.query(EvidenceReviewRecord)
             .join(Evidence, Evidence.id == EvidenceReviewRecord.evidence_id)
@@ -4913,7 +4928,10 @@ def reconstruct_recorded_state_as_of(
             "created_at": row.created_at.isoformat() if row.created_at else None,
         } for row in review_rows]
 
-    if schema_inspector.has_table(EvidenceClaimAssessment.__tablename__):
+    if {
+        "id", "person_id", "claim_id", "claim_version", "status", "rationale",
+        "policy_version", "evidence_links", "reviewed_by_caregiver_id", "created_at",
+    }.issubset(claim_assessment_columns):
         assessment_rows = (
             db.query(EvidenceClaimAssessment)
             .join(CareAssertion, CareAssertion.id == EvidenceClaimAssessment.claim_id)
