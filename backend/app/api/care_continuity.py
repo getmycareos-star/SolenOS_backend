@@ -4520,8 +4520,82 @@ def review_assertion_status(assertion_id: str, payload: dict[str, Any], request:
         raise HTTPException(status_code=404, detail="Assertion not found")
     previous = _jsonable(dict(row))
     requested_status = str(payload.get("assertion_status") or "").strip()
+
+    # Withdrawal is a caregiver-authored lifecycle transition, not deletion.
+    # It is deliberately separate from acceptance: only an already accepted
+    # assertion can be withdrawn, and the caller must identify the exact state
+    # they reviewed. The prior payload and reason are retained in the append-only
+    # assertion revision ledger before the current projection is reconciled.
+    if requested_status == "withdrawn":
+        expected_status = str(payload.get("expected_assertion_status") or "").strip()
+        reason = str(payload.get("reason") or "").strip()
+        if expected_status != previous.get("assertion_status"):
+            raise HTTPException(status_code=409, detail="This care detail changed after it was displayed. Review the latest version before withdrawing it")
+        if previous.get("assertion_status") not in {"accepted", "caregiver_reviewed"}:
+            raise HTTPException(status_code=409, detail="Only an accepted care detail can be withdrawn")
+        if len(reason) < 8 or len(reason) > 1000:
+            raise HTTPException(status_code=422, detail="Add a withdrawal reason between 8 and 1,000 characters")
+        try:
+            connection = db.connection()
+            if not inspect(connection).has_table("care_assertion_revisions"):
+                raise HTTPException(status_code=503, detail="Care-record history is unavailable; this detail was not withdrawn")
+            revisions = _table(db, "care_assertion_revisions")
+            latest = db.execute(select(func.max(revisions.c.revision_number)).where(
+                revisions.c.person_id == person_id,
+                revisions.c.assertion_id == assertion_id,
+            )).scalar()
+            current = dict(previous)
+            current["assertion_status"] = "withdrawn"
+            current["updated_by_caregiver_id"] = caregiver_id
+            values = {"assertion_status": "withdrawn"}
+            if "updated_by_caregiver_id" in assertions.c:
+                values["updated_by_caregiver_id"] = caregiver_id
+            if "updated_at" in assertions.c:
+                values["updated_at"] = datetime.now(timezone.utc)
+            db.execute(update(assertions).where(
+                assertions.c.id == assertion_id,
+                assertions.c.person_id == person_id,
+                assertions.c.assertion_status == expected_status,
+            ).values(**values))
+            db.execute(insert(revisions).values(
+                id=str(uuid.uuid4()),
+                person_id=person_id,
+                assertion_id=assertion_id,
+                revision_number=int(latest or 0) + 1,
+                previous_payload=previous,
+                current_payload=current,
+                revision_reason="Caregiver withdrew this care detail: " + reason,
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=datetime.now(timezone.utc),
+            ))
+            execution = execute_care_continuity_reconciliation(
+                db,
+                person_id,
+                workflow="care_assertion_review",
+                source_assertion_id=assertion_id,
+                source_evidence_ids=previous.get("evidence_ids") or [],
+            )
+            db.commit()
+            execution["stages"]["reconciliation"] = "committed"
+            updated = db.execute(select(assertions).where(
+                assertions.c.id == assertion_id,
+                assertions.c.person_id == person_id,
+            )).mappings().one()
+            response = _jsonable(dict(updated))
+            response["change_intelligence_status"] = "available"
+            response["care_continuity_execution"] = execution
+            response["withdrawal_reason"] = reason
+            return response
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Care assertion withdrawal could not be persisted")
+            raise HTTPException(status_code=503, detail="Care detail could not be withdrawn; the saved record was not changed") from exc
+
     if requested_status != "accepted":
-        raise HTTPException(status_code=422, detail="This workflow only records an explicit caregiver review as accepted")
+        raise HTTPException(status_code=422, detail="This workflow only records an explicit caregiver review as accepted or withdrawn")
     if previous.get("assertion_status") in {"retracted", "superseded", "withdrawn"}:
         raise HTTPException(status_code=409, detail="Retracted or superseded assertions cannot be accepted; preserve them and create a new assertion")
     review_days = payload.get("review_after_days", previous.get("review_after_days"))
