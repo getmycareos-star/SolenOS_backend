@@ -6,6 +6,20 @@ The AI Companion is a conversational interface to the Living Care Record (LCR), 
 
 This contract implements the relevant requirements in `docs/SOLENOS_MASTER_VALUES.md`, especially V02, V04–V12, V26–V29, V37–V38.
 
+## Authenticated caregiver context
+
+Every Companion request constructs its caregiver context from the server-validated bearer session and the current active caregiver access grant. The request body and conversational text cannot select or rename the authenticated caregiver or change the care recipient in scope.
+
+- Caregiver ID and care-recipient ID are bound to the same active grant on every request. The linked account ID, when present, is retained in backend context for identity/audit correlation and is not sent to Qwen.
+- Full name, preferred name, recorded relationship, grant role, access scope, and effective permissions come from the authenticated caregiver and grant records. A greeting may use the caregiver's preferred name but excludes recipient identity, relationship, role, permissions, and care responsibilities.
+- Companion local time is derived only from the caregiver's explicitly configured IANA timezone. Missing or invalid values produce an unknown local-time state; the server timezone and device location are not substitutes.
+- Notification-delivery timezone is independent. It neither configures nor invalidates the Companion timezone, and changing one preference does not mutate the other.
+- Locale, date format, measurement system, and communication style are caregiver preferences. They do not change clinical source values or patient facts.
+- Responsibilities and open loops are included only when they belong to the authenticated caregiver or a valid joint assignment for the authorized recipient.
+- Conversation history is scoped to the authenticated caregiver and recipient. Conversation text can resolve references but is not clinical evidence and cannot silently create or modify an LCR assertion.
+
+The backend is the authorization authority. Qwen receives a minimal identity envelope for response wording; it cannot select identities, widen access, establish local time, or perform a write.
+
 ## Required response behavior
 
 1. **Respond to the current intent.** Answer the question asked before adding context. Greetings, thanks, frustration, and general questions should not automatically become a care review.
