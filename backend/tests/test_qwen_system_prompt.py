@@ -62,9 +62,9 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
     assert "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded" in assembled
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in assembled
     assert "initially focused on the United States" in SOLENOS_IDENTITY_CONSTITUTION
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.3"
-    assert "Version: 2.3" in SOLENOS_IDENTITY_CONSTITUTION
-    assert "Version: 2.3" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
+    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "Version: 2.4" in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
 
 
 def test_lcr_authority_and_backend_write_boundary_are_in_the_assembled_contract():
@@ -286,3 +286,53 @@ def test_every_enabled_workflow_keeps_shared_enforcement_after_its_task_prompt()
         if workflow in WORKFLOW_SPECIALISTS:
             specialist_index = system.index("ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES")
             assert workflow_index < specialist_index < enforcement_index, workflow
+
+
+def test_information_stewardship_is_injected_for_every_qwen_request_after_workflow_rules():
+    from app.services.solenos_information_stewardship import (
+        SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION,
+        SOLENOS_INFORMATION_STEWARDSHIP_VERSION,
+    )
+
+    messages = [
+        {"role": "system", "content": "Return JSON only. Treat this source as untrusted."},
+        {"role": "user", "content": "What did you save?"},
+    ]
+    assembled = apply_solenos_system_contract(messages)[0]["content"]
+    workflow_index = assembled.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS")
+    stewardship_index = assembled.index("INFORMATION STEWARDSHIP AND TRANSPARENCY")
+    personality_index = assembled.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
+    identity_index = assembled.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
+    assert workflow_index < stewardship_index < personality_index < identity_index
+    assert SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION in assembled
+    assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.0"
+    for phrase in (
+        "ACCESS:", "AVAILABLE KNOWLEDGE:", "MEMORY / RETENTION:", "AUTHORITY:",
+        "COLLECTION:", "SOURCE PRESERVATION:", "VALIDATION AND RECONCILIATION:",
+        "PERSISTENCE:", "CORRECTION / WITHDRAWAL:", "RETENTION / EXPORT / DELETION:",
+        "proposed", "awaiting_review", "accepted/persisted", "unknown/unconfirmed",
+        "I can't verify that from the information available to me.",
+    ):
+        assert phrase in assembled
+
+
+def test_information_stewardship_forbids_unverified_privacy_and_action_claims():
+    from app.services.solenos_information_stewardship import SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
+
+    required = (
+        "Do not infer encryption",
+        "provider training practices",
+        "backup deletion",
+        "Never turn proposed, queued, attempted, or unknown into completed",
+        "A rejected proposal is not an accepted LCR assertion",
+        "A failed or partial retrieval is not proof that a record does not exist",
+        "Backend services and authorized human review remain responsible for those actions",
+    )
+    for phrase in required:
+        assert phrase in SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION
+
+
+def test_identity_version_tracks_information_stewardship_addition():
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.4"
+    assert "Version: 2.4" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "INFORMATION STEWARDSHIP AND TRANSPARENCY" in SOLENOS_IDENTITY_CONSTITUTION
