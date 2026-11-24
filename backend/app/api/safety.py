@@ -74,6 +74,7 @@ def _sanitize_client_review_flags(
         rows = db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).all()
         persisted = {row.id: row for row in rows}
         if len(persisted) != len(evidence_ids):
