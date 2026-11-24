@@ -1772,6 +1772,11 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
             correction_lineage = _care_event_correction_fingerprint_snapshot(
                 db, person_id, str(event.id),
             )
+            if correction_lineage.get("status") != "checked":
+                statuses["care_events"].update({
+                    "status": "partial",
+                    "reason": "event_correction_fingerprint_unavailable",
+                })
             sources = [{
                 "evidence_id": row.id,
                 "source_type": row.source_type,
@@ -2830,6 +2835,11 @@ def prepare_handoff_draft(
                     correction_lineage = _care_event_correction_fingerprint_snapshot(
                         db, person_id, str(source_id),
                     )
+                    if correction_lineage.get("status") != "checked":
+                        statuses[table_name].update({
+                            "status": "partial",
+                            "reason": "event_correction_fingerprint_unavailable",
+                        })
                     details["correction_lineage"] = correction_lineage
                     fingerprint_row["correction_lineage"] = correction_lineage
                 source_fingerprint = _fingerprint(fingerprint_row)
