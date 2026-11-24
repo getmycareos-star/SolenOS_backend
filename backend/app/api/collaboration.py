@@ -155,6 +155,17 @@ def _sanitize_companion_event_context(event_context: list[str], shared_lcr_conte
         retained.append(prefix + ": " + json.dumps(record, ensure_ascii=False, default=str))
     return retained
 
+def _active_person_evidence_query(db: Session, person_id: str):
+    """Select only live evidence for one person; caregiver deletion is a tombstone."""
+    return db.query(EvidenceModel).filter(
+        EvidenceModel.person_id == str(person_id),
+        or_(
+            EvidenceModel.evidence_status.is_(None),
+            func.lower(EvidenceModel.evidence_status) != "deleted_by_caregiver",
+        ),
+    )
+
+
 def _build_unified_lcr_context_or_422(*args, **kwargs):
     try:
         return build_unified_lcr_context(*args, **kwargs)
@@ -649,8 +660,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
     }
     evidence = {
         str(item.id): item for item in (
-            db.query(EvidenceModel).filter(
-                EvidenceModel.person_id == person_id,
+            _active_person_evidence_query(db, person_id).filter(
                 EvidenceModel.id.in_(evidence_ids or {"__no_matching_evidence__"}),
             ).all() if evidence_ids else []
         )
@@ -685,8 +695,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
     if missing_evidence_ids:
         evidence.update({
             str(item.id): item
-            for item in db.query(EvidenceModel).filter(
-                EvidenceModel.person_id == person_id,
+            for item in _active_person_evidence_query(db, person_id).filter(
                 EvidenceModel.id.in_(missing_evidence_ids),
             ).all()
         })
@@ -787,8 +796,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
     ))
     duplicate_counts = {}
     if source_hashes:
-        for duplicate in db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
+        for duplicate in _active_person_evidence_query(db, person_id).filter(
             EvidenceModel.source_text_sha256.in_(source_hashes),
         ).all():
             if duplicate.source_text_sha256:
@@ -1010,9 +1018,8 @@ class QwenCareUnderstandingRequest(BaseModel):
 
 
 def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, evidence_id: str, raw_text: str) -> None:
-    evidence = db.query(EvidenceModel).filter(
+    evidence = _active_person_evidence_query(db, person_id).filter(
         EvidenceModel.id == evidence_id,
-        EvidenceModel.person_id == person_id,
     ).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Saved source could not be found.")
@@ -8694,9 +8701,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for evidence_id in (event.evidence_ids or [])
             if evidence_id
         ))
-        evidence_query = db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
-        )
+        evidence_query = _active_person_evidence_query(db, person_id)
         if not can_view_documents:
             evidence_query = evidence_query.filter(EvidenceModel.type != "document")
         linked_rows = (
@@ -8994,9 +8999,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 }, ensure_ascii=False))
 
             existing_evidence_ids = set(_context_record_ids(evidence_context, "evidence_id"))
-            historical_evidence_query = db.query(EvidenceModel).filter(
-                EvidenceModel.person_id == person_id,
-            )
+            historical_evidence_query = _active_person_evidence_query(db, person_id)
             if not can_view_documents:
                 historical_evidence_query = historical_evidence_query.filter(EvidenceModel.type != "document")
             historical_evidence = historical_evidence_query.filter(
