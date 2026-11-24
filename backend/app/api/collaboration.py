@@ -976,6 +976,38 @@ def _scope(request: Request, db: Session, *, allow_documents_only: bool = False)
 
 
 
+def _caregiver_preferences_scope(request: Request, db: Session) -> tuple[str, str]:
+    """Resolve only the bearer-authenticated caregiver's own profile.
+
+    Unlike care-record operations, personal preference reads/writes do not
+    require a patient-record membership grant because they expose no patient
+    data and cannot change the care record.
+    """
+    person_id = getattr(request.state, "scoped_person_id", None)
+    caregiver_id = getattr(request.state, "scoped_caregiver_id", None)
+    if not person_id or not caregiver_id:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="A valid SolenOS session is required")
+        token_hash = hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
+        session = db.query(AnonymousSession).filter(
+            AnonymousSession.token_hash == token_hash,
+            AnonymousSession.revoked_at.is_(None),
+            AnonymousSession.expires_at > datetime.now(timezone.utc),
+        ).first()
+        if session is None:
+            raise HTTPException(status_code=401, detail="SolenOS session is invalid or expired")
+        person_id, caregiver_id = str(session.person_id), str(session.caregiver_id)
+    _resolve_anonymous_session_id(request, db, str(person_id), str(caregiver_id))
+    caregiver = db.query(Caregiver).filter_by(
+        id=str(caregiver_id), person_id=str(person_id),
+    ).first()
+    if caregiver is None:
+        raise HTTPException(status_code=403, detail="The signed-in caregiver profile could not be confirmed")
+    return str(person_id), str(caregiver_id)
+
+
 def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
     """Resolve the verified bearer session without depending on ASGI state propagation."""
     session_id = getattr(request.state, "anonymous_session_id", None)
@@ -11699,7 +11731,7 @@ class CaregiverPreferencesUpdate(BaseModel):
 
 @router.get("/caregiver/preferences")
 def get_caregiver_preferences(request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _caregiver_preferences_scope(request, db)
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
@@ -11720,7 +11752,7 @@ def update_caregiver_preferences(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _caregiver_preferences_scope(request, db)
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
