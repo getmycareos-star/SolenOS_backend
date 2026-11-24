@@ -204,3 +204,27 @@ def test_production_companion_prompts_do_not_identify_as_the_qwen_model():
         if "You are Qwen," in source or "I am Qwen," in source:
             offenders.append(str(source_path.relative_to(app_root)))
     assert offenders == []
+
+
+
+def test_every_enabled_workflow_receives_the_greeting_and_social_response_constitution():
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS
+
+    required = (
+        "For greeting-only messages",
+        "Never invent or assume the caregiver's name",
+        "Do not say you missed them",
+        "Thanks, acknowledgements, and farewells receive proportionate replies",
+        "If a greeting includes a care question",
+        "Greetings and social replies are not care evidence",
+        "history actually supplied in this authorized request",
+    )
+    for workflow in sorted(ENABLED_WORKFLOWS):
+        routed = apply_specialized_intelligence([
+            {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"},
+            {"role": "user", "content": "Good morning."},
+        ])
+        system = apply_solenos_system_contract(routed)[0]["content"]
+        for rule in required:
+            assert rule.casefold() in system.casefold(), (workflow, rule)
