@@ -52,7 +52,7 @@ def test_product_identity_is_the_final_authority_after_workflow_instructions():
     result = apply_solenos_system_contract(messages)
     content = result[0]["content"]
     assert content.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < content.index(
-        "SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION"
+        "SOLENOS COMPANION — PRODUCT IDENTITY"
     )
     assert content.endswith(SOLENOS_IDENTITY_CONSTITUTION)
     assert "David personally programmed, trained, authored, or built every" in content
