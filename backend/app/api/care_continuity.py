@@ -6359,6 +6359,58 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                 raise HTTPException(status_code=422, detail=f"{key} must match the persisted column type")
             data[key] = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     try:
+        if resource == "record-change-items":
+            # A change item is not merely an audit annotation: its after-value
+            # must become the canonical care-fact value in the same transaction.
+            # Otherwise the revision timeline can claim a change that the
+            # authoritative care_facts row never received.
+            target_type = str(data.get("target_type") or "").strip().casefold()
+            operation = str(data.get("operation") or "").strip().casefold()
+            before_value = data.get("before_value")
+            after_value = data.get("after_value")
+            if target_type not in {"care_fact", "fact"} or operation != "update":
+                raise HTTPException(
+                    status_code=422,
+                    detail="Change items currently support versioned care-fact updates only; use the record's dedicated workflow for other changes.",
+                )
+            if (
+                not isinstance(before_value, dict)
+                or not isinstance(after_value, dict)
+                or set(before_value) != {"fact_value"}
+                or set(after_value) != {"fact_value"}
+                or not isinstance(before_value.get("fact_value"), str)
+                or not isinstance(after_value.get("fact_value"), str)
+                or not before_value["fact_value"].strip()
+                or not after_value["fact_value"].strip()
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Care-fact corrections require the exact previous and replacement fact_value.",
+                )
+            facts_table = _table(db, "care_facts")
+            current_fact = db.execute(
+                select(facts_table).where(
+                    facts_table.c.id == data["target_id"],
+                    facts_table.c.person_id == person_id,
+                ).with_for_update()
+            ).mappings().first()
+            if current_fact is None:
+                raise HTTPException(status_code=404, detail="Care fact was not found in this care record")
+            if str(current_fact.get("fact_value") or "") != before_value["fact_value"]:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This care fact changed after it was displayed. Review the latest saved wording before correcting it.",
+                )
+            if before_value["fact_value"] == after_value["fact_value"]:
+                raise HTTPException(status_code=422, detail="The replacement must change the saved care-fact wording")
+            fact_changes = {"fact_value": after_value["fact_value"]}
+            if "updated_at" in facts_table.c:
+                fact_changes["updated_at"] = datetime.now(timezone.utc)
+            db.execute(update(facts_table).where(
+                facts_table.c.id == data["target_id"],
+                facts_table.c.person_id == person_id,
+            ).values(**fact_changes))
+
         result = db.execute(insert(table).values(**data).returning(table))
         row = result.mappings().one()
         if resource == "record-change-items":
