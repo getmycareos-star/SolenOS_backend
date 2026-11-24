@@ -703,10 +703,17 @@ async def ask_daily_care_qwen(
             if response_exceeds_hard_maximum(parsed["answer"], response_length_policy):
                 raise ValueError("Qwen answer exceeded the selected caregiver response-length contract after repair")
     except HTTPException as exc:
-        if exc.status_code == 503:
+        if exc.status_code in {502, 503, 504}:
+            # Gateway protocol errors, runtime outages, and inference timeouts
+            # must all fail closed. Keep saved Daily Care history available,
+            # but never create a proposal from an absent or malformed answer.
+            failure_status = "qwen_invalid_response" if exc.status_code == 502 else "qwen_unavailable"
             return {
-                "status": "qwen_unavailable",
-                "answer": "Daily Care records remain available, but Qwen could not answer this request right now. Try again later.",
+                "status": failure_status,
+                "answer": (
+                    "Daily Care records remain available, but the AI could not return a usable answer. "
+                    "No LCR changes were made. Try again later."
+                ),
                 "source_records": [],
                 "proposal_analysis_id": None,
                 "proposals": [],
