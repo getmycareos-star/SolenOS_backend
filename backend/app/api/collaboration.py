@@ -3438,20 +3438,20 @@ def _contains_unsupported_quotation(reply: str, source_text: str) -> bool:
     Short labels and the standard uncertainty disclosure are not treated as source
     quotations. Source matching is whitespace-normalized and case-insensitive.
     """
-    source = re.sub(r"\\s+", " ", (source_text or "")).casefold()
+    source = re.sub(r"\s+", " ", (source_text or "")).casefold()
     standard_disclosures = {
         "i can't verify that from the information available to me.",
         "i cannot verify that from the information available to me.",
     }
     patterns = (
         r"“([^”]{24,})”",
-        r'"([^"\\n]{24,})"',
+        r'"([^"\n]{24,})"',
         r"‘([^’]{24,})’",
     )
     for pattern in patterns:
         for match in re.finditer(pattern, reply or ""):
             quote = re.sub(r"\\s+", " ", match.group(1)).strip()
-            if len(re.findall(r"[^\\W_]+", quote, flags=re.UNICODE)) < 4:
+            if len(re.findall(r"[^\W_]+", quote, flags=re.UNICODE)) < 4:
                 continue
             normalized = quote.casefold()
             if normalized in standard_disclosures:
