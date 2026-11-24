@@ -650,6 +650,7 @@ def extract_review_candidates(
     source_event_id: str,
     source_evidence_id: str | None = None,
     workflow_id: str = "care_claim_extraction",
+    audit_context: dict | None = None,
 ) -> dict:
     """Return verbatim-grounded review candidates under the correct source workflow."""
     if workflow_id not in {"care_claim_extraction", "daily_capture", "daily_capture_extraction", "document_candidate_extraction"}:
@@ -693,7 +694,17 @@ def extract_review_candidates(
     ]
     # Ollama's native JSON mode avoids fragile prompt-only formatting while
     # keeping source-quote validation as the final authority boundary.
-    raw = qwen_chat(messages, response_format="json", options={"temperature": 0, "num_predict": 384})
+    trusted_audit_context = dict(audit_context) if isinstance(audit_context, dict) else {}
+    if source_event_id:
+        trusted_audit_context.setdefault("source_event_ids", [source_event_id])
+    if source_evidence_id:
+        trusted_audit_context.setdefault("source_evidence_ids", [source_evidence_id])
+    raw = qwen_chat(
+        messages,
+        response_format="json",
+        options={"temperature": 0, "num_predict": 384},
+        audit_context=trusted_audit_context,
+    )
     try:
         parsed = json.loads(raw)
     except (TypeError, ValueError) as exc:
@@ -792,7 +803,7 @@ def extract_review_candidates(
 
 
 
-def extract_companion_care_candidates(source_text: str) -> dict:
+def extract_companion_care_candidates(source_text: str, *, audit_context: dict | None = None) -> dict:
     """Identify possible care observations; every returned candidate is an exact source quotation."""
     source = (source_text or "").strip()
     if len(source) > 4_000:
@@ -827,6 +838,7 @@ def extract_companion_care_candidates(source_text: str) -> dict:
         ],
         response_format="json",
         options={"temperature": 0, "num_predict": 256},
+        audit_context=audit_context,
     )
     try:
         parsed = json.loads(raw)
