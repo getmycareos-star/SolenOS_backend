@@ -102,6 +102,7 @@ def build_companion_caregiver_context(
     timezone_conflict: bool = False,
     caregiver_profile=None,
     active_roles=None,
+    active_roles_truncated: bool = False,
     active_responsibilities=None,
     assigned_open_loops=None,
     responsibilities_truncated: bool = False,
@@ -187,6 +188,8 @@ def build_companion_caregiver_context(
         "proximity_category": _enum_value(getattr(caregiver_profile, "proximity_category", None)),
         } if caregiver_profile is not None else None,
         "active_roles": [_role_context(row) for row in (active_roles or [])[:10]],
+        "active_roles_status": "available" if active_roles else "no_rows_returned",
+        "active_roles_truncated": bool(active_roles_truncated),
         "active_responsibilities": [
             _responsibility_context(row) for row in (active_responsibilities or [])[:10]
         ],
