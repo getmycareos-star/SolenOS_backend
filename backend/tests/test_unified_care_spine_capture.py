@@ -774,7 +774,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
     pending_correction_id = f"companion-lineage-waiting-{suffix}"
     aggregate_event_id = f"companion-lineage-unsteadiness-{suffix}"
     aggregate_correction_id = f"companion-lineage-unsteadiness-correction-{suffix}"
-    relationship_id = f"companion-lineage-link-{suffix}"
+    relationship_id = str(uuid.uuid4())
     aggregate_event_time = datetime.now(timezone.utc) - timedelta(hours=1)
 
     def override_get_db():
