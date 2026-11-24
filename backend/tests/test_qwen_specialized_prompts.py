@@ -12,7 +12,6 @@ from app.services.qwen_system_prompt import (
     SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
     apply_solenos_system_contract,
 )
-from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
 
 
 def test_all_ten_specialists_are_defined_and_have_distinct_responsibilities():
@@ -135,20 +134,22 @@ def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_deci
     assert all(workflow in ENABLED_WORKFLOWS for workflow in WORKFLOWS_WITHOUT_SPECIALISTS)
 
 
-def test_runtime_contract_and_two_specialists_fit_the_configured_context_budget():
-    runtime_base = (
-        len(SOLENOS_QWEN_CORE_SYSTEM_PROMPT)
-        + len(SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION)
-        + len(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
-    )
-    largest_two_specialists = sum(sorted(
-        (len(value) for value in SPECIALIZED_PROMPTS.values()),
-        reverse=True,
-    )[:2])
-    # At 4096 context, reserve 96 output tokens and 128 safety tokens.
-    # 3.5 UTF-8 bytes/token is the gateway's conservative preflight estimate.
-    estimated_tokens = (runtime_base + largest_two_specialists + 8 * 3.5) / 3.5
-    assert estimated_tokens < 4096 - 96 - 128
+def test_largest_supported_runtime_prompt_leaves_room_for_care_evidence():
+    from app.services.qwen_gateway import _estimate_prompt_tokens
+
+    largest = (0, None)
+    for workflow in WORKFLOW_SPECIALISTS:
+        messages = [{
+            "role": "system",
+            "content": f"SOLENOS_WORKFLOW_ID: {workflow}.",
+        }]
+        final = apply_solenos_system_contract(apply_specialized_intelligence(messages))
+        estimate = _estimate_prompt_tokens(final)
+        if estimate > largest[0]:
+            largest = (estimate, workflow)
+
+    # Gateway defaults: 4096 context, 96 output tokens, 128-token safety margin.
+    assert largest[0] < 4096 - 96 - 128
     assert max(len(value) for value in SPECIALIZED_PROMPTS.values()) <= 1200
 
 
