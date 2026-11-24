@@ -766,7 +766,7 @@ def update_loop(loop_id: str, payload: LoopUpdate, request: Request, db: Session
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "updated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
-    if payload.status is not None:
+    if payload.status is not None or payload.expected_version is not None:
         _require_expected_version(loop, payload.expected_version)
     before = _snapshot(loop)
     changes = payload.model_dump(exclude_unset=True)

@@ -1498,6 +1498,12 @@ def test_lifecycle_decisions_reject_missing_and_stale_versions():
         json={"title": "Updated follow-up title"},
     )
     assert edited.status_code == 200, edited.text
+    stale_metadata_update = client.patch(
+        f"/api/v1/open-loops/{closable['id']}",
+        headers=headers,
+        json={"title": "Overwrite from the stale screen", "expected_version": stale_version},
+    )
+    assert stale_metadata_update.status_code == 409, stale_metadata_update.text
     missing_status_version = client.patch(
         f"/api/v1/open-loops/{closable['id']}",
         headers=headers,
