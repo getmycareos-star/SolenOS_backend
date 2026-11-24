@@ -1023,6 +1023,7 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                 evidence_rows = db.query(Evidence).filter(
                     Evidence.person_id == draft.person_id,
                     Evidence.id.in_(evidence_ids),
+                    Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
                 ).all() if evidence_ids else []
                 evidence_by_id = {str(row.id): row for row in evidence_rows}
                 linked = [evidence_by_id[value] for value in evidence_ids if value in evidence_by_id]
@@ -1078,6 +1079,7 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     Evidence.id == source_id,
                     Evidence.person_id == draft.person_id,
                     Evidence.type == "document",
+                    Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
                 ).first()
                 upload = db.query(EvidenceUpload).filter(EvidenceUpload.evidence_id == source_id).first()
                 if document is None or upload is None:
@@ -1777,6 +1779,7 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
         evidence_rows = db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).all() if evidence_ids else []
         evidence_by_id = {str(row.id): row for row in evidence_rows}
         output = []
@@ -1900,6 +1903,7 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
         document_query = db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.type == "document",
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).order_by(Evidence.uploaded_at.desc().nullslast(), Evidence.id.asc())
         documents = []
         document_offset = 0
