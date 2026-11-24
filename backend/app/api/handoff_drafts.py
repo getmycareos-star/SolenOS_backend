@@ -2308,7 +2308,13 @@ def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
     }
 
 
-def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str) -> dict:
+def _generate_grounded_handoff(
+    records: list[dict],
+    purpose: str,
+    audience: str,
+    *,
+    audit_context: dict | None = None,
+) -> dict:
     """Qwen drafts a concise briefing from retrieved LCR records; the backend binds and validates every source quote.
 
     Qwen is a renderer, never a care-record authority. It receives only the
@@ -2457,6 +2463,7 @@ def _generate_grounded_handoff(records: list[dict], purpose: str, audience: str)
             timeout=150,
             response_format=response_schema,
             options={"temperature": 0, "num_predict": response_length_policy.token_budget},
+            audit_context=audit_context,
         )
         parsed = json.loads(raw)
         items = parsed.get("items") if isinstance(parsed, dict) else None
@@ -3220,7 +3227,21 @@ def prepare_handoff_draft(
             "source_freshness": _draft_source_freshness(db, existing),
         }
 
-    generated_document = _generate_grounded_handoff(records, payload.purpose, payload.audience)
+    generated_document = _generate_grounded_handoff(
+        records,
+        payload.purpose,
+        payload.audience,
+        audit_context={
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "request_id": request_id,
+            "source_refs": [
+                f"{item['source_table']}:{item['source_id']}"
+                for item in records
+                if item.get("source_table") and item.get("source_id")
+            ][:100],
+        },
+    )
     structured_content["generation"] = generated_document
 
     # One durable identity binds the response, persisted draft, revision, and audit event.
