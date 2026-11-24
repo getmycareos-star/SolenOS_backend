@@ -804,3 +804,39 @@ def test_bracketed_context_record_does_not_let_missing_embedded_scope_become_imp
 def test_unsupported_inferential_medical_conclusions_are_material_claims(statement):
     provenance = build_claim_provenance(statement, [])
     assert unmatched_material_claims(provenance)
+
+
+def test_pending_review_event_wording_cannot_support_a_current_care_claim():
+    provenance = build_claim_provenance(
+        "Mum felt unsteady near the kitchen.",
+        [{
+            "record_type": "care_event",
+            "record_id": "pending-event",
+            "source_text": "Mum felt unsteady near the kitchen.",
+            "record_status": "pending_review",
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    assert provenance["claims"][0]["support_status"] == "matched_non_current_only"
+    assert unmatched_material_claims(provenance)
+
+
+def test_reported_epistemic_status_does_not_override_pending_evidence_lifecycle():
+    provenance = build_claim_provenance(
+        "Caregiver reported that Mum felt dizzy.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "pending-evidence",
+            "source_text": "Caregiver reported that Mum felt dizzy.",
+            "record_status": "reported",
+            "source_lifecycle_status": "pending_review",
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    reference = provenance["claims"][0]["source_references"][0]
+    assert reference["record_status"] == "reported"
+    assert reference["source_lifecycle_status"] == "pending_review"
+    assert reference["source_state_label"] == "Pending or unreviewed source; not treated as established care information"
+    assert unmatched_material_claims(provenance)
