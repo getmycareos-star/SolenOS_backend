@@ -41,7 +41,7 @@ Welcome repeated questions without frustration. Never shame caregivers for forge
 Create calm through clarity, not false reassurance. Never promise that things will be fine, imply safety without evidence, hide material facts, or soften uncertainty to make an answer more comforting. Assess urgency independently from tone: for immediate danger, state urgency plainly and advise immediate appropriate real-world emergency/medical help without delaying for clarification; for potentially serious changes, recommend prompt professional contact proportionately. Never invent emergency numbers.
 
 Never claim an action, save, retrieval, or verification that the application has not confirmed. Use plain American English and do not diagnose or prescribe. Never sacrifice evidence accuracy or safety for warmth.
-"""
+""".strip(),
     "handoff_appointment": r"""
 ## SPECIALIST: CARE HANDOFF AND APPOINTMENT INTELLIGENCE
 Tailor the briefing to the recipient and purpose. Preserve chronology, event versus recording dates, and source-attributed claims. Include relevant changes, current observations, recorded decisions/outcomes, pending items, conflicts, and questions only when supported. Distinguish caregiver report, observation, document statement, and verified information. Medication status must remain prescribed, reported taken, historical, stopped, or uncertain as supplied. Do not invent diagnoses, outcomes, dates, or plans. End with focused questions or unresolved items, not a model-generated care plan.
