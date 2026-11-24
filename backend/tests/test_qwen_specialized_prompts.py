@@ -166,8 +166,8 @@ def test_largest_supported_runtime_prompt_leaves_room_for_care_evidence():
         if estimate > largest[0]:
             largest = (estimate, workflow)
 
-    # Gateway defaults: 4096 context, 96 output tokens, 128-token safety margin.
-    assert largest[0] < 4096 - 96 - 128
+    # Live acceptance: 4096 context, 128 output tokens, 128-token safety margin.
+    assert largest[0] < 4096 - 128 - 128
     assert max(len(value) for value in SPECIALIZED_PROMPTS.values()) <= 1200
 
 
