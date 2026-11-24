@@ -4447,6 +4447,24 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
         assert readback.json()["preferred_name"] == "Mary"
         assert readback.json()["timezone"] == "America/New_York"
 
+        # A stale ambient request scope must never override the identity in
+        # the bearer capability used by the preferences endpoint.
+        from starlette.requests import Request
+        scoped_request = Request({
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/caregiver/preferences",
+            "query_string": b"",
+            "headers": [(b"authorization", f"Bearer {token}".encode())],
+        })
+        scoped_request.state.scoped_person_id = "stale-person-id"
+        scoped_request.state.scoped_caregiver_id = "stale-caregiver-id"
+        with TestingSessionLocal() as db:
+            assert collaboration._caregiver_preferences_scope(scoped_request, db) == (
+                person_id,
+                caregiver_id,
+            )
+
         from app.models.caregiver_access import CaregiverAccessGrant
         with TestingSessionLocal() as db:
             db.query(CaregiverAccessGrant).filter_by(
