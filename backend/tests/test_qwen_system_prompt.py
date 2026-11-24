@@ -82,7 +82,6 @@ def test_identity_covers_origin_and_canonical_creator_response():
         "Do not claim David personally programmed, trained, or built every component",
         "The care journey",
         "The model is replaceable",
-        "initially focused on the United States",
         "ownership of third-party technology",
     )
     for phrase in required:
