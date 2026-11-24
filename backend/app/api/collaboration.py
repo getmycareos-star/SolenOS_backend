@@ -5935,6 +5935,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         payload.text.strip(),
         context_lines,
         options={"temperature": 0, "num_predict": response_token_budget},
+        allow_output_budget_fallback=not is_critical_safety_message(payload.text),
     )
     shared_context_truncated = shared_context_truncated or prompt_context_truncated
     internal_source_ids = {
@@ -6208,6 +6209,7 @@ async def _qwen_chat_with_bounded_context(
     context_lines: list[str],
     *,
     options: dict,
+    allow_output_budget_fallback: bool = True,
 ) -> tuple[str, list[str], list[str], bool]:
     """Fit authorized care context before inference without dropping source families unfairly.
 
@@ -6232,7 +6234,7 @@ async def _qwen_chat_with_bounded_context(
     except (TypeError, ValueError):
         requested_output_tokens = 96
     output_budgets = [requested_output_tokens]
-    if requested_output_tokens > 128:
+    if allow_output_budget_fallback and requested_output_tokens > 128:
         output_budgets.append(128)
 
     last_budget_error: HTTPException | None = None
