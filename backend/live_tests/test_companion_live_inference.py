@@ -1473,6 +1473,9 @@ def test_companion_identity_is_consistent_without_model_or_patient_context():
             ("Are you human or a doctor?", "role"),
             ("What is your purpose?", "purpose"),
             ("Do you remember everything?", "memory"),
+            ("Can you see all my records?", "access"),
+            ("Do you put everything I say in the LCR?", "persistence"),
+            ("Which model powers you?", "model"),
         )
         seen_sessions = set()
         for question, expected in questions:
@@ -1513,6 +1516,17 @@ def test_companion_identity_is_consistent_without_model_or_patient_context():
             elif expected == "memory":
                 assert re.search(r"\b(?:not|don't|do not|cannot|can't)\b", reply), body
                 assert any(term in reply for term in ("authorized", "available", "record", "context")), body
+            elif expected == "access":
+                assert "authorized scope" in reply, body
+                assert "every record" in reply, body
+            elif expected == "persistence":
+                assert "not automatically" in reply, body
+                assert "approved application workflow" in reply, body
+            elif expected == "model":
+                from app.services.qwen_gateway import get_ollama_config
+
+                _, configured_model, _ = get_ollama_config()
+                assert configured_model.casefold() in reply, body
             assert not re.search(
                 r"\bdavid\s+(?:personally\s+)?(?:trained|programmed|built|coded)\b",
                 reply,
