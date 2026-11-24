@@ -62,7 +62,11 @@ def test_qwen_gateway_persists_successful_invocation_metadata_without_care_conte
     answer = qwen_gateway.qwen_chat([
         {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion. Use authorized evidence only."},
         {"role": "user", "content": "PRIVATE_SYNTHETIC_CARE_TEXT_7c21: Did Dad sleep well?"},
-    ])
+    ], audit_context={
+        "request_id": "synthetic-qwen-audit-request",
+        "source_event_ids": ["synthetic-event-1"],
+        "source_evidence_ids": ["synthetic-evidence-1"],
+    })
 
     assert answer == "The supplied record has no sleep entry."
     assert len(invocation_ids) == 1
@@ -80,6 +84,11 @@ def test_qwen_gateway_persists_successful_invocation_metadata_without_care_conte
         assert metadata["provider"] == "ollama"
         assert metadata["transport"] == "native_chat"
         assert metadata["workflow_id"] == "companion"
+        assert metadata["request_id"] == "synthetic-qwen-audit-request"
+        assert metadata["source_references"] == {
+            "source_event_ids": ["synthetic-event-1"],
+            "source_evidence_ids": ["synthetic-evidence-1"],
+        }
         assert metadata["operating_contract_version"] == qwen_gateway.SOLENOS_OPERATING_CONTRACT_VERSION
         assert len(metadata["system_prompt_sha256"]) == 64
         assert len(metadata["request_context_sha256"]) == 64
