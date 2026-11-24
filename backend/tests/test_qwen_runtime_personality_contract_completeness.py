@@ -17,7 +17,7 @@ from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION_VERSION
 def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait():
     runtime = SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
     assert f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}" in runtime
-    assert len(runtime) < 3000, f"Runtime personality kernel grew to {len(runtime)} characters"
+    assert len(runtime) < 6500, f"Runtime personality kernel grew to {len(runtime)} characters"
     required_fields = {
         "observable_behaviors",
         "required_context",
@@ -31,6 +31,15 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
         assert required_fields.issubset(contract), trait
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in runtime
         assert contract["runtime_rule"] in runtime
+        for field in (
+            "observable_behaviors",
+            "required_context",
+            "prohibited_behaviors",
+            "violation_conditions",
+            "verification_cases",
+        ):
+            for dimension in contract[field]:
+                assert dimension in runtime, (trait, field, dimension)
         for field in required_fields:
             values = contract[field]
             assert values, (trait, field)
