@@ -130,6 +130,8 @@ def test_context_uses_canonical_member_manager_permission_semantics():
     )
     assert context["caregiver_id"] == "caregiver-mary"
     assert context["access_scope"] == "full_record"
+    assert "view_lcr" in context["permissions"]
+    assert "correct_records" in context["permissions"]
 
 
 def test_documents_only_grant_cannot_build_companion_care_context():
