@@ -38,6 +38,52 @@ def upgrade() -> None:
         "UPDATE caregivers SET timezone_configured = TRUE "
         "WHERE timezone IS NOT NULL AND TRIM(timezone) <> '' AND timezone <> 'UTC'"
     ))
+    if inspector.has_table("care_notification_preferences"):
+        # Older notification settings were the only explicit caregiver
+        # timezone control. Backfill a non-UTC saved value only when the
+        # canonical caregiver timezone is still the untouched UTC default.
+        bind.execute(text("""
+            UPDATE caregivers
+            SET timezone = (
+                SELECT preference.timezone_name
+                FROM care_notification_preferences AS preference
+                WHERE preference.person_id = caregivers.person_id
+                  AND preference.caregiver_id = caregivers.id
+                LIMIT 1
+            ),
+            timezone_configured = TRUE
+            WHERE timezone = 'UTC'
+              AND timezone_configured = FALSE
+              AND EXISTS (
+                  SELECT 1 FROM care_notification_preferences AS preference
+                  WHERE preference.person_id = caregivers.person_id
+                    AND preference.caregiver_id = caregivers.id
+                    AND preference.timezone_name IS NOT NULL
+                    AND TRIM(preference.timezone_name) <> ''
+                    AND preference.timezone_name <> 'UTC'
+              )
+        """))
+    if inspector.has_table("caregiver_profiles"):
+        # Keep the legacy caregiver intelligence profile aligned when it still
+        # carries its own untouched UTC default.
+        bind.execute(text("""
+            UPDATE caregiver_profiles
+            SET timezone = (
+                SELECT caregiver.timezone
+                FROM caregivers AS caregiver
+                WHERE caregiver.id = caregiver_profiles.session_caregiver_id
+                  AND caregiver.person_id = caregiver_profiles.person_id
+                  AND caregiver.timezone_configured = TRUE
+                LIMIT 1
+            )
+            WHERE timezone = 'UTC'
+              AND EXISTS (
+                  SELECT 1 FROM caregivers AS caregiver
+                  WHERE caregiver.id = caregiver_profiles.session_caregiver_id
+                    AND caregiver.person_id = caregiver_profiles.person_id
+                    AND caregiver.timezone_configured = TRUE
+              )
+        """))
     final = {column["name"] for column in inspect(bind).get_columns("caregivers")}
     missing = set(COLUMNS) - final
     if missing:
