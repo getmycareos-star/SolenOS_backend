@@ -899,3 +899,19 @@ def test_caregiver_attributed_lcr_assertion_is_a_resolvable_claim_source():
     assert records[0]["record_type"] == "care_assertion"
     assert records[0]["record_id"] == "assertion-1"
     assert records[0]["person_id"] == "person-1"
+
+
+def test_historical_caregiver_approved_assertion_context_is_resolvable():
+    records = context_lines_to_source_records([
+        "Caregiver-approved LCR assertion (source-attributed): " + json.dumps({
+            "assertion_id": "assertion-historical-1",
+            "field": "mobility",
+            "value": "Mum felt unsteady near the kitchen.",
+            "source_text": "Caregiver reported that Mum felt unsteady near the kitchen.",
+            "status": "reported",
+            "recorded_at": "2026-11-22T10:00:00+00:00",
+        })
+    ])
+    assert len(records) == 1
+    assert records[0]["record_type"] == "care_assertion"
+    assert records[0]["record_id"] == "assertion-historical-1"
