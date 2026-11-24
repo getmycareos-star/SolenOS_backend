@@ -96,15 +96,19 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                 record_type = kind
                 break
         record_metadata: dict[str, Any] = {}
-        if not record_id:
-            try:
-                payload = json.loads(text[text.index("{"):])
-                if isinstance(payload, dict):
+        # Parse the JSON envelope even when a bracketed source ID was already
+        # found. The envelope can carry the authoritative person scope and
+        # epistemic qualifiers; skipping it for bracketed records would allow
+        # the caller's later default scope to mask a mismatched payload scope.
+        try:
+            payload = json.loads(text[text.index("{"):])
+            if isinstance(payload, dict):
+                if not record_id:
                     for key in ("source_id", "event_id", "care_event_id", "evidence_id", "capture_analysis_id", "document_analysis_id", "appointment_id", "handoff_id", "care_handoff_id", "notification_id", "id"):
                         if payload.get(key):
                             record_id = str(payload[key])
                             break
-                    source_type_map = {
+                source_type_map = {
                         "living_record": "living_care_record",
                         "events": "care_event",
                         "care_events": "care_event",
