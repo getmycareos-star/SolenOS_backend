@@ -2052,6 +2052,17 @@ def main():
             "evidence": [{"kind": "ci_fixture", "text": "Cancel attempt evidence."}],
             "idempotency_key": "postgres-open-loop-terminal-race-cancel",
         }
+        status, lifecycle_before_race = request(
+            "GET", f"/api/v1/open-loops/{lifecycle_loop_id}", token=token_a,
+        )
+        require(status == 200, f"Terminal race version read failed: {status}: {lifecycle_before_race}")
+        expected_version = lifecycle_before_race.get("loop", {}).get("version")
+        require(isinstance(expected_version, int) and expected_version > 0,
+                f"Terminal race did not receive a current saved version: {lifecycle_before_race}")
+        # Both contenders intentionally start from the same saved version.
+        # Row locking plus optimistic version checking must allow one winner.
+        close_payload["expected_version"] = expected_version
+        cancel_payload["expected_version"] = expected_version
         def terminal_transition(item):
             endpoint, payload = item
             return request(
