@@ -16,10 +16,11 @@ import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
-from app.models.care import Caregiver, Evidence
+from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
+from app.models.care import Caregiver, Correction, Evidence
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.capture_analysis import CaptureAnalysis
-from app.models.care_continuity import CareAssertion
+from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
+from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
 from app.models.privacy_request import DataSubjectRequest
@@ -106,7 +107,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             size_bytes=24,
             sha256=hashlib.sha256(b"SYNTHETIC-PRIVATE-BINARY").hexdigest(),
         ))
-        db.add(CaptureAnalysis(
+        analysis = CaptureAnalysis(
             person_id=person_id,
             caregiver_id=caregiver_id,
             source_evidence_id=evidence.id,
@@ -114,8 +115,10 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             extraction_status="completed",
             candidates=[],
             review_history=[],
-        ))
-        db.add(CareAssertion(
+        )
+        db.add(analysis)
+        db.flush()
+        assertion = CareAssertion(
             person_id=person_id,
             subject_type="person",
             subject_id=person_id,
@@ -126,6 +129,61 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             assertion_status="caregiver_reviewed",
             epistemic_state="reported",
             created_by_caregiver_id=caregiver_id,
+        )
+        db.add(assertion)
+        db.flush()
+        db.add(DocumentReviewEvent(
+            analysis_id=analysis.id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=evidence.id,
+            candidate_index=0,
+            decision_version=1,
+            decision="accept",
+            before_state={},
+            after_state={"status": "accepted"},
+            resulting_assertion_id=assertion.id,
+        ))
+        db.add(Correction(
+            person_id=person_id,
+            target_type="care_assertion",
+            target_id=assertion.id,
+            original_text="uses a walking aid",
+            corrected_text="uses a walker",
+            reason="Caregiver correction",
+            caregiver_id=caregiver_id,
+            processing_status="completed",
+            processing_attempts=1,
+            processed_at=datetime.now(timezone.utc),
+        ))
+        db.add(CareStateRevision(
+            person_id=person_id,
+            target_type="care_assertion",
+            target_id=assertion.id,
+            revision_number=1,
+            change_kind="created",
+            after_state='{"field":"mobility"}',
+            evidence_ids=[evidence.id],
+            changed_by_caregiver_id=caregiver_id,
+        ))
+        proposal = AIOutputLCRProposal(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            proposal_type="care_update",
+            proposed_change_json={"field": "mobility"},
+            source_event_ids_json=[],
+            source_evidence_ids_json=[evidence.id],
+            uncertainty_json={},
+            status="accepted",
+        )
+        db.add(proposal)
+        db.flush()
+        db.add(AIOutputLCRDecision(
+            proposal_id=proposal.id,
+            person_id=person_id,
+            reviewer_caregiver_id=caregiver_id,
+            decision="accept",
+            resulting_lcr_revision_id="synthetic-revision-1",
         ))
         db.add(AuditLogEvent(
             actor_id=caregiver_id,
@@ -158,6 +216,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert payload["scope"]["caregiver_id"] == caregiver_id
     assert payload["coverage"]["active_session"] == "complete"
     assert payload["coverage"]["documents"] == "complete_metadata"
+    assert payload["coverage"]["document_review"] == "complete_recent_window"
     assert payload["coverage"]["lcr"] == "complete_aggregate_and_recent"
     assert payload["coverage"]["audit_activity"] == "complete_recent_window"
     assert payload["coverage"]["privacy_requests"] == "complete_recent_window"
@@ -166,7 +225,16 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert by_kind["documents_and_extraction"]["details"]["evidence_count"] == 1
     assert by_kind["documents_and_extraction"]["details"]["recent_documents"][0]["filename"] == "synthetic-discharge-summary.txt"
     assert by_kind["documents_and_extraction"]["details"]["extraction_status_counts"] == {"completed": 1}
-    assert by_kind["living_care_record_state"]["details"]["assertion_status_counts"] == {"caregiver_reviewed": 1}
+    assert by_kind["documents_and_extraction"]["details"]["recent_extractions"][0]["extraction_status"] == "completed"
+    assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["decision"] == "accept"
+    assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["reviewer_name"] == "Primary caregiver"
+    assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["resulting_assertion_id"] == assertion.id
+    lcr_details = by_kind["living_care_record_state"]["details"]
+    assert lcr_details["assertion_status_counts"] == {"caregiver_reviewed": 1}
+    assert lcr_details["recent_corrections"][0]["actor_name"] == "Primary caregiver"
+    assert lcr_details["recent_revisions"][0]["revision_number"] == 1
+    assert lcr_details["recent_proposals"][0]["status"] == "accepted"
+    assert lcr_details["recent_proposals"][0]["decisions"][0]["decision"] == "accept"
     assert by_kind["audit_activity"]["details"]["recent_events"][0]["action"] == "synthetic.document.uploaded"
     assert by_kind["privacy_data_control_operations"]["details"]["requests"][0]["request_type"] == "access"
 
