@@ -10029,6 +10029,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             ][:100],
             "retrieval_coverage": {
                 "status": model_retrieval_coverage.get("retrieval_completeness", "unknown"),
+                "answer_restriction": model_retrieval_coverage.get("answer_restriction", "unknown"),
+                "retrieval_scan_complete": bool(
+                    lcr_context_coverage.get("retrieval_scan_complete", False)
+                ),
                 "retrieval_projection_complete": bool(
                     lcr_context_coverage.get("retrieval_projection_complete", False)
                 ),
@@ -10037,6 +10041,20 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or more_available_source_names
                 ),
                 "context_truncated": bool(context_truncated),
+                "prompt_context_complete": not bool(context_truncated),
+                "missing_required_sources": list(
+                    model_retrieval_coverage.get("missing_required_sources") or []
+                )[:30],
+                "missing_optional_sources": list(
+                    model_retrieval_coverage.get("missing_optional_sources") or []
+                )[:30],
+                "failed_sources": list(model_retrieval_coverage.get("failed_sources") or [])[:30],
+                "more_available_sources": list(
+                    model_retrieval_coverage.get("more_available_sources") or []
+                )[:30],
+                "selection_truncated_sources": list(
+                    model_retrieval_coverage.get("selection_truncated_sources") or []
+                )[:30],
             },
         }
         try:
