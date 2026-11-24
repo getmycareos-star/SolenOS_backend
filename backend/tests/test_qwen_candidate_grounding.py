@@ -72,6 +72,8 @@ def test_capture_candidates_keep_only_verbatim_source_grounded_observations(monk
         "She ate half of breakfast this morning.",
     ]
     assert all(item["review_status"] == "pending_review" for item in result["observations"])
+    assert captured["kwargs"]["audit_context"]["source_event_ids"] == ["event-123"]
+    assert captured["kwargs"]["audit_context"]["source_evidence_ids"] == ["evidence-456"]
     assert all(item["source_event_id"] == "event-123" for item in result["observations"])
     assert all(item["source_evidence_id"] == "evidence-456" for item in result["observations"])
     assert all(item["source_quote"] in source for item in result["observations"])
