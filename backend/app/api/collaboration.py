@@ -10330,6 +10330,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024)
+                    or _greeting_name_missing(reply, caregiver_context.get("display_name"))
                 )
                 if not invalid_reply:
                     break
