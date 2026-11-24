@@ -290,34 +290,7 @@ def live_qwen_context():
             session,
             "Caregiver reported that the person prefers a quiet room after lunch.",
         )
-        from app.core.database import SessionLocal
-        from app.models.uncertainty import OpenQuestion
-
         handoff_open_question_id = str(uuid.uuid4())
-        with SessionLocal() as db:
-            db.add(OpenQuestion(
-                id=handoff_open_question_id,
-                person_id=session["person"]["id"],
-                question="What transfer support is required for the next handoff?",
-                description="The current transfer support level is not recorded.",
-                subject_type="person",
-                subject_id=session["person"]["id"],
-                status="open",
-                necessity="necessary",
-                necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
-                evidence_ids=[handoff_evidence_ids[0]],
-                context=[{
-                    "source_kind": "caregiver_report",
-                    "source_id": handoff_evidence_ids[0],
-                    "source_record_refs": [{"record_type": "evidence", "record_id": handoff_evidence_ids[0]}],
-                    "necessity_assessment": {
-                        "necessity_rationale": "The receiving caregiver needs the current support level to safely plan transfers.",
-                        "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level.",
-                        "evidence_ids": [handoff_evidence_ids[0]],
-                    },
-                }],
-            ))
-            db.commit()
         care_understanding_report = (
             "Caregiver reported that the person slept poorly last night. "
             "The nurse observed that the person walked with a frame this morning. "
@@ -530,6 +503,33 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     session = live_qwen_context["session"]
     evidence_ids = live_qwen_context["handoff_evidence_ids"]
     open_question_id = live_qwen_context["handoff_open_question_id"]
+    from app.core.database import SessionLocal
+    from app.models.uncertainty import OpenQuestion
+
+    with SessionLocal() as db:
+        db.add(OpenQuestion(
+            id=open_question_id,
+            person_id=session["person"]["id"],
+            question="What transfer support is required for the next handoff?",
+            description="The current transfer support level is not recorded.",
+            subject_type="person",
+            subject_id=session["person"]["id"],
+            status="open",
+            necessity="necessary",
+            necessity_rationale="The receiving caregiver needs the current support level to safely plan transfers.",
+            evidence_ids=[evidence_ids[0]],
+            context=[{
+                "source_kind": "caregiver_report",
+                "source_id": evidence_ids[0],
+                "source_record_refs": [{"record_type": "evidence", "record_id": evidence_ids[0]}],
+                "necessity_assessment": {
+                    "necessity_rationale": "The receiving caregiver needs the current support level to safely plan transfers.",
+                    "decision_dependency": "The receiving caregiver cannot prepare the transfer plan without the current support level.",
+                    "evidence_ids": [evidence_ids[0]],
+                },
+            }],
+        ))
+        db.commit()
     headers = {
         "Authorization": f"Bearer {session['access_token']}",
         "X-Request-ID": str(uuid.uuid4()),
