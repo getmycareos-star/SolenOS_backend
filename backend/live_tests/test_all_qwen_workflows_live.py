@@ -83,7 +83,7 @@ def test_enabled_workflow_contract_is_complete():
     assert set(WORKFLOW_REQUESTS) == set(ENABLED_WORKFLOWS)
 
 
-def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared_gateway():
+def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared_gateway(monkeypatch):
     from app.api.collaboration import (
         _production_qwen_answer_checks,
         _production_qwen_evaluation_cases,
