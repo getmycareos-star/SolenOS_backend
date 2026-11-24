@@ -84,7 +84,8 @@ from app.services.document_binary_storage import (
 from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
-from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, build_shared_origin_evidence_pairs, context_lines_to_source_records, unmatched_material_claims
+from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
+from app.services.evidence_lineage import build_evidence_lineage, load_evidence_lineage_scope
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.schemas.care_continuity import CareAssertionCreate
 from app.services.care_continuity import (
@@ -269,7 +270,7 @@ def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict)
             "intended_answerer_label": row.intended_answerer_label,
             "necessity_rationale": row.necessity_rationale,
             "decision_dependency": dependency,
-            "evidence_ids": [str(value) for value in (row.evidence_ids or [])],
+            "evidence_ids": [str(value) for value in (row.evidence_ids or []) if str(value) in same_person_evidence_ids],
             "status": row.status,
             "asked_at": row.asked_at.isoformat() if row.asked_at else None,
         }
@@ -474,41 +475,42 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
                 correction_evidence_ids.add(str(item.evidence_id))
     shared_origin_pairs = set()
     same_person_evidence_ids = set()
+    lineage_lookup_truncated = False
     if all_event_evidence_ids:
-        lineage_evidence_rows = db.query(EvidenceModel).filter(
-            EvidenceModel.person_id == person_id,
-            EvidenceModel.id.in_(all_event_evidence_ids),
-        ).all()
-        same_person_evidence_ids = {str(item.id) for item in lineage_evidence_rows}
-        shared_origin_pairs.update(build_shared_origin_evidence_pairs(lineage_evidence_rows))
-    if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
-        shared_scope_filters = [
-            and_(
-                EvidenceSourceRelationship.scope_type == "evidence_pair",
-                EvidenceSourceRelationship.scope_id == "",
-            )
-        ]
-        selected_event_ids = [str(row.id) for row in selected]
-        if selected_event_ids:
-            shared_scope_filters.append(and_(
-                EvidenceSourceRelationship.scope_type.in_(("event", "care_event")),
-                EvidenceSourceRelationship.scope_id.in_(selected_event_ids),
-            ))
-        shared_rows = db.query(EvidenceSourceRelationship).filter(
-            EvidenceSourceRelationship.person_id == person_id,
-            EvidenceSourceRelationship.source_independence_status.in_(("shared_origin", "copied_or_same_origin")),
-            or_(
-                EvidenceSourceRelationship.source_evidence_id.in_(all_event_evidence_ids),
-                EvidenceSourceRelationship.related_evidence_id.in_(all_event_evidence_ids),
-            ),
-            or_(*shared_scope_filters),
-        ).all()
-        shared_origin_pairs.update({
-            frozenset((str(item.source_evidence_id), str(item.related_evidence_id)))
-            for item in shared_rows
-            if str(item.source_evidence_id) in same_person_evidence_ids
-            and str(item.related_evidence_id) in same_person_evidence_ids
-        })
+        lineage_scope = load_evidence_lineage_scope(
+            db,
+            person_id,
+            all_event_evidence_ids,
+            max_depth=12,
+            max_nodes=250,
+            max_relationships=450,
+        )
+        lineage_rows = lineage_scope.get("evidence_rows") or []
+        same_person_evidence_ids = {
+            str(getattr(item, "id", "") or "")
+            for item in lineage_rows
+            if getattr(item, "id", None)
+        }
+        lineage_lookup_truncated = bool(
+            lineage_scope.get("truncated")
+            or lineage_scope.get("has_more")
+            or (set(all_event_evidence_ids) - same_person_evidence_ids)
+        )
+        lineage_by_id, _independence_by_id = build_evidence_lineage(
+            lineage_rows,
+            lineage_scope.get("relationships") or [],
+            all_event_evidence_ids,
+        )
+        lineage_groups = {}
+        for evidence_id, lineage_id in lineage_by_id.items():
+            lineage_groups.setdefault(lineage_id, []).append(evidence_id)
+        for evidence_ids in lineage_groups.values():
+            unique_ids = sorted(set(evidence_ids))
+            for index, left in enumerate(unique_ids):
+                for right in unique_ids[index + 1:]:
+                    if left != right:
+                        shared_origin_pairs.add(frozenset((left, right)))
+    truncated = truncated or lineage_lookup_truncated
     aggregate = build_distinct_event_aggregate(
         [{
             "id": str(row.id),
