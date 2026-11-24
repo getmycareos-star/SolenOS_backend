@@ -1,8 +1,11 @@
 from app.services.qwen_specialized_prompts import (
     SPECIALIZED_PROMPTS,
+    WORKFLOWS_WITHOUT_SPECIALISTS,
+    WORKFLOW_SPECIALISTS,
     apply_specialized_intelligence,
     select_specialized_domains,
 )
+from app.services.qwen_workflows import ENABLED_WORKFLOWS
 from app.services.qwen_system_prompt import apply_solenos_system_contract
 
 
@@ -106,6 +109,12 @@ def test_workflow_ids_map_to_their_required_specialist_domains():
     for workflow, expected in cases.items():
         messages = [{"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"}]
         assert select_specialized_domains(messages) == expected
+
+
+def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_decision():
+    accounted_for = set(WORKFLOW_SPECIALISTS) | set(WORKFLOWS_WITHOUT_SPECIALISTS)
+    assert set(ENABLED_WORKFLOWS) <= accounted_for
+    assert not (set(WORKFLOW_SPECIALISTS) & set(WORKFLOWS_WITHOUT_SPECIALISTS))
 
 
 def test_gateway_contract_keeps_core_and_only_selected_specialist():
