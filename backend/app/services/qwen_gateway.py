@@ -484,23 +484,22 @@ def extract_review_candidates(
             "role": "system",
             "content": (
                 f"SOLENOS_WORKFLOW_ID: {workflow_id}. "
-                "Extract explicit care statements from clinician, caregiver, or patient source text. "
-                "Each result is a source claim for caregiver review, not a verified finding. "
+                "Extract explicit care statements from clinician, caregiver, or patient source text; outputs are "
+                "source claims for caregiver review, not verified findings. "
                 'Return JSON only: {"observations":[{"subject":"string","observation":"string","source_quote":"exact source substring"}],"open_questions":["string"]}. '
-                "Never infer a clinical condition, cause, risk, or treatment change. Include only explicit source "
-                "statements about diagnoses, medication stops or dose transitions, and current/discharge differences; "
-                "keep them as review claims, never advice, prescriptions, or active instructions. "
-                "Care topics: mobility/transfers/falls; eating/drinking/appetite; sleep/mood/behaviour; pain/continence/"
-                "communication; daily activities; medications/diagnoses/allergies; appointments/instructions; "
-                "caregiver or patient observations. Include neutral and positive statements; do not rank or omit by "
-                "perceived importance. Keep distinct observations separate. "
-                "Copy a complete local clause or sentence exactly into source_quote. Subject and observation must be "
-                "verbatim substrings of that quote. Never paraphrase, summarize, normalize, add details, or merge "
-                "clauses or people. Preserve who reported/observed, time wording, negation, uncertainty, and qualifiers "
+                "Never infer diagnosis, cause, risk, or treatment change. Do extract a diagnosis, medication "
+                "discontinuation, dosage transition, or current/discharge discrepancy only as a review-required "
+                "source claim, never as a clinical conclusion, recommendation, prescription, or active instruction. "
+                "Topics: mobility/transfers/falls; intake/appetite; sleep/mood/behaviour; pain/continence/communication; "
+                "daily activities; medications/diagnoses/allergies; appointments/instructions; caregiver/patient "
+                "observations. Include neutral and positive facts; do not rank/omit; keep observations separate. "
+                "Copy a complete local clause/sentence exactly into source_quote; subject and observation must be "
+                "verbatim substrings of that quote. Do not paraphrase, normalize, add details, or merge clauses/people. "
+                "Preserve who reported/observed, time wording, negation, uncertainty/hedges, and qualifiers "
                 "(previously, discontinued, currently, seemed, yesterday, last night); never clip them. "
-                "If multiple patient identities appear, return no observations and ask to separate records. "
-                "If none are supported, return an empty observations array. Ask at most three short questions. "
-                "Ignore greetings and small talk."
+                "Multiple patient identities: no observations; ask caregiver to separate records. "
+                "No supported statements: empty observations. Ask at most three questions; ignore greetings/small talk."
+            ),
             ),
         },
         {"role": "user", "content": "Source text to review:\n" + bounded_source},
