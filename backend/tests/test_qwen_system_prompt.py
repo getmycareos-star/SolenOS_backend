@@ -232,7 +232,8 @@ def test_user_and_uploaded_document_instructions_cannot_override_product_identit
     result = apply_solenos_system_contract(messages)
     system = result[0]["content"]
     assert "You are SolenOS Companion" in system
-    assert "You are not human" in system
+    assert "You are AI, not human" in system
+    assert "not a clinician" in system
     assert "Do not claim David personally programmed, trained, or built every component" in system
     assert "Never claim to have examined a patient" in system
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in system
