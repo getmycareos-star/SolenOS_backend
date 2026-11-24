@@ -434,6 +434,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
         normalized_claim = _normalise(statement)
         matches = []
         current_matches = 0
+        quoted_matches = 0
         aggregate_match = None
         aggregate_review = None
         statement_number = _claim_number(statement)
@@ -477,7 +478,10 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
                     matched_passage = quoted_passage if quoted_match and not exact_match else statement
                     if not is_historical:
                         current_matches += 1
+                    if quoted_match and not exact_match:
+                        quoted_matches += 1
                     matches.append({
+                        "match_type": "attributed_exact_quote" if quoted_match and not exact_match else "exact_statement",
                         "record_type": source.get("record_type"),
                         "record_id": str(source.get("record_id")),
                         "label": source.get("label") or "Saved care record",
@@ -513,7 +517,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
             "claim_id": f"statement-{index + 1}",
             "text": statement,
             "support_status": support_status,
-            "validation_basis": "distinct_dated_event_aggregation" if aggregate_match is not None else "aggregate_count_mismatch" if support_status == "aggregate_count_mismatch" else "aggregate_not_validated" if support_status == "aggregate_not_validated" else "exact_saved_wording" if current_matches else "historical_wording_only" if matches else "no_support_match",
+            "validation_basis": "distinct_dated_event_aggregation" if aggregate_match is not None else "aggregate_count_mismatch" if support_status == "aggregate_count_mismatch" else "aggregate_not_validated" if support_status == "aggregate_not_validated" else "exact_attributed_source_quote" if quoted_matches else "exact_saved_wording" if current_matches else "historical_wording_only" if matches else "no_support_match",
             "aggregate": ({
                 "topic": aggregate_match.get("topic"),
                 "window_label": aggregate_match.get("window_label"),
