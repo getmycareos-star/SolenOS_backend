@@ -6133,22 +6133,22 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
-    _record_companion_output_validation(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        request_id=companion_request_id,
-        reply=reply,
-        rejection_reasons=rejection_reasons,
-        source_event_ids=source_event_ids,
-        source_evidence_ids=source_evidence_ids,
-        source_document_analysis_ids=source_document_analysis_ids,
-        source_appointment_ids=source_appointment_ids,
-        source_assertion_ids=source_assertion_ids,
-        source_lcr_context_ids=source_lcr_context_ids,
-        source_freshness_assessment_ids=source_freshness_assessment_ids,
-    )
     if rejection_reasons:
+        _record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id=companion_request_id,
+            reply=reply,
+            rejection_reasons=rejection_reasons,
+            source_event_ids=source_event_ids,
+            source_evidence_ids=source_evidence_ids,
+            source_document_analysis_ids=source_document_analysis_ids,
+            source_appointment_ids=source_appointment_ids,
+            source_assertion_ids=source_assertion_ids,
+            source_lcr_context_ids=source_lcr_context_ids,
+            source_freshness_assessment_ids=source_freshness_assessment_ids,
+        )
         logger.warning("Qwen repaired response rejected by grounding validators: %s", ",".join(rejection_reasons))
         raise HTTPException(
             status_code=503,
@@ -6195,6 +6195,21 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if incomplete_notice and incomplete_notice not in reply:
             reply = reply.rstrip() + "\n\n" + incomplete_notice
             lcr_context_coverage["caregiver_notice"] = "incomplete_retrieval"
+    _record_companion_output_validation(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        request_id=companion_request_id,
+        reply=reply,
+        rejection_reasons=[],
+        source_event_ids=source_event_ids,
+        source_evidence_ids=source_evidence_ids,
+        source_document_analysis_ids=source_document_analysis_ids,
+        source_appointment_ids=source_appointment_ids,
+        source_assertion_ids=source_assertion_ids,
+        source_lcr_context_ids=source_lcr_context_ids,
+        source_freshness_assessment_ids=source_freshness_assessment_ids,
+    )
     return {
         "workflow": payload.workflow,
         "reply": reply,
