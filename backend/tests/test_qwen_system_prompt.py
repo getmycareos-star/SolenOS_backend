@@ -344,7 +344,7 @@ def test_information_stewardship_is_injected_for_every_qwen_request_after_workfl
     assert workflow_index < stewardship_index < personality_index < identity_index
     assert SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP in assembled
     assert SOLENOS_INFORMATION_STEWARDSHIP_CONSTITUTION not in assembled
-    assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.0"
+    assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.1"
     for phrase in (
         "ACCESS:", "AVAILABLE KNOWLEDGE:", "MEMORY / RETENTION:", "AUTHORITY:",
         "COLLECTION:", "SOURCE PRESERVATION:", "VALIDATION AND RECONCILIATION:",

@@ -9,7 +9,7 @@ from app.services.solenos_information_stewardship import (
 
 
 def test_full_information_stewardship_constitution_covers_the_complete_lifecycle():
-    assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.0"
+    assert SOLENOS_INFORMATION_STEWARDSHIP_VERSION == "1.1"
     for required in (
         "ACCESS",
         "AVAILABLE KNOWLEDGE",
@@ -25,7 +25,7 @@ def test_full_information_stewardship_constitution_covers_the_complete_lifecycle
         "RETRIEVAL",
         "CORRECTION / WITHDRAWAL",
         "RETENTION / EXPORT / DELETION",
-        "SOURCE AND CLAIM ACCOUNTABILITY",
+        "CONFIDENCE AND EVALUATION INTEGRITY",\n        "SOURCE AND CLAIM ACCOUNTABILITY",
         "ACTION ACCOUNTABILITY",
         "PRIVACY, SECURITY, AND DATA CONTROL",
         "TRANSPARENCY QUESTION HANDLING",
@@ -47,7 +47,7 @@ def test_runtime_information_stewardship_is_compact_and_preserves_non_negotiable
         "missing or partial retrieval is not proof of absence",
         "Model output is a proposal, never an accepted LCR assertion",
         "required human review",
-        "Never claim an action without backend confirmation",
+        "Never claim an action without backend confirmation",\n        "Never invent numerical confidence scores",\n        "Keep evaluation criteria fixed before a run",
         "Preserve correction lineage and conflicts",
         "Answer access, privacy, security, training, retention, sharing, export, and deletion only from current trusted policy or service results",
         "SolenOS policy prohibits selling sensitive care information or using it for advertising",
