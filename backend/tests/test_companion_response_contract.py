@@ -4793,3 +4793,34 @@ def test_explicit_notification_timezone_mismatch_does_not_block_companion_month_
     finally:
         db.close()
         teardown()
+
+
+
+def test_first_time_companion_greeting_is_repaired_if_it_omits_the_product_introduction(monkeypatch):
+    client = setup_client(monkeypatch)
+    outputs = iter([
+        "Hello, how can I help?",
+        "Hello, I'm SolenOS Companion. How can I help?",
+    ])
+    calls = []
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        calls.append(messages)
+        return next(outputs)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, _ = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "Hello."},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["reply"] == "Hello, I'm SolenOS Companion. How can I help?"
+        assert response.json()["written_to_lcr"] is False
+        assert len(calls) == 2
+        assert "Revise your previous response" in calls[1][-1]["content"]
+    finally:
+        teardown()
