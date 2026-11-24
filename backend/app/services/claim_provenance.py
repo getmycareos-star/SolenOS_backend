@@ -452,6 +452,11 @@ def build_claim_provenance(
     independent corroboration.
     """
     historical_statuses = {"corrected", "superseded", "withdrawn", "rejected", "retracted", "expired", "deleted", "archived"}
+    non_current_statuses = {
+        "pending", "pending_review", "awaiting_review", "needs_review",
+        "draft", "queued", "processing", "failed", "unverified", "unreviewed",
+        "proposed", "candidate",
+    }
     claims = []
     aggregates = list(validated_aggregates or [])
     for index, statement in enumerate(split_response_claims(reply)):
@@ -503,9 +508,12 @@ def build_claim_provenance(
                     and _claim_preserves_source_qualifiers(statement, source, matched_text=quoted_passage)
                 )
                 if exact_match or quoted_match:
-                    is_historical = str(source.get("record_status") or "").casefold() in historical_statuses
+                    record_status = str(source.get("record_status") or "").casefold()
+                    lifecycle_status = str(source.get("source_lifecycle_status") or "").casefold()
+                    is_historical = record_status in historical_statuses or lifecycle_status in historical_statuses
+                    is_non_current = record_status in non_current_statuses or lifecycle_status in non_current_statuses
                     matched_passage = quoted_passage if quoted_match and not exact_match else statement
-                    if not is_historical:
+                    if not is_historical and not is_non_current:
                         current_matches += 1
                     if quoted_match and not exact_match:
                         quoted_matches += 1
@@ -522,9 +530,13 @@ def build_claim_provenance(
                         "reported_by": source.get("reported_by"),
                         "entered_by": source.get("entered_by"),
                         "record_status": source.get("record_status"),
+                        "source_lifecycle_status": source.get("source_lifecycle_status"),
                         "source_independence_status": source.get("source_independence_status", "not_assessed"),
                         "exact_wording_duplicate_count": int(source.get("exact_wording_duplicate_count") or 0),
-                        "source_state_label": source.get("source_state_label") or ("Earlier or corrected record; not treated as current" if is_historical else None),
+                        "source_state_label": source.get("source_state_label") or (
+                            "Earlier or corrected record; not treated as current" if is_historical else
+                            "Pending or unreviewed source; not treated as established care information" if is_non_current else None
+                        ),
                         "correction_note": source.get("correction_note"),
                         "correction_rationale": source.get("correction_rationale"),
                         "previous_source_excerpt": source.get("previous_source_excerpt"),
@@ -540,7 +552,15 @@ def build_claim_provenance(
             "aggregate_count_mismatch" if aggregate_review and aggregate_review.get("status") == "count_mismatch" else
             "aggregate_not_validated" if aggregate_review is not None else
             "matched_saved_wording" if current_matches else
-            "matched_historical_only" if matches else
+            "matched_historical_only" if matches and all(
+                str(source.get("record_status") or "").casefold() in historical_statuses
+                or str(source.get("source_lifecycle_status") or "").casefold() in historical_statuses
+                for source in source_records
+                if str(source.get("record_id")) in {
+                    str(reference.get("record_id")) for reference in matches
+                }
+            ) else
+            "matched_non_current_only" if matches else
             "not_matched_to_saved_wording"
         )
         claims.append({
