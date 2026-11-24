@@ -290,7 +290,6 @@ def live_qwen_context():
             session,
             "Caregiver reported that the person prefers a quiet room after lunch.",
         )
-        handoff_open_question_id = str(uuid.uuid4())
         care_understanding_report = (
             "Caregiver reported that the person slept poorly last night. "
             "The nurse observed that the person walked with a frame this morning. "
@@ -318,7 +317,6 @@ def live_qwen_context():
             "medication_event_id": medication_event_id,
             "medication_evidence_ids": medication_evidence_ids,
             "handoff_evidence_ids": handoff_evidence_ids,
-            "handoff_open_question_id": handoff_open_question_id,
             "care_understanding_evidence_id": care_understanding_evidence_ids[0],
             "care_understanding_source": care_understanding_source,
         }
@@ -502,7 +500,6 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     client = live_qwen_context["client"]
     session = live_qwen_context["session"]
     evidence_ids = live_qwen_context["handoff_evidence_ids"]
-    open_question_id = live_qwen_context["handoff_open_question_id"]
     question_response = client.post(
         "/api/v1/uncertainty/questions",
         headers={
@@ -534,7 +531,7 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
         },
     )
     assert question_response.status_code == 200, question_response.text
-    assert question_response.json()["id"] == open_question_id
+    open_question_id = question_response.json()["id"]
     headers = {
         "Authorization": f"Bearer {session['access_token']}",
         "X-Request-ID": str(uuid.uuid4()),
