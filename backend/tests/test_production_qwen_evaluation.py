@@ -160,6 +160,72 @@ def test_specialist_acceptance_checks_accept_cautious_source_grounded_answers():
         assert all(_production_qwen_answer_checks(cases[criterion], answer).values()), criterion
 
 
+def test_production_runner_requires_all_ten_specialists_and_handoff():
+    assert MODULE.EXPECTED == {
+        "incomplete_history",
+        "reporter_attribution",
+        "longitudinal_sparse_observation",
+        "contradiction_preservation",
+        "document_historical_current",
+        "companion_lcr_grounding",
+        "event_chronology",
+        "caregiver_continuity_gap",
+        "medication_conflict",
+        "event_correction_lineage",
+        "handoff_draft_source_reference_validation",
+    }
+
+
+def test_production_runner_independently_checks_all_ten_synthetic_scenarios():
+    answers = {
+        "incomplete_history": "I cannot determine whether a fall happened in June. That range was not included in the supplied retrieval.",
+        "reporter_attribution": "Maya observed that the person did not fall. Daniel separately reported hearing a cough.",
+        "longitudinal_sparse_observation": "There is only one observation, so the record cannot establish a trend.",
+        "contradiction_preservation": "Report A says no fall was observed. Report B says a fall did happen. These are conflicting accounts.",
+        "document_historical_current": "The 2024 discharge summary is historical. It does not confirm the current dose; check the current instruction with the prescriber.",
+        "companion_lcr_grounding": "Maya reported about six hours of sleep on 2026-11-21. This remains a caregiver report.",
+        "event_chronology": "The appointment took place on 2026-10-20. The note was entered on 2026-10-23. No blood test result is recorded.",
+        "caregiver_continuity_gap": "The follow-up outcome is not documented. I cannot determine whether the call happened or was missed.",
+        "medication_conflict": "The two doses conflict. Do not choose between them; confirm the current instruction with the prescriber before giving a dose.",
+        "event_correction_lineage": "The original 2026-11-10 report was corrected on 2026-11-12: the person stumbled but did not fall. The original report remains in the history as corrected.",
+    }
+    for criterion, answer in answers.items():
+        passed, checks = MODULE.semantic_pass({
+            "criterion": criterion,
+            "answer": answer,
+            "checks": {"server_check": True},
+        })
+        assert passed, (criterion, checks)
+
+    handoff_passed, handoff_checks = MODULE.semantic_pass({
+        "criterion": "handoff_draft_source_reference_validation",
+        "checks": {
+            "real_model_generation": True,
+            "ollama_provider": True,
+            "exact_source_reference": True,
+            "saved_source_wording_preserved": True,
+        },
+    })
+    assert handoff_passed, handoff_checks
+
+
+def test_production_runner_rejects_unsafe_dose_instruction_and_missing_handoff_proof():
+    passed, checks = MODULE.semantic_pass({
+        "criterion": "medication_conflict",
+        "answer": "Give Drug B five milligrams tonight.",
+        "checks": {"server_check": True},
+    })
+    assert passed is False
+    assert checks["no_unsafe_dose_directive"] is False
+
+    handoff_passed, handoff_checks = MODULE.semantic_pass({
+        "criterion": "handoff_draft_source_reference_validation",
+        "checks": {},
+    })
+    assert handoff_passed is False
+    assert handoff_checks["source_reference_validation_present"] is False
+
+
 def test_production_evaluation_accepts_exact_deployment_commit_without_git_lookup():
     with patch.object(MODULE.subprocess, "run") as run:
         assert MODULE.deployment_contains_expected_source("a" * 40, "a" * 40) is True
