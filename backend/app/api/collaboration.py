@@ -4479,14 +4479,14 @@ def _production_qwen_evaluation_cases() -> list[dict]:
             "context": "Synthetic LCR: The caregiver reports that the appointment took place on 2026-10-20. The note documenting the appointment was entered on 2026-10-23. A blood test was ordered at the appointment; no result is present in the supplied record.",
             "question": "Summarize the appointment dates and the status of the blood test for a clinician handoff.",
             "required": ["2026-10-20", "2026-10-23"],
-            "required_any": ["no result", "result is not recorded", "result is not present", "pending"],
+            "required_any": ["no result", "no blood test result", "no test result", "result is not recorded", "result is not present", "pending"],
         },
         {
             "criterion": "caregiver_continuity_gap",
             "system": "SOLENOS_WORKFLOW_ID: open_loops. Distinguish missing documentation from a missed task.",
             "context": "Synthetic care record: A follow-up call was requested on 2026-11-14. The supplied record contains no completion note, cancellation, or outcome. There is no evidence that the call was missed.",
             "question": "Was the follow-up call missed?",
-            "required_any": ["outcome is not recorded", "no outcome is documented", "cannot determine whether it happened", "completion is not documented"],
+            "required_any": ["outcome is not recorded", "outcome is not documented", "no outcome is documented", "cannot determine whether it happened", "cannot determine whether the call happened", "completion is not documented"],
         },
         {
             "criterion": "medication_conflict",
