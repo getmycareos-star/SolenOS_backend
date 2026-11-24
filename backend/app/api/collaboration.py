@@ -10347,7 +10347,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         }),
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_care_history"
+            "deterministic_product_identity"
+            if identity_direct_answer_used
+            else "source_quoted_care_history"
             if care_history_direct_answer_used or care_history_extractive_fallback_used
             else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
@@ -10442,7 +10444,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         }),
         "ai_generated": ai_generated,
         "response_mode": (
-            "source_quoted_care_history"
+            "deterministic_product_identity"
+            if identity_direct_answer_used
+            else "source_quoted_care_history"
             if care_history_direct_answer_used or care_history_extractive_fallback_used
             else "source_quoted_caregiver_question"
             if caregiver_question_direct_answer_used
