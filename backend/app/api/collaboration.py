@@ -5813,34 +5813,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
         context_lines.append(
             "Canonical LCR retrieval coverage: "
-            + json.dumps({
-                "schema_status": shared_lcr_context.get("schema_status"),
-                "history_coverage": shared_lcr_context.get("history_coverage"),
-                "missing_required_sources": shared_lcr_context.get("missing_required_sources", []),
-                "retrieval_scan_complete": shared_lcr_context.get("retrieval_scan_complete", False),
-                "failed_sources": [
-                    name for name, source in shared_lcr_context.get("sources", {}).items()
-                    if source.get("status") in {
-                        "failed", "unsearchable", "unavailable_schema", "unavailable_scope"
-                    }
-                ][:20],
-                "source_limits": [
-                    {
-                        "source_type": name,
-                        "status": source.get("status"),
-                        "interpretation_limit": source.get("interpretation_limit"),
-                    }
-                    for name, source in shared_lcr_context.get("sources", {}).items()
-                    if source.get("status") in {
-                        "failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"
-                    }
-                    and source.get("interpretation_limit")
-                ][:20],
-                "sources": {
-                    name: {"status": source.get("status")}
-                    for name, source in shared_lcr_context.get("sources", {}).items()
-                },
-            }, ensure_ascii=False, default=str)
+            + json.dumps(_compact_lcr_retrieval_coverage(shared_lcr_context), ensure_ascii=False, default=str)
         )
         canonical_sources = (
             (
@@ -6130,37 +6103,14 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         # appends the shared operating and specialist contracts; repeating
         # those rules here made first-visit requests exceed the 4K context
         # window even after all optional record context had been removed.
-        prompt_prefix = (
-            f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
-            "You are SolenOS Companion. The caregiver and Living Care Record remain authoritative. "
-            f"Task: {guidance} Use only supplied, authorized context. "
-            "Preserve exact source wording, reporter, event and recorded times, negation, uncertainty, conflicts and corrections. "
-            "Separate caregiver reports from verified information. Do not infer diagnosis or cause, strengthen a claim, or invent details. "
-            "State when the available history is incomplete. Never write to the Care Record or claim a record change. "
-            "Use concise, plain English and return only the helpful response.\\n\\n"
-            + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
-            + "Authorized context (may be empty):\\n"
-        )
-    else:
-        prompt_prefix = (
-            f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
-            "You are SolenOS Companion, the AI care-continuity companion inside SolenOS. The Living Care Record and caregiver "
-            "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
-            f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. "
-            "For material care facts, preserve exact source wording and its reporter, event time, negation, uncertainty, and reported/observed/verified status. "
-            "Do not paraphrase a care fact into a stronger or different assertion; use an explicitly attributed exact source quote when needed. "
-            "If exact support is unavailable, say the supplied information does not establish the fact. Never fabricate people, events, "
-            "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
-            "Never ask the caregiver to disclose a password, verification code, one-time code or recovery secret. "
-            "Never expose internal record identifiers, UUIDs, source IDs or opaque keys; refer to records by human-readable titles, dates and statuses. "
-            f"RESPONSE LENGTH CONTRACT: {response_length_instruction} Preserve material source distinctions, uncertainty, conflicts and missing-history limits. "
-            "Use concise, plain, natural English when the user writes in English. Do not use unexplained foreign words, "
-            "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
-            "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
-            "Return only the helpful response text.\\n\\n"
-            + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
-            + "Authorized context (may be empty):\\n"
-        )
+        prompt_prefix = _build_companion_prompt_prefix(
+        payload.workflow,
+        guidance,
+        appointment_status_guidance,
+        empty_context_output_constraint,
+        response_length_instruction,
+        canonical_coverage_lines,
+    )
     # Release the read transaction before model inference; prompt fitting below
     # performs preflight-only retries and does not hold database connections.
     db.rollback()
@@ -6617,6 +6567,55 @@ def _fit_model_context_lines_across_sources(
     selected_raw = [item[1] for item in selected]
     selected_rendered = [item[2] for item in selected]
     return selected_raw, selected_rendered, used_chars, len(selected) < len(lines)
+
+
+def _compact_lcr_retrieval_coverage(shared_lcr_context: dict) -> dict:
+    """Keep authoritative retrieval gaps without listing every healthy source."""
+    sources = shared_lcr_context.get("sources") if isinstance(shared_lcr_context, dict) else {}
+    sources = sources if isinstance(sources, dict) else {}
+    available_count = sum(
+        1 for value in sources.values()
+        if isinstance(value, dict) and value.get("status") == "available"
+    )
+    non_available = {}
+    for name, value in sources.items():
+        if not isinstance(value, dict) or value.get("status") == "available":
+            continue
+        non_available[str(name)] = {
+            "status": value.get("status") or "unknown",
+            "interpretation_limit": value.get("interpretation_limit"),
+        }
+        if len(non_available) >= 20:
+            break
+    missing = shared_lcr_context.get("missing_required_sources", [])
+    return {
+        "schema_status": shared_lcr_context.get("schema_status"),
+        "history_coverage": shared_lcr_context.get("history_coverage"),
+        "missing_required_sources": missing[:20] if isinstance(missing, list) else [],
+        "retrieval_scan_complete": bool(shared_lcr_context.get("retrieval_scan_complete", False)),
+        "available_source_count": available_count,
+        "non_available_sources": non_available,
+    }
+
+
+def _build_companion_prompt_prefix(
+    workflow: str,
+    guidance: str,
+    appointment_status_guidance: str,
+    empty_context_output_constraint: str,
+    response_length_instruction: str,
+    canonical_coverage_lines: list[str],
+) -> str:
+    """Keep task text compact; the canonical contract owns shared safety and evidence rules."""
+    return (
+        f"SOLENOS_WORKFLOW_ID: {workflow}. Task: {guidance}"
+        f"{appointment_status_guidance}{empty_context_output_constraint}\\n"
+        f"{response_length_instruction} Use authorized supplied context only. "
+        "Follow the shared SolenOS evidence, uncertainty, safety and action rules. "
+        "Return only a plain-language response.\\n\\n"
+        + ("\\n".join(canonical_coverage_lines) + "\\n\\n" if canonical_coverage_lines else "")
+        + "Authorized context (may be empty):\\n"
+    )
 
 
 async def _qwen_chat_with_bounded_context(
