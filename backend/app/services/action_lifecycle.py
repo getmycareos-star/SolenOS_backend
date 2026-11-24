@@ -110,6 +110,7 @@ class ActionLifecycleService:
             .filter(
                 EvidenceModel.id.in_(requested_ids),
                 EvidenceModel.person_id == action.person_id,
+                EvidenceModel.evidence_status.is_(None) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             )
             .all()
         )
