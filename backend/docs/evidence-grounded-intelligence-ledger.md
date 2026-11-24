@@ -464,4 +464,15 @@ This slice does **not** close the full evidence capability map. Groups A–J and
 - [ ] Run real Qwen inference acceptance and inspect caregiver-visible outputs. The new exact-quote contract is not a semantic entailment engine; unsupported paraphrases fail closed until a deterministic source-bound representation can support them.
 
 This increment does not complete claim-level semantic entailment, full historical reconstruction, evidence freshness, longitudinal change analysis, source-family discovery, authorization/failure coverage, or live-model acceptance. Those remain open under capability groups A–R.
+## Direct-main historical projection increment — 2026-11-24
+
+**Status: Implemented, verification pending; overall historical LCR coverage remains partial.**
+
+- The bounded as-of projection now includes append-only evidence-review and claim-assessment events in addition to CareStateRevision snapshots.
+- Both streams are filtered by the requested historical instant and joined to same-person persisted evidence or care assertions.
+- Claim-assessment evidence links are revalidated against the requested person's persisted evidence; foreign links are withheld.
+- Reviewer identifiers are returned only when the caregiver belongs to the same care record. Unverified reviewer attribution is explicitly marked.
+- Missing or incomplete review-history schemas are reported as unavailable rather than silently treated as empty.
+- Regression coverage was added for historical cutoffs, cross-person review/assessment isolation, reviewer-scope redaction, and evidence-link filtering.
+- Exact-current-main backend and PostgreSQL execution evidence remains pending. The endpoint continues to report partial revision-history coverage and is not a complete historical Living Care Record reconstruction.
 
