@@ -5909,7 +5909,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
                "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' "
                if empty_context_emergency_readiness else "")
             + "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
-            "Return only the revised response, not an explanation.\\n\\nAuthorized context (may be empty):\\n"
+            "Return only the revised response, not an explanation.\n\nAuthorized context (may be empty):\n"
         )
         repair_user_text = json.dumps(
             {
@@ -5928,7 +5928,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             )
         )
         shared_context_truncated = shared_context_truncated or repair_context_truncated
-        source_context = payload.text + "\\n" + "\\n".join(prompt_context_lines)
+        source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
     if rejection_reasons:
