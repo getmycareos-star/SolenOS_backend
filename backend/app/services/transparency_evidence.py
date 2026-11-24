@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, inspect, or_
 from sqlalchemy.orm import Session
 
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Caregiver, Correction, Evidence
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.capture_analysis import CaptureAnalysis
@@ -57,6 +58,7 @@ def build_transparency_evidence(
     *,
     person_id: str,
     caregiver_id: str,
+    session_id: str,
     grant: CaregiverAccessGrant,
 ) -> dict[str, Any]:
     """Build a minimal evidence bundle for the already-authorized session scope.
@@ -100,8 +102,31 @@ def build_transparency_evidence(
         },
     }]
 
+    active_session = db.query(AnonymousSession).filter(
+        AnonymousSession.id == session_id,
+        AnonymousSession.person_id == person_id,
+        AnonymousSession.caregiver_id == caregiver_id,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > now,
+    ).first()
+    items.append({
+        "kind": "active_session",
+        "source_service": "anonymous_sessions",
+        "scope": {"person_id": person_id, "caregiver_id": caregiver_id},
+        "observed_at": now.isoformat(),
+        "status": "available" if active_session else "unavailable",
+        "reference_id": session_id,
+        "completeness": "current_session_record",
+        "details": {
+            "session_status": "active" if active_session else "not_verified",
+            "created_at": _iso(active_session.created_at) if active_session else None,
+            "expires_at": _iso(active_session.expires_at) if active_session else None,
+        },
+    })
+
     coverage: dict[str, str] = {
         "authenticated_scope": "complete" if caregiver else "partial",
+        "active_session": "complete" if active_session else "unavailable",
         "sharing_members": "not_authorized",
         "documents": "not_authorized",
         "lcr": "not_authorized",
