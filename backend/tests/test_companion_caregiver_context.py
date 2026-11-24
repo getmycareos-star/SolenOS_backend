@@ -127,3 +127,50 @@ def test_missing_caregiver_name_does_not_invent_a_display_name():
     )
     assert context["display_name"] is None
     assert context["full_name"] is None
+
+
+@pytest.mark.parametrize(
+    "utc_hour,expected_period",
+    [
+        (4, "neutral"), (5, "morning"), (11, "morning"),
+        (12, "afternoon"), (16, "afternoon"), (17, "evening"),
+        (20, "evening"), (21, "neutral"), (23, "neutral"),
+    ],
+)
+def test_greeting_period_boundaries_are_calculated_in_caregiver_timezone(utc_hour, expected_period):
+    context = build_companion_caregiver_context(
+        _caregiver(timezone="UTC", timezone_configured=True),
+        _grant(),
+        now=datetime(2026, 11, 24, utc_hour, 0, tzinfo=timezone.utc),
+    )
+    assert context["greeting_period"] == expected_period
+
+
+def test_daylight_saving_transition_uses_iana_timezone_rules():
+    before = build_companion_caregiver_context(
+        _caregiver(timezone="America/Los_Angeles", timezone_configured=True),
+        _grant(),
+        now=datetime(2026, 3, 8, 9, 30, tzinfo=timezone.utc),
+    )
+    after = build_companion_caregiver_context(
+        _caregiver(timezone="America/Los_Angeles", timezone_configured=True),
+        _grant(),
+        now=datetime(2026, 3, 8, 10, 30, tzinfo=timezone.utc),
+    )
+    assert before["local_time"] == "1:30 AM"
+    assert after["local_time"] == "3:30 AM"
+    assert before["timezone_name"] == after["timezone_name"] == "America/Los_Angeles"
+
+
+def test_two_caregivers_sharing_one_record_receive_only_their_own_identity():
+    first = build_companion_caregiver_context(
+        _caregiver(id="caregiver-a", person_id="shared-person", name="Mary Johnson", preferred_name="Mary"),
+        _grant(caregiver_id="caregiver-a", person_id="shared-person"),
+    )
+    second = build_companion_caregiver_context(
+        _caregiver(id="caregiver-b", person_id="shared-person", name="John Smith", preferred_name="John"),
+        _grant(caregiver_id="caregiver-b", person_id="shared-person"),
+    )
+    assert first["display_name"] == "Mary"
+    assert second["display_name"] == "John"
+    assert first["caregiver_id"] != second["caregiver_id"]
