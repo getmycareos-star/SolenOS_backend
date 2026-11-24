@@ -1230,7 +1230,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     status="supported",
                     rationale="Cross-person assessment must not appear.",
                     policy_version="claim-v1",
-                    evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                    evidence_links=[{"evidence_id": foreign_evidence.id, "relationship": "supports"}],
                     reviewed_by_caregiver_id=other_caregiver_id,
                     created_at=before,
                 ),
