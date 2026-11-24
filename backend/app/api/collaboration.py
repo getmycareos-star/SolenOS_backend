@@ -9267,6 +9267,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             name for name, value in source_coverage.items()
             if value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
         )
+        unsearchable_source_notes = sorted(
+            f"{name}: cannot be searched for this topic"
+            for name, value in source_coverage.items()
+            if value.get("status") == "unsearchable"
+        )
         selected_source_names = sorted(
             name for name in source_coverage
             if prompt_source_counts.get(name, 0) > 0
@@ -9307,6 +9312,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "context_truncated": context_truncated,
             "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
             "missing_optional_sources": list(lcr_context_coverage.get("missing_optional_sources") or []),
+            "unsearchable_sources": unsearchable_source_notes,
             "failed_sources": failed_source_names,
             "selected_sources": selected_source_names,
             "more_available_sources": more_available_source_names,
