@@ -1534,9 +1534,17 @@ def test_temporal_fact_rejects_foreign_evidence_and_spoofed_caregiver_attributio
             source_text="Private evidence belonging to another person.",
             uploaded_by_caregiver_id=other["caregiver"]["id"],
         )
-        db.add(foreign)
+        deleted = Evidence(
+            person_id=owner["person"]["id"],
+            type="note",
+            source_text="This evidence was deleted by the caregiver.",
+            uploaded_by_caregiver_id=owner["caregiver"]["id"],
+            evidence_status="deleted_by_caregiver",
+        )
+        db.add_all([foreign, deleted])
         db.commit()
         foreign_evidence_id = foreign.id
+        deleted_evidence_id = deleted.id
     finally:
         db.close()
 
@@ -1553,6 +1561,13 @@ def test_temporal_fact_rejects_foreign_evidence_and_spoofed_caregiver_attributio
         json={**base, "evidence_ids": [foreign_evidence_id]},
     )
     assert foreign_evidence.status_code == 422, foreign_evidence.text
+
+    deleted_evidence = client.post(
+        "/api/v1/temporal/facts",
+        headers=headers,
+        json={**base, "evidence_ids": [deleted_evidence_id]},
+    )
+    assert deleted_evidence.status_code == 422, deleted_evidence.text
 
     spoofed_author = client.post(
         "/api/v1/temporal/facts",
