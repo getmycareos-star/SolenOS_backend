@@ -340,6 +340,7 @@ async def _process_daily_capture_delta_reconciliation(db, job: QwenBackgroundJob
         Evidence.id == evidence_id,
         Evidence.person_id == person_id,
         Evidence.uploaded_by_caregiver_id == caregiver_id,
+        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
     ).first()
     analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.person_id == person_id,
