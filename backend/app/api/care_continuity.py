@@ -6388,6 +6388,12 @@ def create_resource(resource: str, payload: dict, request: Request, db: Session 
                     detail="Care-fact corrections require the exact previous and replacement fact_value.",
                 )
             facts_table = _table(db, "care_facts")
+            if db.get_bind().dialect.name == "postgresql":
+                lock_key = f"care-state-revision:care_facts:{person_id}:{data['target_id']}"
+                db.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                    {"lock_key": lock_key},
+                )
             current_fact = db.execute(
                 select(facts_table).where(
                     facts_table.c.id == data["target_id"],
