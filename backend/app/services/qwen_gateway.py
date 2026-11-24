@@ -191,6 +191,53 @@ def _persist_inference_metric(metric: AIInferenceMetric) -> bool:
         session.close()
 
 
+def _begin_inference_metric(model: str, audit_metadata: dict) -> str | None:
+    """Commit an invocation-start receipt before any model request is sent."""
+    metric_id = str(uuid.uuid4())
+    metric = AIInferenceMetric(
+        id=metric_id,
+        outcome="started",
+        metrics_json={**audit_metadata, "model": model, "invocation_state": "started"},
+    )
+    return metric_id if _persist_inference_metric(metric) else None
+
+
+def _complete_inference_metric(
+    metric_id: str,
+    *,
+    latency_ms: int,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    outcome: str,
+    metrics_json: dict,
+) -> bool:
+    """Complete the previously committed start receipt; a missing row is an audit failure."""
+    session = SessionLocal()
+    try:
+        metric = session.get(AIInferenceMetric, metric_id)
+        if metric is None:
+            logger.error("Qwen inference audit start receipt disappeared before completion")
+            return False
+        metric.latency_ms = latency_ms
+        metric.input_tokens = input_tokens
+        metric.output_tokens = output_tokens
+        metric.total_tokens = (
+            input_tokens + output_tokens
+            if input_tokens is not None and output_tokens is not None else None
+        )
+        metric.outcome = outcome
+        metric.metrics_json = {**(metric.metrics_json or {}), **metrics_json, "invocation_state": "finished"}
+        session.add(metric)
+        session.commit()
+        return True
+    except Exception:
+        session.rollback()
+        logger.exception("Qwen inference audit completion failed")
+        return False
+    finally:
+        session.close()
+
+
 def qwen_chat(
     messages: list[dict],
     *,
@@ -221,7 +268,7 @@ def qwen_chat(
         model = os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         _mark_inference_unverified(model)
         detail = exc.detail if isinstance(exc.detail, dict) else {}
-        _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"), audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"), audit_metadata=audit_metadata, audit_id=audit_id)
         raise
     # Keep the model context within the Railway memory envelope. The
     # preflight below rejects oversized requests before Ollama can truncate
@@ -315,6 +362,16 @@ def qwen_chat(
     if response_format is not None:
         payload["format"] = response_format
     body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    audit_id = _begin_inference_metric(model, audit_metadata)
+    if audit_id is None:
+        _mark_inference_unverified(model)
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "inference_audit_unavailable",
+                "message": "SolenOS could not securely record this AI request. No model response was requested.",
+            },
+        )
     request = urllib.request.Request(
         base + "/api/chat",
         data=body,
@@ -427,12 +484,12 @@ def qwen_chat(
             ):
                 failure_category = "model_not_installed"
                 failure_reason = "configured_model_missing"
-                _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+                _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
                 raise HTTPException(
                     status_code=503,
                     detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
                 ) from exc
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(
             status_code=503,
             detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."},
@@ -446,38 +503,38 @@ def qwen_chat(
     ) as exc:
         _mark_inference_unverified(model)
         failure_category, failure_reason = "runtime_unreachable", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except http.client.HTTPException as exc:
         # A truncated or malformed HTTP message is an upstream protocol
         # failure, not an uncaught server error and never a successful answer.
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except TimeoutError as exc:
         _mark_inference_unverified(model)
         failure_category, failure_reason = "inference_timeout", "socket_timeout"
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=504, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except urllib.error.URLError as exc:
         _mark_inference_unverified(model)
         if isinstance(getattr(exc, "reason", None), TimeoutError):
             failure_category, failure_reason = "inference_timeout", "url_timeout"
-            _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+            _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
             raise HTTPException(status_code=504, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
         failure_category, failure_reason = "runtime_unreachable", type(getattr(exc, "reason", exc)).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     except (ValueError, OSError) as exc:
         _mark_inference_unverified(model)
         failure_category, failure_reason = "runtime_error", type(exc).__name__
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=503, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."}) from exc
     # Treat a syntactically valid JSON response with an unexpected shape as
     # an upstream protocol failure. Calling .get() on a list, null, or scalar
@@ -487,7 +544,7 @@ def qwen_chat(
     if not isinstance(message, dict):
         _mark_inference_unverified(model)
         failure_category, failure_reason = "invalid_upstream_response", "unexpected_response_shape"
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
     # Ollama can return a syntactically valid assistant message when generation
     # stopped before completion (for example, the output-token limit was reached).
@@ -508,7 +565,7 @@ def qwen_chat(
             failure_reason = "generation_limit_reached"
         else:
             failure_reason = "invalid_completion_metadata"
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(
             status_code=502,
             detail={
@@ -521,11 +578,11 @@ def qwen_chat(
     if not isinstance(content, str) or not content.strip():
         _mark_inference_unverified(model)
         failure_category, failure_reason = "empty_model_response", "missing_message_content"
-        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata)
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
     _log_persisted = _log_inference_result(
         model, started, timeout or configured_timeout, None, None,
-        audit_metadata=audit_metadata, response_metadata=result,
+        audit_metadata=audit_metadata, response_metadata=result, audit_id=audit_id,
     )
     if not _log_persisted:
         _mark_inference_unverified(model)
@@ -773,6 +830,7 @@ def _log_inference_result(
     *,
     audit_metadata: dict | None = None,
     response_metadata: dict | None = None,
+    audit_id: str | None = None,
 ) -> bool:
     """Persist and emit metadata only; never include prompts, replies or care content."""
     elapsed_ms = round((time.monotonic() - started) * 1000)
@@ -791,19 +849,31 @@ def _log_inference_result(
     }
     prompt_tokens = response_metadata.get("prompt_eval_count")
     output_tokens = response_metadata.get("eval_count")
-    metric = AIInferenceMetric(
-        id=str(uuid.uuid4()),
-        latency_ms=elapsed_ms,
-        input_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
-        output_tokens=output_tokens if isinstance(output_tokens, int) else None,
-        total_tokens=prompt_tokens + output_tokens if isinstance(prompt_tokens, int) and isinstance(output_tokens, int) else None,
-        outcome="failed" if error_category else "succeeded",
-        metrics_json=metadata,
-    )
-    persisted = _persist_inference_metric(metric)
+    if audit_id:
+        persisted = _complete_inference_metric(
+            audit_id,
+            latency_ms=elapsed_ms,
+            input_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+            output_tokens=output_tokens if isinstance(output_tokens, int) else None,
+            outcome="failed" if error_category else "succeeded",
+            metrics_json=metadata,
+        )
+        metric_id = audit_id
+    else:
+        metric = AIInferenceMetric(
+            id=str(uuid.uuid4()),
+            latency_ms=elapsed_ms,
+            input_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
+            output_tokens=output_tokens if isinstance(output_tokens, int) else None,
+            total_tokens=prompt_tokens + output_tokens if isinstance(prompt_tokens, int) and isinstance(output_tokens, int) else None,
+            outcome="failed" if error_category else "succeeded",
+            metrics_json=metadata,
+        )
+        persisted = _persist_inference_metric(metric)
+        metric_id = metric.id
     logger.info(json.dumps({
         "event": "qwen_inference",
-        "inference_audit_id": metric.id,
+        "inference_audit_id": metric_id,
         "model": model,
         "duration_ms": elapsed_ms,
         "timeout_seconds": timeout,
