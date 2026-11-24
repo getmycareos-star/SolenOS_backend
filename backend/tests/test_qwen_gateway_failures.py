@@ -98,10 +98,18 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
             "source_notification_ids": ["notification-1"],
             "source_refs": ["appointments:visit-1", "care_events:event-2"],
             "retrieval_coverage": {
-                "status": "complete",
-                "retrieval_projection_complete": True,
-                "page_limit_reached": False,
+                "status": "partial_or_unknown",
+                "answer_restriction": "do_not_infer_absence",
+                "retrieval_scan_complete": False,
+                "retrieval_projection_complete": False,
+                "page_limit_reached": True,
                 "context_truncated": False,
+                "prompt_context_complete": True,
+                "missing_required_sources": ["appointments", "care_events", None, {"secret": "discard"}],
+                "missing_optional_sources": ["documents"],
+                "failed_sources": ["care_assertions"],
+                "more_available_sources": ["care_events"],
+                "selection_truncated_sources": ["evidence"],
                 "untrusted_extra": "must not be retained",
             },
             "source_text": "must not be retained",
@@ -118,6 +126,20 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
         "source_notification_ids": ["notification-1"],
     }
     assert metadata["source_refs"] == ["appointments:visit-1", "care_events:event-2"]
+    assert metadata["retrieval_coverage"] == {
+        "status": "partial_or_unknown",
+        "answer_restriction": "do_not_infer_absence",
+        "retrieval_scan_complete": False,
+        "retrieval_projection_complete": False,
+        "page_limit_reached": True,
+        "context_truncated": False,
+        "prompt_context_complete": True,
+        "missing_required_sources": ["appointments", "care_events"],
+        "missing_optional_sources": ["documents"],
+        "failed_sources": ["care_assertions"],
+        "more_available_sources": ["care_events"],
+        "selection_truncated_sources": ["evidence"],
+    }
     assert "untrusted_extra" not in metadata["retrieval_coverage"]
     serialized = json.dumps(metadata)
     assert "PRIVATE_SOURCE_TEXT_NOT_FOR_AUDIT" not in serialized
