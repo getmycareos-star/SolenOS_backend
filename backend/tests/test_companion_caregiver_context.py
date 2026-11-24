@@ -55,6 +55,9 @@ def test_context_uses_authenticated_preferred_name_and_caregiver_local_time():
     assert context["timezone_name"] == "America/Los_Angeles"
     assert context["timezone_status"] == "configured"
     assert context["local_time"] == "6:00 AM"
+    assert context["local_date"] == "2026-11-24"
+    assert context["local_day_of_week"] == "Tuesday"
+    assert context["local_utc_offset"] == "-0800"
     assert context["greeting_period"] == "morning"
     assert context["locale"] == "en-US"
     assert context["date_format"] == "MM/DD/YYYY"
@@ -284,6 +287,10 @@ def test_companion_prompt_identity_binds_authenticated_caregiver_to_named_recipi
     assert identity["access_scope"] == "full_record"
     assert identity["permitted_capabilities"] == ["view_lcr", "add_evidence"]
     assert identity["timezone_name"] == "America/Los_Angeles"
+    assert identity["local_datetime"] == "2026-11-24T06:00:00-08:00"
+    assert identity["local_date"] == "2026-11-24"
+    assert identity["local_day_of_week"] == "Tuesday"
+    assert identity["local_utc_offset"] == "-0800"
     assert identity["timezone_status"] == "configured"
 
 
