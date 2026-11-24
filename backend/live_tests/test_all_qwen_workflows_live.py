@@ -107,7 +107,7 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
             {"role": "system", "content": case["system"]},
             {
                 "role": "user",
-                "content": case["context"] + "\\n\\nQuestion: " + case["question"],
+                "content": case["context"] + "\n\nQuestion: " + case["question"],
             },
         ]
         result = {
