@@ -14,7 +14,7 @@ from time import monotonic
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import MetaData, Table, inspect, select, func, or_, and_, false, text as sql_text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
@@ -22,11 +22,11 @@ from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.services.document_binary_storage import read_document_binary
 from app.models.privacy_delivery import AuditLogEvent, HandoffDraft, HandoffDraftRevision
-from app.models.care import Evidence, CareEvent, Caregiver
+from app.models.care import Evidence, CareEvent, Caregiver, Correction
 from app.models.time_location import Appointment
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
-from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation
+from app.models.care_continuity import EvidenceSourceRelationship, CareAssertion, EvidenceObservation, CareRecordRelationship
 from app.services.qwen_gateway import get_ollama_config, qwen_chat
 from app.services.response_length_policy import resolve_response_length_policy, count_response_words
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
@@ -1553,11 +1553,66 @@ def _evidence_observation_snapshot(db: Session, person_id: str, evidence_ids: li
     }
 
 
+def _care_event_correction_fingerprint_snapshot(db: Session, person_id: str, event_id: str) -> dict:
+    """Return the append-only correction and relationship state for one event.
+
+    A handoff source must become stale when its correction changes, even when
+    the original CareEvent row remains unchanged.
+    """
+    try:
+        inspector = inspect(db.get_bind())
+        if not inspector.has_table("corrections") or not inspector.has_table("care_record_relationships"):
+            return {"status": "unavailable", "corrections": [], "relationships": []}
+        corrections = db.query(Correction).filter(
+            Correction.person_id == person_id,
+            Correction.target_type == "care_event",
+            Correction.target_id == event_id,
+        ).order_by(Correction.created_at.asc(), Correction.id.asc()).all()
+        correction_ids = [str(item.id) for item in corrections]
+        relationships = db.query(CareRecordRelationship).filter(
+            CareRecordRelationship.person_id == person_id,
+            CareRecordRelationship.source_type == "correction",
+            CareRecordRelationship.source_id.in_(correction_ids or {"__no_matching_correction__"}),
+            CareRecordRelationship.relationship_type == "corrects",
+            CareRecordRelationship.target_type == "care_event",
+            CareRecordRelationship.target_id == event_id,
+        ).order_by(CareRecordRelationship.created_at.asc(), CareRecordRelationship.id.asc()).all() if correction_ids else []
+        return {
+            "status": "checked",
+            "corrections": [{
+                "id": str(item.id),
+                "original_text": item.original_text,
+                "corrected_text": item.corrected_text,
+                "reason": item.reason,
+                "processing_status": item.processing_status,
+                "processing_attempts": item.processing_attempts,
+                "processing_error": item.processing_error,
+                "processed_at": _iso(item.processed_at),
+                "next_retry_at": _iso(item.next_retry_at),
+                "created_at": _iso(item.created_at),
+            } for item in corrections],
+            "relationships": [{
+                "id": str(item.id),
+                "source_id": str(item.source_id),
+                "relationship_type": item.relationship_type,
+                "relationship_version": item.relationship_version,
+                "target_type": item.target_type,
+                "target_id": str(item.target_id),
+                "provenance": item.provenance,
+                "created_at": _iso(item.created_at),
+            } for item in relationships],
+        }
+    except SQLAlchemyError:
+        logger.exception("Handoff correction-lineage fingerprint retrieval failed")
+        return {"status": "failed", "corrections": [], "relationships": []}
+
+
 def _daily_care_fingerprint_payload(
     event,
     linked_evidence: list,
     analyses: list | dict | None = None,
     observations: dict | None = None,
+    correction_lineage: dict | None = None,
 ) -> dict:
     return {
         "id": event.id,
@@ -1576,6 +1631,9 @@ def _daily_care_fingerprint_payload(
         ],
         "daily_review_state": analyses or [],
         "source_observations": observations or {"status": "not_checked", "records": []},
+        "correction_lineage": correction_lineage or {
+            "status": "not_checked", "corrections": [], "relationships": [],
+        },
     }
 
 
