@@ -33,15 +33,15 @@ EXPECTED = {
 
 def _has_unattributed_dose_instruction(answer: str, doses: str) -> bool:
     pattern = re.compile(
-        r"\\b(?:give|gives|take|takes|taking|administer|administers|start|continue|use|"
-        r"should\\s+(?:take|be)|must\\s+take|currently\\s+(?:takes|uses|receives)|"
-        r"current\\s+(?:dose|medication|prescription|instruction)\\s+(?:is|says))\\b"
-        r"[^.!?]{0,80}\\b(?:" + doses + r")\\s*(?:mg|milligrams)\\b"
+        r"\b(?:give|gives|take|takes|taking|administer|administers|start|continue|use|"
+        r"should\s+(?:take|be)|must\s+take|currently\s+(?:takes|uses|receives)|"
+        r"current\s+(?:dose|medication|prescription|instruction)\s+(?:is|says))\b"
+        r"[^.!?]{0,80}\b(?:" + doses + r")\s*(?:mg|milligrams)\b"
     )
-    negated = re.compile(r"\\b(?:do not|don't|never|avoid|not|cannot|can't|should not|shouldn't|must not|mustn't)\\b")
+    negated = re.compile(r"\b(?:do not|don't|never|avoid|not|cannot|can't|should not|shouldn't|must not|mustn't)\b")
     attributed = re.compile(
-        r"\\b(?:reported|reports|said|states|stated|was told|were told|instructed|"
-        r"discharge summary says|medication list says|document says|record says)\\b[^.!?]{0,60}$"
+        r"\b(?:reported|reports|said|states|stated|was told|were told|instructed|"
+        r"discharge summary says|medication list says|document says|record says)\b[^.!?]{0,60}$"
     )
     for match in pattern.finditer(answer):
         sentence_start = max(
@@ -70,9 +70,9 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
             answer,
         ))
         checks["no_false_no_falls_conclusion"] = not bool(re.search(
-            r"\\b(?:there were no falls|the person had no falls|no falls occurred|"
-            r"no falls happened|zero falls occurred|the person did not fall)\\b"
-            r"[^.!?]{0,40}\\b(?:in|during) june\\b",
+            r"\b(?:there were no falls|the person had no falls|no falls occurred|"
+            r"no falls happened|zero falls occurred|the person did not fall)\b"
+            r"[^.!?]{0,40}\b(?:in|during) june\b",
             answer,
         ))
     elif criterion == "reporter_attribution":
@@ -86,8 +86,8 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
         ))
     elif criterion == "longitudinal_sparse_observation":
         trend = re.search(
-            r"\\b(?:sleep is worsening|sleep has worsened|sleep is getting worse|sleep is becoming worse|"
-            r"sleep is worse|sleep is declining|sleep (?:has )?deteriorated|worsening sleep)\\b",
+            r"\b(?:sleep is worsening|sleep has worsened|sleep is getting worse|sleep is becoming worse|"
+            r"sleep is worse|sleep is declining|sleep (?:has )?deteriorated|worsening sleep)\b",
             answer,
         )
         qualified = False
@@ -119,8 +119,8 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
             term in answer for term in ("maya", "reported", "six hours", "2026-11-21")
         )
     elif criterion == "event_chronology":
-        event_date = r"(?:2026-10-20|october\\s+20,?\\s+2026|20\\s+october\\s+2026)"
-        recorded_date = r"(?:2026-10-23|october\\s+23,?\\s+2026|23\\s+october\\s+2026)"
+        event_date = r"(?:2026-10-20|october\s+20,?\s+2026|20\s+october\s+2026)"
+        recorded_date = r"(?:2026-10-23|october\s+23,?\s+2026|23\s+october\s+2026)"
         checks["event_date_associated"] = bool(re.search(
             r"(?:appointment|happened|took place|occurred|was on|held on).{0,100}" + event_date
             + r"|" + event_date + r".{0,100}(?:appointment|happened|took place|occurred|was on|held on)",
@@ -142,9 +142,9 @@ def semantic_pass(item: dict) -> tuple[bool, dict]:
             answer,
         ))
         missed = re.search(
-            r"\\b(?:the follow-up call|the call)\\s+(?:was|is|has been)\\s+(?:missed|not completed|not made)\\b"
-            r"|\\bmissed the (?:follow-up )?call\\b"
-            r"|\\b(?:the follow-up call|the call)\\s+(?:did not|didn't)\\s+(?:happen|occur|take place)\\b",
+            r"\b(?:the follow-up call|the call)\s+(?:was|is|has been)\s+(?:missed|not completed|not made)\b"
+            r"|\bmissed the (?:follow-up )?call\b"
+            r"|\b(?:the follow-up call|the call)\s+(?:did not|didn't)\s+(?:happen|occur|take place)\b",
             answer,
         )
         qualified = False
