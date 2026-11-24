@@ -11749,17 +11749,9 @@ def update_care_notification_preferences(
     if payload.quiet_hours_end is not None:
         preference.quiet_hours_end = payload.quiet_hours_end
     if payload.timezone_name is not None:
+        # Notification delivery uses its own timezone preference. It must never
+        # establish or overwrite the Companion's caregiver-confirmed timezone.
         preference.timezone_name = payload.timezone_name
-        caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
-        if caregiver is None:
-            raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
-        caregiver.timezone = payload.timezone_name
-        caregiver.timezone_configured = True
-        profile = db.query(CaregiverProfile).filter_by(
-            person_id=person_id, session_caregiver_id=caregiver_id,
-        ).first()
-        if profile is not None:
-            profile.timezone = payload.timezone_name
     if any(value is not None for value in (
         payload.quiet_hours_enabled, payload.reminders_enabled,
         payload.quiet_hours_start, payload.quiet_hours_end, payload.timezone_name,
@@ -12023,11 +12015,6 @@ def update_caregiver_preferences(
     if "timezone" in updates:
         caregiver.timezone_configured = updates["timezone"] is not None
         caregiver.timezone = updates["timezone"] or "UTC"
-        notification_preference = db.query(CareNotificationPreference).filter_by(
-            person_id=person_id, caregiver_id=caregiver_id,
-        ).first()
-        if notification_preference is not None:
-            notification_preference.timezone_name = caregiver.timezone
         profile = db.query(CaregiverProfile).filter_by(
             person_id=person_id, session_caregiver_id=caregiver_id,
         ).first()
