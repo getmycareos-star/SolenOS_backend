@@ -1277,6 +1277,7 @@ def build_lcr_context(
                 "evidence_freshness_policies": ("created_at",),
                 "evidence_completeness_assessments": ("assessed_at",),
                 "evidence_completeness_policies": ("created_at",),
+                "corrections": ("created_at", "processed_at"),
                 "decisions": ("decided_at", "created_at"),
                 "decision_outcomes": ("observed_at", "created_at"),
                 "care_state_revisions": ("changed_at",),

@@ -2633,3 +2633,55 @@ def test_postgres_document_recorded_date_is_distinct_from_assertion_recorded_at(
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_postgres_correction_processing_timestamp_is_searched_separately_from_creation():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        created_at = datetime(2024, 2, 1, 9, 0, tzinfo=UTC)
+        processed_at = datetime(2026, 11, 24, 9, 0, tzinfo=UTC)
+        with Session(bind=connection) as db:
+            person = Person(id="correction-clock-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="correction-clock-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add(Correction(
+                id="correction-clock-record",
+                person_id=person.id,
+                target_type="care_event",
+                target_id="historical-event-id",
+                original_text="The earlier report said the medicine was given.",
+                corrected_text="The caregiver did not witness it being given.",
+                reason="The original statement was corrected after review.",
+                caregiver_id=caregiver.id,
+                processing_status="completed",
+                processing_attempts=1,
+                created_at=created_at,
+                processed_at=processed_at,
+            ))
+            db.commit()
+            context = build_lcr_context(
+                db,
+                person.id,
+                caregiver_id=caregiver.id,
+                only_sources={"corrections"},
+                temporal_window={
+                    "start": "2026-11-24T00:00:00+00:00",
+                    "end": "2026-11-24T23:59:59+00:00",
+                    "basis": "explicit_user_temporal_expression",
+                },
+                limit_per_source=20,
+            )
+        corrections = context["sources"]["corrections"]["items"]
+        assert [item["id"] for item in corrections] == ["correction-clock-record"]
+        assert corrections[0]["created_at"].startswith("2024-02-01")
+        assert corrections[0]["processed_at"].startswith("2026-11-24")
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
