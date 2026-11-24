@@ -276,3 +276,30 @@ def test_qwen_quote_expansion_restores_source_attribution_before_review(monkeypa
     )
     assert canonical["page_number"] == 1
     assert canonical["source_attribution"] == "caregiver_reported"
+
+def test_background_daily_capture_extraction_uses_internal_care_extraction_specialist(monkeypatch):
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_workflows import ENABLED_WORKFLOWS, INTERNAL_API_WORKFLOWS
+
+    captured = {}
+
+    def fake_qwen_chat(messages, **kwargs):
+        captured["messages"] = messages
+        return json.dumps({"observations": [], "open_questions": []})
+
+    monkeypatch.setattr(qwen_gateway, "qwen_chat", fake_qwen_chat)
+    result = qwen_gateway.extract_review_candidates(
+        "Caregiver reported that Mum left most of breakfast untouched.",
+        source_event_id="daily-event",
+        source_evidence_id="daily-evidence",
+        workflow_id="daily_capture_extraction",
+    )
+
+    assert result["observations"] == []
+    assert "daily_capture_extraction" not in ENABLED_WORKFLOWS
+    assert "daily_capture_extraction" in INTERNAL_API_WORKFLOWS
+    prepared = apply_specialized_intelligence(captured["messages"])
+    assert any(
+        "SPECIALIST: CARE INFORMATION UNDERSTANDING AND EXTRACTION" in message.get("content", "")
+        for message in prepared
+    )
