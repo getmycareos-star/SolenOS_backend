@@ -94,3 +94,4 @@ def test_caregiver_timezone_authority_migration_is_reachable_from_canonical_head
     reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261124_01_caregiver_preferences" in reachable
     assert "20261124_02_caregiver_timezone_authority" in reachable
+    assert "20261124_03_timezone_notification_provenance" in reachable
