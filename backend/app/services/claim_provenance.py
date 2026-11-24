@@ -90,6 +90,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             if marker in prefix:
                 record_type = kind
                 break
+        record_metadata: dict[str, Any] = {}
         if not record_id:
             try:
                 payload = json.loads(text[text.index("{"):])
@@ -132,19 +133,19 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                             or record_payload.get("time_provenance")
                         )
                         if source_status is not None:
-                            record["record_status"] = str(source_status)
+                            record_metadata["record_status"] = str(source_status)
                         if source_attribution is not None:
-                            record["source_attribution"] = str(source_attribution)
-                        record["reported_by"] = (
+                            record_metadata["source_attribution"] = str(source_attribution)
+                        record_metadata["reported_by"] = (
                             record_payload.get("reported_by_label")
                             or record_payload.get("original_author")
                         )
-                        record["occurred_at"] = (
+                        record_metadata["occurred_at"] = (
                             record_payload.get("occurred_at")
                             or record_payload.get("observed_at")
                             or record_payload.get("event_at")
                         )
-                        record["recorded_at"] = (
+                        record_metadata["recorded_at"] = (
                             record_payload.get("recorded_at")
                             or record_payload.get("uploaded_at")
                             or record_payload.get("created_at")
@@ -174,6 +175,7 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
             "source_excerpt": text[:700],
             "record_status": None,
             "related_evidence_ids": bracket_ids[1:2] if record_type in {"document_extraction", "freshness_assessment"} and len(bracket_ids) > 1 else [],
+            **record_metadata,
         })
     return records
 
