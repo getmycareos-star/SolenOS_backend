@@ -1,6 +1,8 @@
 import json
 
-from app.services.claim_provenance import build_claim_provenance
+import pytest
+
+from app.services.claim_provenance import build_claim_provenance, unmatched_material_claims
 
 
 def test_exact_statement_is_linked_only_to_the_source_that_contains_it():
@@ -788,3 +790,17 @@ def test_bracketed_context_record_does_not_let_missing_embedded_scope_become_imp
     ])
     assert len(records) == 1
     assert records[0]["person_id"] is None
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "This could be dehydration.",
+        "Her symptoms are consistent with a urinary tract infection.",
+        "The new confusion suggests delirium.",
+        "The breathing change may be due to pneumonia.",
+    ],
+)
+def test_unsupported_inferential_medical_conclusions_are_material_claims(statement):
+    provenance = build_claim_provenance(statement, [])
+    assert unmatched_material_claims(provenance)
