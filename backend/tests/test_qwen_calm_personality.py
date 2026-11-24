@@ -24,6 +24,18 @@ EXPECTED_CHARACTERISTICS = (
     "respectful",
     "dependable",
 )
+EXPECTED_HEADINGS = (
+    "STEADY",
+    "EMPATHETIC",
+    "OBSERVANT",
+    "THOUGHTFUL",
+    "PATIENT",
+    "HONEST",
+    "PROACTIVE",
+    "REASSURING THROUGH CLARITY",
+    "RESPECTFUL",
+    "DEPENDABLE",
+)
 
 
 def _companion_system():
@@ -38,8 +50,8 @@ def _companion_system():
 
 def test_personality_constitution_has_all_ten_characteristics():
     assert SOLENOS_PERSONALITY_CHARACTERISTICS == EXPECTED_CHARACTERISTICS
-    for characteristic in EXPECTED_CHARACTERISTICS:
-        assert f"## {characteristic.upper()}" in SOLENOS_PERSONALITY_CONSTITUTION
+    for heading in EXPECTED_HEADINGS:
+        assert f"## {heading}" in SOLENOS_PERSONALITY_CONSTITUTION
 
 
 def test_personality_and_product_identity_versions_are_independently_versioned():
@@ -95,8 +107,8 @@ def test_characteristics_define_observable_boundaries_not_only_tone_adjectives()
 def test_companion_workflow_receives_specialist_and_all_ten_shared_characteristics():
     system = _companion_system()
     assert "SPECIALIST: CAREGIVER COMPANION" in system
-    for characteristic in EXPECTED_CHARACTERISTICS:
-        assert f"## {characteristic.upper()}" in system
+    for heading in EXPECTED_HEADINGS:
+        assert f"## {heading}" in system
 
 
 def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules():
