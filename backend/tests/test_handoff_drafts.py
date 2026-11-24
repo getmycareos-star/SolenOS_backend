@@ -9,11 +9,11 @@ from sqlalchemy.pool import StaticPool
 import app.main as main_module
 from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
-from app.models.care import CareEvent, Caregiver, Evidence
+from app.models.care import CareEvent, Caregiver, Correction, Evidence
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.collaboration import EvidenceUpload
 from app.models.action import Action
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareRecordRelationship
 from app.models.caregiver_intelligence import CaregiverProfile, CaregiverRole, CaregiverResponsibility, CaregiverHandoff
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.core.caregiver_enums import CaregiverRoleType, ResponsibilityStatus, ResponsibilityAcceptanceStatus, HandoffAcceptanceStatus
@@ -2503,4 +2503,92 @@ def test_handoff_generation_receives_correction_status_and_corrected_wording(mon
     assert '"information_status": "historical_event"' in prompt
     assert "The caregiver did not witness medicine being given." in prompt
     assert "must never be described as the current account" in prompt
+
+def test_daily_care_handoff_fingerprint_changes_when_correction_lineage_changes(client):
+    import app.api.handoff_drafts as handoff_drafts
+
+    _, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    now = datetime.now(timezone.utc)
+    db = TestSessionLocal()
+    try:
+        event = CareEvent(
+            id="handoff-lineage-fingerprint-event",
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(hours=2),
+            title="Medication report",
+            description="Caregiver reported that medication was given.",
+            evidence_ids=[],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        )
+        db.add(event)
+        db.flush()
+
+        before_lineage = handoff_drafts._care_event_correction_fingerprint_snapshot(
+            db, person_id, event.id,
+        )
+        before = handoff_drafts._fingerprint(
+            handoff_drafts._daily_care_fingerprint_payload(
+                event, [], {}, {}, before_lineage,
+            )
+        )
+        assert before_lineage["status"] == "checked"
+        assert before_lineage["corrections"] == []
+
+        correction = Correction(
+            id="handoff-lineage-fingerprint-correction",
+            person_id=person_id,
+            target_type="care_event",
+            target_id=event.id,
+            original_text="Medication was given.",
+            corrected_text="The caregiver did not witness medication being given.",
+            reason="The original report overstated what was observed.",
+            caregiver_id=caregiver_id,
+            processing_status="pending",
+            processing_attempts=0,
+        )
+        db.add(correction)
+        db.flush()
+        pending_lineage = handoff_drafts._care_event_correction_fingerprint_snapshot(
+            db, person_id, event.id,
+        )
+        pending = handoff_drafts._fingerprint(
+            handoff_drafts._daily_care_fingerprint_payload(
+                event, [], {}, {}, pending_lineage,
+            )
+        )
+        assert pending != before
+        assert pending_lineage["corrections"][0]["processing_status"] == "pending"
+
+        correction.processing_status = "completed"
+        correction.processing_attempts = 1
+        db.flush()
+        db.add(CareRecordRelationship(
+            id="handoff-lineage-fingerprint-relationship",
+            person_id=person_id,
+            source_type="correction",
+            source_id=correction.id,
+            relationship_type="corrects",
+            target_type="care_event",
+            target_id=event.id,
+            provenance="Caregiver correction; original report retained.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.flush()
+        completed_lineage = handoff_drafts._care_event_correction_fingerprint_snapshot(
+            db, person_id, event.id,
+        )
+        completed = handoff_drafts._fingerprint(
+            handoff_drafts._daily_care_fingerprint_payload(
+                event, [], {}, {}, completed_lineage,
+            )
+        )
+        assert completed != pending
+        assert completed_lineage["relationships"][0]["source_id"] == correction.id
+    finally:
+        db.close()
 
