@@ -158,7 +158,7 @@ def test_every_qwen_request_receives_product_identity_constitution():
     system = final[0]["content"]
     assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system
     assert "SolenOS was founded by David Abuchi" in system
-    assert "Do not claim David personally" in system
+    assert "Do not claim he personally programmed" in system
     assert "The model is replaceable" in system
 
 
