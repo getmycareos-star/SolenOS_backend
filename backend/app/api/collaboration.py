@@ -3962,7 +3962,7 @@ def _contradictory_event_evidence_response(user_text: str, event_context: list[s
                 continue
             bucket = grouped.setdefault((term, event_date), {"positive": set(), "negative": set()})
             for polarity in polarities:
-                bucket[polarity].add(str(record["event_id"]))
+                bucket[polarity].add(str(event_id))
 
     for (term, _event_date), polarities in grouped.items():
         positive_ids = polarities["positive"]
