@@ -58,3 +58,78 @@ def test_delta_engine_uses_the_shared_gateway_and_its_longitudinal_specialist():
     assert "SOLENOS_WORKFLOW_ID: delta_engine." in source
     assert "_request_delta_json(" in source
     assert "base + \"/api/chat\"" not in source
+
+
+def _dotted_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _dotted_name(node.value)
+        return f"{parent}.{node.attr}" if parent else node.attr
+    return ""
+
+
+def test_qwen_chat_calls_and_references_are_gateway_imports_even_when_aliased():
+    offenders = []
+    discovered_call_sites = set()
+    gateway_module = "app.services.qwen_gateway"
+    for source_path in APP_ROOT.rglob("*.py"):
+        if source_path == GATEWAY_PATH:
+            continue
+        relative = str(source_path.relative_to(BACKEND_ROOT))
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=relative)
+        imported_chat_names = set()
+        imported_gateway_module_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name == "qwen_chat":
+                        if node.module != gateway_module:
+                            offenders.append(f"{relative}: qwen_chat imported from {node.module}")
+                        else:
+                            imported_chat_names.add(alias.asname or alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name == gateway_module:
+                        imported_gateway_module_names.add(alias.asname or alias.name.split(".")[0])
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            target = _dotted_name(node.func)
+            if target in imported_chat_names:
+                discovered_call_sites.add(relative)
+            elif target.endswith(".qwen_chat") and target.rsplit(".", 1)[0] in imported_gateway_module_names:
+                discovered_call_sites.add(relative)
+            elif target.endswith(".qwen_chat"):
+                offenders.append(f"{relative}: unverified qwen_chat receiver {target}")
+            elif target == "qwen_chat":
+                offenders.append(f"{relative}: qwen_chat called without a gateway import")
+
+        # Passing qwen_chat as a callback (for example asyncio.to_thread) is
+        # also an inference path, even though it is not itself a Call node.
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in imported_chat_names:
+                discovered_call_sites.add(relative)
+
+    assert discovered_call_sites, "No Qwen inference call sites were discovered"
+    assert offenders == [], offenders
+
+
+def test_gateway_extraction_entry_points_delegate_to_the_single_qwen_chat():
+    tree = ast.parse(GATEWAY_PATH.read_text(encoding="utf-8"))
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for name in ("qwen_chat", "extract_review_candidates", "extract_companion_care_candidates"):
+        assert name in functions, f"Missing gateway entry point: {name}"
+    for name in ("extract_review_candidates", "extract_companion_care_candidates"):
+        calls_gateway = any(
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "qwen_chat"
+            for node in ast.walk(functions[name])
+        )
+        assert calls_gateway, f"{name} must delegate inference to qwen_chat"
