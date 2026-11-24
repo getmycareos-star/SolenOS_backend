@@ -41,12 +41,13 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
             "violation_conditions",
             "verification_cases",
         }
+        # Only behavior, required context, and prohibitions belong in every
+        # inference. Violation and verification examples remain in the
+        # machine-readable test contract, not the model's context window.
         runtime_labels = {
             "observable_behaviors": "Behaviour: ",
             "required_context": "Context: ",
             "prohibited_behaviors": "Prohibited: ",
-            "violation_conditions": "Violation: ",
-            "verification_cases": "Test: ",
         }
         for field, label in runtime_labels.items():
             contract_values = contract[field] if isinstance(contract[field], (tuple, list)) else (contract[field],)
