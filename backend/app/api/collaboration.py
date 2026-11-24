@@ -473,11 +473,13 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
             if any(term in correction_text for term in topic_terms):
                 correction_evidence_ids.add(str(item.evidence_id))
     shared_origin_pairs = set()
+    same_person_evidence_ids = set()
     if all_event_evidence_ids:
         lineage_evidence_rows = db.query(EvidenceModel).filter(
             EvidenceModel.person_id == person_id,
             EvidenceModel.id.in_(all_event_evidence_ids),
         ).all()
+        same_person_evidence_ids = {str(item.id) for item in lineage_evidence_rows}
         shared_origin_pairs.update(build_shared_origin_evidence_pairs(lineage_evidence_rows))
     if all_event_evidence_ids and inspect(db.get_bind()).has_table("evidence_source_relationships"):
         shared_scope_filters = [
@@ -504,6 +506,8 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
         shared_origin_pairs.update({
             frozenset((str(item.source_evidence_id), str(item.related_evidence_id)))
             for item in shared_rows
+            if str(item.source_evidence_id) in same_person_evidence_ids
+            and str(item.related_evidence_id) in same_person_evidence_ids
         })
     aggregate = build_distinct_event_aggregate(
         [{
