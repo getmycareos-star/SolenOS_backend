@@ -241,3 +241,30 @@ def test_caregiver_preferences_require_a_valid_bearer_session():
             assert update.status_code == 401, update.text
     finally:
         teardown_client()
+
+
+
+def test_explicitly_selected_utc_is_authoritative_not_confused_with_database_default():
+    client = setup_client()
+    try:
+        _, headers = create_caregiver(client, "Caregiver")
+        initial = client.get("/api/v1/caregiver/preferences", headers=headers)
+        assert initial.status_code == 200
+        assert initial.json()["timezone"] is None
+        assert initial.json()["timezone_configured"] is False
+
+        saved = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=headers,
+            json={"timezone": "UTC"},
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["timezone"] == "UTC"
+        assert saved.json()["timezone_configured"] is True
+
+        reread = client.get("/api/v1/caregiver/preferences", headers=headers)
+        assert reread.status_code == 200
+        assert reread.json()["timezone"] == "UTC"
+        assert reread.json()["timezone_configured"] is True
+    finally:
+        teardown_client()
