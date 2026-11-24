@@ -573,30 +573,32 @@ async def ask_daily_care_qwen(
             "written_to_lcr": False,
         }
 
-    # Use full DB-side retrieval to find relevant history, then pass a transparent
-    # bounded evidence set to Qwen. Preserve source IDs and dates for every item.
+    # Use full DB-side retrieval to find relevant history, then fit a transparent
+    # evidence subset to the model context budget. Source IDs and dates remain intact.
     question_terms = set(_expanded_search_terms(
         re.findall(r"[\\w'-]{3,}", payload.question.casefold())
     ))
     scored = []
     for row in records:
-        text = json.dumps(row, ensure_ascii=False).casefold()
-        score = sum(1 for term in question_terms if term in text)
+        row_text = json.dumps(row, ensure_ascii=False).casefold()
+        score = sum(1 for term in question_terms if term in row_text)
         scored.append((score, row))
-    scored.sort(key=lambda item: (item[0], item[1].get("occurred_at") or item[1].get("recorded_at") or item[1].get("uploaded_at") or ""), reverse=True)
-    selected = [row for _, row in scored[:30]]
-    # Keep model context bounded while explicitly reporting how many records were
-    # retrieved and how many were selected for this inference.
-    evidence_json = json.dumps(selected, ensure_ascii=False)
-    while len(evidence_json) > 26000 and len(selected) > 1:
-        selected.pop()
-        evidence_json = json.dumps(selected, ensure_ascii=False)
-
-    records_omitted = max(0, len(records) - len(selected))
-    selection_truncated = records_omitted > 0 or any(
-        source.get("has_more") is True
-        for source in bundle.get("lcr_context", {}).get("sources", {}).values()
+    scored.sort(
+        key=lambda item: (
+            item[0],
+            item[1].get("occurred_at") or item[1].get("recorded_at")
+            or item[1].get("uploaded_at") or item[1].get("scheduled_at") or "",
+        ),
+        reverse=True,
     )
+    selected_candidates = [row for _, row in scored[:30]]
+    prompt_payload, selected, records_omitted, selection_truncated = _fit_daily_care_prompt_context(
+        payload.question,
+        selected_candidates,
+        bundle.get("lcr_context"),
+        payload.prepare_lcr_proposals,
+    )
+    records_omitted = max(records_omitted, len(records) - len(selected))
     history_scope = {
         **bundle["counts"],
         "lcr_context": bundle.get("lcr_context", {}),
@@ -608,7 +610,6 @@ async def ask_daily_care_qwen(
         "oldest_record_at": bundle["oldest_record_at"],
         "newest_record_at": bundle["newest_record_at"],
     }
-
     schema = {
         "type": "object",
         "properties": {
@@ -642,7 +643,7 @@ async def ask_daily_care_qwen(
         "status, and your interpretation. If sources conflict, state the conflict without choosing a winner. Superseded or withdrawn facts and rejected, retracted, superseded, or withdrawn assertions are historical only, not current. Never "
         "infer diagnosis, cause, medication changes, or clinical certainty. Never say that anything has been saved. "
         "The retrieved context includes explicit schema and bounded-history metadata. If a source is unavailable or the schema is partial, do not claim the information is absent. "
-        "If records were omitted from the model context or any source reports more matching history, explicitly say the answer is based on a partial view and do not call it the complete history. "
+        "If records were omitted, source text was truncated, or any source reports more matching history, explicitly say the answer is based on a partial view and do not call it the complete history. "
         "Propose an LCR update only when it would improve longitudinal continuity; proposals are not facts and "
         "must retain source IDs and uncertainty. Do not propose a value that is unsupported by the supplied records. "
         "If there is no supported proposal, return an empty proposals array. Return only the required JSON."
@@ -650,24 +651,11 @@ async def ask_daily_care_qwen(
     system_prompt += f" RESPONSE LENGTH: target {response_length_policy.target_words if response_length_policy.target_words is not None else 'situation-dependent'} words; hard maximum {response_length_policy.max_words if response_length_policy.max_words is not None else 'none for critical safety content'}. Preserve source limitations and uncertainty; do not pad or speculate."
     daily_messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": json.dumps({
-            "question": payload.question,
-            "retrieved_history": selected,
-            "retrieval_metadata": {
-                "matching_records_in_database": len(records),
-                "records_sent_to_model": len(selected),
-                "records_omitted_from_model": records_omitted,
-                "selection_truncated": selection_truncated,
-                "oldest_record_at": bundle["oldest_record_at"],
-                "newest_record_at": bundle["newest_record_at"],
-                "lcr_context": bundle.get("lcr_context", {}),
-            },
-            "lcr_proposals_requested": payload.prepare_lcr_proposals,
-        }, ensure_ascii=False)},
+        {"role": "user", "content": json.dumps(prompt_payload, ensure_ascii=False)},
     ]
     daily_token_budget = min(
-        1024,
-        response_length_policy.token_budget + (256 if payload.prepare_lcr_proposals else 0),
+        DAILY_CARE_MAX_OUTPUT_TOKENS,
+        response_length_policy.token_budget + (128 if payload.prepare_lcr_proposals else 0),
     )
     try:
         raw = await __import__("asyncio").to_thread(
