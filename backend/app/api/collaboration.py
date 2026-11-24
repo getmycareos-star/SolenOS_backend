@@ -6328,7 +6328,6 @@ def _record_companion_output_validation(
         "caregiver_id": caregiver_id,
         "workflow_id": "companion",
         "generator": "qwen" if ai_generated else "deterministic_solenos",
-        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b") if ai_generated else None,
         "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
         "response_sha256": hashlib.sha256((reply or "").encode("utf-8")).hexdigest(),
         "response_length": len(reply or ""),
