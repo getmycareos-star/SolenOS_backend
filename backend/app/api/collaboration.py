@@ -8754,6 +8754,36 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
         lcr_context_coverage["retrieval_receipt"] = retrieval_receipt
         missing_context_instruction = _lcr_missing_context_instruction(lcr_context_coverage, context_truncated)
+        # Give the model only the coverage facts needed to qualify its answer.
+        # The full receipt remains in the API response and persisted metadata;
+        # serializing every empty optional source and internal count into the
+        # prompt wastes the small Qwen context window and can reject a first-visit
+        # question even when only one care event was retrieved.
+        model_retrieval_coverage = {
+            "retrieval_completeness": retrieval_receipt.get("retrieval_completeness"),
+            "answer_restriction": retrieval_receipt.get("answer_restriction"),
+            "context_truncated": context_truncated,
+            "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
+            "failed_sources": sorted(
+                name for name, value in (lcr_context_coverage.get("sources") or {}).items()
+                if value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"}
+            ),
+            "sources": {
+                name: {
+                    "status": value.get("status"),
+                    "has_more": bool(value.get("has_more")),
+                    "returned_history_complete": bool(value.get("returned_history_complete")),
+                    "selected_for_answer": int(value.get("selected_for_answer") or 0),
+                    "selection_truncated": bool(value.get("selection_truncated")),
+                }
+                for name, value in (lcr_context_coverage.get("sources") or {}).items()
+                if (
+                    value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"}
+                    or value.get("has_more")
+                    or prompt_source_counts.get(name, 0) > 0
+                )
+            },
+        }
         # Keep retrieval completeness in the system role as well as the data
         # message. This prevents a lower-priority prompt or retry instruction
         # from turning a partial search into a claim that information is absent.
@@ -8771,7 +8801,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "Keep conflicting_information unresolved unless a recorded reconciliation resolves it; never choose a winner yourself. "
                 "Document-extracted text is source material, not a verified care fact.\n"
                 + ("\n".join([
-                    "Retrieval coverage: " + json.dumps(lcr_context_coverage, ensure_ascii=False, default=str),
+                    "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
                     *bounded_context,
                 ]) if bounded_context else "No matching authorized care-record context was retrieved.")
             ),
