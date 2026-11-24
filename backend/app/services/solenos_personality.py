@@ -290,7 +290,16 @@ def _build_runtime_personality_constitution() -> str:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
         for field, anchor in anchors.items():
-            if anchor not in contract[field]:
+            contract_value = contract[field]
+            if isinstance(contract_value, str):
+                contract_text = contract_value
+            elif isinstance(contract_value, (tuple, list, set, frozenset)):
+                contract_text = " | ".join(str(item) for item in contract_value)
+            else:
+                raise RuntimeError(
+                    f"Invalid SolenOS personality contract shape: {trait}.{field}"
+                )
+            if anchor not in contract_text:
                 raise RuntimeError(f"Stale SolenOS personality runtime anchor: {trait}.{field}")
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
