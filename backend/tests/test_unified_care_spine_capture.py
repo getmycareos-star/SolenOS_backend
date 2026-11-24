@@ -795,7 +795,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             db.add(Caregiver(
                 id=caregiver_id, name="Family caregiver",
                 relationship="Family", person_id=person_id,
-                timezone="America/New_York",
+                timezone="America/New_York", timezone_configured=True,
             ))
             db.flush()
             db.add_all([
