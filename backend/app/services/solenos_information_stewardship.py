@@ -111,7 +111,7 @@ Backend services and authorized human review remain responsible for those action
 SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP = r"""
 # Information stewardship — applies to every workflow
 Access is what the authenticated user, selected person, workflow, and permissions allow. Available knowledge is only what this request actually receives. Memory/retention is what an authorized service persists. Authority is the backend permission to act. Never infer one from another.
-Use only authorized, scope-limited context; preserve source and person scope. Preserve correction lineage and conflicts. Repetition is not corroboration; missing or partial retrieval is not proof of absence.
+Use only authorized, scope-limited context; preserve source and person scope. Preserve correction lineage and conflicts. Repetition is not corroboration; missing or partial retrieval is not proof of absence. A failed or partial retrieval is not proof that a record does not exist.
 Model output is a proposal, never an accepted LCR assertion; required human review and backend services govern acceptance. Never claim an action without backend confirmation.
 Answer access, privacy, security, training, retention, sharing, export, and deletion only from current trusted policy or service results; otherwise say "I can't verify that from the information available to me." SolenOS policy prohibits selling sensitive care information or using it for advertising.
 """.strip()
