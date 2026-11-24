@@ -103,6 +103,7 @@ def build_companion_caregiver_context(
     now: datetime | None = None,
     timezone_conflict: bool = False,
     caregiver_profile=None,
+    authenticated_account_id: str | None = None,
     active_roles=None,
     active_roles_truncated: bool = False,
     active_responsibilities=None,
@@ -182,6 +183,9 @@ def build_companion_caregiver_context(
 
     return {
         "caregiver_id": caregiver_id,
+        # Internal audit identity only. The prompt identity envelope deliberately
+        # excludes account/session identifiers and never asks Qwen to authorize.
+        "authenticated_account_id": _clean(authenticated_account_id, limit=80),
         "care_recipient_id": person_id,
         "full_name": full_name,
         "preferred_name": preferred_name,
