@@ -212,6 +212,12 @@ def _attach_caregiver_question_queue(db: Session, person_id: str, context: dict)
     unique, visible, additional_count = prioritize_caregiver_questions(
         eligible, ordinary_limit=2
     )
+    same_person_evidence_ids = {
+        str(evidence_id)
+        for (evidence_id,) in db.query(Evidence.id).filter(
+            Evidence.person_id == person_id
+        ).all()
+    }
 
     def serialize_question(row: OpenQuestion) -> dict:
         dependency = None
