@@ -1949,7 +1949,8 @@ def build_lcr_context(
         "read_only": True,
         "requested_sources": sorted(only_sources) if only_sources is not None else sorted(SOURCE_SPECS),
         "history_coverage": (
-            "partial_source_history" if failed_sources
+            "partial_source_history"
+            if any(source.get("status") in {"failed", "partial"} for source in sources.values())
             else "partial_search_coverage" if unsearchable_sources
             else "paginated_history_page" if any(source.get("offset", 0) > 0 for source in sources.values())
             else "complete_history_scan_ranked_subset" if include_all_history
