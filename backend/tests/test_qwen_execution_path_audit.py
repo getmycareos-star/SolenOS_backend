@@ -224,7 +224,13 @@ def test_gateway_is_the_only_module_that_owns_ollama_runtime_configuration():
     assert 'base + "/api/chat"' in source
 
 def test_every_production_qwen_invocation_has_trusted_audit_context():
-    required_calls = {"qwen_chat", "extract_review_candidates", "extract_companion_care_candidates"}
+    required_calls = {
+        "qwen_chat",
+        "_qwen_chat_with_bounded_context",
+        "_ollama_chat",
+        "extract_review_candidates",
+        "extract_companion_care_candidates",
+    }
     offenders = []
     for source_path in APP_ROOT.rglob("*.py"):
         source = source_path.read_text(encoding="utf-8")
