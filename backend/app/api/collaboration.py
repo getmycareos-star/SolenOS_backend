@@ -4342,6 +4342,15 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
         "required_any_term": not required_any or any(term in normalized for term in required_any),
         "forbidden_terms_absent": not any(term in normalized for term in forbidden),
     }
+    for field, check_name in (
+        ("required_any_history_limit", "history_scope_disclosed"),
+        ("required_any_provenance", "reporter_provenance_preserved"),
+        ("required_any_unresolved", "unresolved_question_preserved"),
+        ("required_any_not_missed", "missing_outcome_not_called_missed"),
+    ):
+        phrases = case.get(field, [])
+        if phrases:
+            checks[check_name] = any(phrase in normalized for phrase in phrases)
     professional_confirmation = case.get("required_professional_confirmation", [])
     if professional_confirmation:
         checks["professional_confirmation"] = any(
@@ -4481,6 +4490,8 @@ def _production_qwen_evaluation_cases() -> list[dict]:
             "context": "Synthetic LCR retrieval: The supplied result contains records from 2026-07-02 and 2026-07-18 only. The retrieval metadata says the requested June 2026 range was not included and older pages remain unqueried. No June event records are supplied in this request.",
             "question": "Did the person have any falls in June 2026?",
             "required_any": ["cannot determine", "cannot establish", "not enough information", "not included in the supplied", "older records were not retrieved"],
+            "required_any_history_limit": ["june records were not supplied", "june records were not included", "older records have not been retrieved", "cannot determine from the supplied records", "the supplied view does not include june"],
+            "forbidden": ["there were no falls in june", "no falls occurred in june", "the person did not fall in june", "the person had no falls in june"],
         },
         {
             "criterion": "reporter_attribution",
@@ -4520,11 +4531,13 @@ def _production_qwen_evaluation_cases() -> list[dict]:
         },
         {
             "criterion": "event_chronology",
-            "system": "SOLENOS_WORKFLOW_ID: handoff. Preserve chronology and distinguish event time from recording time.",
-            "context": "Synthetic LCR: The caregiver reports that the appointment took place on 2026-10-20. The note documenting the appointment was entered on 2026-10-23. A blood test was ordered at the appointment; no result is present in the supplied record.",
-            "question": "Summarize the appointment dates and the status of the blood test for a clinician handoff.",
+            "system": "SOLENOS_WORKFLOW_ID: handoff. Preserve chronology, reporter provenance, and unresolved questions; distinguish event time from recording time.",
+            "context": "Synthetic LCR: The caregiver reported that the appointment took place on 2026-10-20. The note documenting the appointment was entered on 2026-10-23. A blood test was ordered at the appointment; no result is present in the supplied record. Open question: whether the blood test has been completed and when the result is expected.",
+            "question": "Prepare a clinician handoff summary that preserves the appointment dates, who reported them, and the unresolved blood-test question.",
             "required": ["2026-10-20", "2026-10-23"],
             "required_any": ["no result", "no blood test result", "no test result", "result is not recorded", "result is not present", "pending"],
+            "required_any_provenance": ["caregiver reported", "caregiver report", "reported by the caregiver"],
+            "required_any_unresolved": ["whether the blood test has been completed", "whether the test has been completed", "when the result is expected", "completion is not documented", "remains unresolved"],
         },
         {
             "criterion": "caregiver_continuity_gap",
@@ -4532,6 +4545,7 @@ def _production_qwen_evaluation_cases() -> list[dict]:
             "context": "Synthetic care record: A follow-up call was requested on 2026-11-14. The supplied record contains no completion note, cancellation, or outcome. There is no evidence that the call was missed.",
             "question": "Was the follow-up call missed?",
             "required_any": ["outcome is not recorded", "outcome is not documented", "no outcome is documented", "cannot determine whether it happened", "cannot determine whether the call happened", "completion is not documented"],
+            "required_any_not_missed": ["no evidence it was missed", "not enough evidence to say it was missed", "cannot say it was missed", "cannot determine whether it was missed", "the record does not show that it was missed"],
         },
         {
             "criterion": "medication_conflict",
