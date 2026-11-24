@@ -117,11 +117,11 @@ def test_qwen_chat_calls_and_references_are_gateway_imports_even_when_aliased():
                 discovered_call_sites.add(relative)
 
     expected_call_sites = {
-        "backend/app/api/collaboration.py",
-        "backend/app/api/handoff_drafts.py",
-        "backend/app/api/daily_care_intelligence.py",
-        "backend/app/services/delta_engine.py",
-        "backend/app/services/qwen_background_worker.py",
+        "app/api/collaboration.py",
+        "app/api/handoff_drafts.py",
+        "app/api/daily_care_intelligence.py",
+        "app/services/delta_engine.py",
+        "app/services/qwen_background_worker.py",
     }
     assert discovered_call_sites == expected_call_sites, {
         "discovered": sorted(discovered_call_sites),
@@ -151,10 +151,10 @@ def test_gateway_extraction_entry_points_delegate_to_the_single_qwen_chat():
 
 def test_gateway_extraction_consumers_are_explicitly_imported_from_the_gateway():
     expected = {
-        "backend/app/api/v1.py": {"extract_review_candidates"},
-        "backend/app/api/document_intelligence.py": {"extract_review_candidates"},
-        "backend/app/services/qwen_background_worker.py": {"extract_review_candidates"},
-        "backend/app/services/companion_care_updates.py": {"extract_companion_care_candidates"},
+        "app/api/v1.py": {"extract_review_candidates"},
+        "app/api/document_intelligence.py": {"extract_review_candidates"},
+        "app/services/qwen_background_worker.py": {"extract_review_candidates"},
+        "app/services/companion_care_updates.py": {"extract_companion_care_candidates"},
     }
     for relative, required_symbols in expected.items():
         tree = ast.parse((BACKEND_ROOT / relative).read_text(encoding="utf-8"))
