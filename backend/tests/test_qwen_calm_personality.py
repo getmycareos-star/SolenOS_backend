@@ -104,3 +104,42 @@ def test_user_and_workflow_instructions_cannot_weaken_shared_personality_rules()
     assert "Do not say \"everything will be okay\"" in system
     assert "Uncertainty must not become confidence to reassure" in system
     assert "Safety, factual integrity, dignity, privacy" in system
+
+
+def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contract():
+    from app.services.solenos_personality import (
+        SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS,
+        SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
+    )
+
+    assert tuple(SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS) == SOLENOS_PERSONALITY_CHARACTERISTICS
+    required_fields = {
+        "observable_behaviors",
+        "required_context",
+        "prohibited_behaviors",
+        "violation_conditions",
+        "verification_cases",
+    }
+    for trait, contract in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS.items():
+        assert required_fields.issubset(contract), trait
+        for field in required_fields:
+            assert contract[field], (trait, field)
+            assert all(isinstance(item, str) and item.strip() for item in contract[field]), (trait, field)
+        assert trait.upper() in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.upper(), trait
+        for prohibited in contract["prohibited_behaviors"]:
+            assert prohibited.casefold() in SOLENOS_PERSONALITY_CONSTITUTION.casefold(), (trait, prohibited)
+
+
+def test_trait_acceptance_contracts_cover_distinct_context_and_failure_modes():
+    from app.services.solenos_personality import SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS
+
+    contexts = {
+        tuple(contract["required_context"])
+        for contract in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS.values()
+    }
+    violations = {
+        tuple(contract["violation_conditions"])
+        for contract in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS.values()
+    }
+    assert len(contexts) == len(SOLENOS_PERSONALITY_CHARACTERISTICS)
+    assert len(violations) == len(SOLENOS_PERSONALITY_CHARACTERISTICS)
