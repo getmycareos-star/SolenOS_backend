@@ -201,6 +201,8 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
             raise ValueError(f"unmapped_solenos_workflow:{workflow_id}")
         if len(domains) > MAX_SPECIALISTS_PER_REQUEST:
             raise RuntimeError(f"specialist_limit_exceeded:{workflow_id}")
+        if len(domains) != len(set(domains)):
+            raise RuntimeError(f"duplicate_specialist_domain:{workflow_id}")
         unknown_domains = set(domains) - set(SPECIALIZED_PROMPTS)
         if unknown_domains:
             raise RuntimeError(f"unknown_specialist_domain:{workflow_id}")
