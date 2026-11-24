@@ -1026,13 +1026,13 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
         response = client.post(
             "/api/v1/conversation/message",
             headers={"Authorization": f"Bearer {token}"},
-            json={"person_id": person_id, "text": "Hey, how are you?"},
+            json={"person_id": person_id, "text": "Hello."},
         )
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["reply"] == "Hello, I'm SolenOS Companion. I'm ready to help with whatever you'd like to work through."
         assert len(calls) == 1
-        assert calls[0][-1]["content"].startswith("Caregiver greeting: Hey, how are you?")
+        assert calls[0][-1]["content"].startswith("Caregiver greeting: Hello.")
         serialized_prompt = "\\n".join(message["content"] for message in calls[0])
         assert '"conversation_stage":"first_time"' in serialized_prompt
         assert "This is the caregiver's first persisted Companion conversation" in serialized_prompt
