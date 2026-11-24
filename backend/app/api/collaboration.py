@@ -7488,12 +7488,27 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
             return True
         if re.search(r"(?m)^\s*(?:[-*•]|\d+[.)])\s+", text):
             return True
-    if "CONTINUITY REPAIR" in guidance and re.search(
-        r"\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
-        r"start (?:all )?over|what did you say before)\b",
-        lowered,
-    ):
-        return True
+    if "CONTINUITY REPAIR" in guidance:
+        continuity_reask = re.compile(
+            r"\b(?:repeat (?:yourself|the story|that)|tell me (?:again|the whole story)|"
+            r"start (?:all )?over|what did you say before)\b"
+        )
+        for match in continuity_reask.finditer(lowered):
+            clause_start = max(
+                lowered.rfind(".", 0, match.start()),
+                lowered.rfind(";", 0, match.start()),
+                lowered.rfind(",", 0, match.start()),
+            ) + 1
+            prefix = lowered[clause_start:match.start()].strip()
+            # A response that explicitly says the caregiver does not need to
+            # repeat or start over is continuity reassurance, not a re-ask.
+            if re.search(
+                r"\b(?:don't|do not|doesn't|does not|need not|never)\s+"
+                r"(?:need to |have to |be asked to )?$",
+                prefix,
+            ):
+                continue
+            return True
     if "CORRECTION HANDLING" in guidance and re.search(
         r"\b(?:i(?:'ve| have) (?:updated|changed|corrected|saved) (?:the )?(?:care )?record|"
         r"the record (?:is|has been) updated)\b",
