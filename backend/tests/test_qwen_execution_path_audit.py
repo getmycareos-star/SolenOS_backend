@@ -99,7 +99,11 @@ def test_qwen_chat_calls_and_references_are_gateway_imports_even_when_aliased():
             target = _dotted_name(node.func)
             if target in imported_chat_names:
                 discovered_call_sites.add(relative)
-            elif target.endswith(".qwen_chat") and target.rsplit(".", 1)[0] in imported_gateway_module_names:
+            elif target.endswith(".qwen_chat") and any(
+                target == "{}.qwen_chat".format(module_name)
+                or target == "{}.services.qwen_gateway.qwen_chat".format(module_name)
+                for module_name in imported_gateway_module_names
+            ):
                 discovered_call_sites.add(relative)
             elif target.endswith(".qwen_chat"):
                 offenders.append(f"{relative}: unverified qwen_chat receiver {target}")
