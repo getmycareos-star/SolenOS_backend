@@ -54,4 +54,15 @@
 ## Known external blocker
 
 At the latest observed frontend production workflow, the production build and validation passed but the Netlify deploy job failed at **"Fail clearly if Netlify credentials are not configured"**. This is a credential/configuration blocker, not proof of an application-code failure. It cannot be cleared by inventing or committing secrets; configure the required repository secrets in GitHub/Netlify, then rerun deployment.
+## Direct-main Companion claim-grounding increment — 2026-11-24
+
+**Status: Implemented in source; exact-current-main test and live-model verification pending. This does not close groups D, H, I, or P.**
+
+- Companion response validation now constructs claim provenance before accepting a generated answer and rejects unmatched material care claims with a fail-closed response.
+- Claim source candidates are retained only when their typed record IDs resolve to persisted rows scoped to the authenticated person's care record. Unknown, unresolved, and cross-person IDs are excluded.
+- Context parsing maps shared LCR source types and LCR event/evidence prefixes to the source types used by the person-scoped enrichment path; reporter, epistemic status, source attribution, event time, and recording time are retained where supplied.
+- Exact source matching now refuses to drop explicit attribution, negation, or uncertainty qualifiers. Short exact quotations are accepted only with explicit attribution framing and are recorded separately from whole-statement exact matches.
+- Companion instructions now require exact wording and preserved attribution/time/negation/uncertainty for material care facts; unsupported paraphrases must not be presented as established facts.
+- Regression coverage was added for unsupported paraphrases, attribution preservation, attributed exact quotes, source-type mapping, unresolved/cross-person source IDs, and fail-closed Companion responses.
+- **Verification limitation:** the GitHub connector available in this session exposed Railway commit statuses but not push-triggered GitHub Actions check runs or logs. The tests were committed and the push workflows are configured, but their results have not been observed here. Live Qwen acceptance remains unverified.
 
