@@ -430,6 +430,29 @@ def qwen_chat(
         failure_category, failure_reason = "invalid_upstream_response", "unexpected_response_shape"
         _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    # Ollama can return a syntactically valid assistant message when generation
+    # stopped before completion (for example, the output-token limit was reached).
+    # Non-streaming requests must not be reported as successful in that case.
+    # Older compatible Ollama responses may omit these metadata fields, so only
+    # explicit incomplete/invalid completion metadata is rejected.
+    done = result.get("done")
+    done_reason = result.get("done_reason")
+    if (done is not None and not isinstance(done, bool)) or done is False or str(done_reason or "").casefold() == "length":
+        _mark_inference_unverified(model)
+        failure_category, failure_reason = "incomplete_model_response", (
+            "generation_not_completed" if done is False else
+            "generation_limit_reached" if str(done_reason or "").casefold() == "length" else
+            "invalid_completion_metadata"
+        )
+        _log_inference_result(model, started, timeout or configured_timeout, failure_category, failure_reason)
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": failure_category,
+                "reason": failure_reason,
+                "message": "SolenOS could not confirm that the AI response finished. No answer was accepted.",
+            },
+        )
     content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         _mark_inference_unverified(model)
