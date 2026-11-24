@@ -26,6 +26,7 @@ def test_runtime_injects_every_machine_readable_trait_dimension():
             "required_context",
             "prohibited_behaviors",
             "violation_conditions",
+            "verification_cases",
         ):
             for requirement in contract[field]:
                 assert requirement in runtime, (trait, field, requirement)
@@ -70,6 +71,7 @@ def test_every_personality_dimension_is_present_in_the_actual_assembled_qwen_sys
             "required_context",
             "prohibited_behaviors",
             "violation_conditions",
+            "verification_cases",
         ):
             assert all(value in system_message["content"] for value in contract[field])
 
