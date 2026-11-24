@@ -3247,7 +3247,7 @@ def _should_include_evidence_lineage_in_prompt(user_text: str) -> bool:
     audit metadata in the model prompt and can crowd out the care facts themselves.
     """
     return bool(re.search(
-        r"\b(?:corroborat|independent source|source lineage|same source|source|origin|came from|where .* from)\b",
+        r"\b(?:corroborat\w*|independent source|source lineage|same source|source|origin|came from|where .* from)\b",
         user_text or "",
         re.IGNORECASE,
     ))
@@ -7553,7 +7553,7 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
             "I cannot contact anyone unless an authorized communication tool is available, invoked, "
             "and confirms delivery. A draft is not a sent message."
         )
-    if re.search(r"\bcan you change a medication, appointment, or care plan$", normalized):
+    if re.search(r"\bcan you change a medication appointment or care plan$", normalized):
         return (
             "I cannot make autonomous changes. The current workflow may help prepare a proposal or question, "
             "but changes require the appropriate caregiver and professional approval."
