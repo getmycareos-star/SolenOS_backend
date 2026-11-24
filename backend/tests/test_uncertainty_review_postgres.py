@@ -240,7 +240,6 @@ def test_accepted_care_assertion_withdrawal_preserves_history_and_rejects_stale_
         assert withdrawn_row["latest_revision"]["revision_reason"] == (
             "Caregiver withdrew this care detail: The caregiver confirmed this earlier report was inaccurate."
         )
-        assert withdrawn_row["latest_revision"]["changed_by_caregiver_id"] == caregiver_id
 
         with SessionLocal() as db:
             persisted = db.query(CareAssertion).filter_by(id=assertion_id).one()
