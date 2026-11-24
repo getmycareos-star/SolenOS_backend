@@ -420,12 +420,13 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
 
     captured = []
 
-    def fake_chat(base, model, messages, options=None):
-        captured.append({"messages": messages, "options": options or {}})
+    def fake_chat(messages, *, timeout=None, options=None):
+        captured.append({"messages": messages, "options": options or {}, "timeout": timeout})
         return "The saved care record contains one caregiver-reported sleep observation."
 
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
+    # The bounded assistant path calls the shared gateway directly; intercept
+    # that boundary rather than the legacy Companion adapter.
+    monkeypatch.setattr(collaboration, "qwen_chat", fake_chat)
     original_builder = collaboration.build_unified_lcr_context
 
     def with_unsearchable_source(*args, **kwargs):
