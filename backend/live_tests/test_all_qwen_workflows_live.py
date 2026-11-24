@@ -304,6 +304,16 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     from app.api import collaboration as collaboration_api
 
     original_qwen_chat = collaboration_api.qwen_chat
+    from app.services import qwen_gateway
+    original_identity_contract = qwen_gateway.apply_solenos_system_contract
+    identity_contracts = []
+
+    def capture_identity_contract(messages):
+        final_messages = original_identity_contract(messages)
+        identity_contracts.append(final_messages[0]["content"])
+        return final_messages
+
+    monkeypatch.setattr(qwen_gateway, "apply_solenos_system_contract", capture_identity_contract)
     generated_drafts = []
 
     def capture_qwen_chat(*args, **kwargs):
@@ -339,6 +349,11 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
     assert data.get("review_required") is True, data
     assert data.get("written_to_lcr") is False, data
     assert data.get("persistence") == "read_only_assistance", data
+    assert identity_contracts, f"{workflow} did not pass through the shared identity contract"
+    for contract in identity_contracts:
+        assert "SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION" in contract
+        assert "SolenOS was founded by David Abuchi" in contract
+        assert contract.rstrip().endswith("Human agency before automation.")
     assert data.get("authority") == "solenos_care_record_and_caregiver", data
     assert not re.search(
         r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
@@ -361,8 +376,18 @@ def test_each_enabled_workflow_uses_real_qwen_and_returns_reviewable_grounded_ou
         assert event_id in data["source_event_ids"], (
             f"{workflow} did not retrieve the authorized fixture event: {data}"
         )
-def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qwen_context):
+def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qwen_context, monkeypatch):
     """Exercise the separate handoff-draft generator, not only the handoff assist workflow."""
+    from app.services import qwen_gateway
+    original_identity_contract = qwen_gateway.apply_solenos_system_contract
+    identity_contracts = []
+
+    def capture_identity_contract(messages):
+        final_messages = original_identity_contract(messages)
+        identity_contracts.append(final_messages[0]["content"])
+        return final_messages
+
+    monkeypatch.setattr(qwen_gateway, "apply_solenos_system_contract", capture_identity_contract)
     client = live_qwen_context["client"]
     session = live_qwen_context["session"]
     evidence_ids = live_qwen_context["handoff_evidence_ids"]
@@ -390,6 +415,8 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
     assert data.get("requires_caregiver_review") is True, data
     assert data.get("creates_handoff") is False, data
     assert data.get("updates_lcr") is False, data
+    assert identity_contracts, "handoff draft generation bypassed the shared identity contract"
+    assert all("SolenOS was founded by David Abuchi" in item for item in identity_contracts)
 
     generation = data.get("generation") or {}
     assert generation.get("provider") == "ollama", generation
