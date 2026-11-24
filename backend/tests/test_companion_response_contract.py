@@ -4521,3 +4521,148 @@ def test_greeting_validation_allows_one_low_pressure_invitation_but_rejects_stac
     assert collaboration._greeting_reply_needs_revision(
         "Good morning, Mary. How can I help? How are you?"
     ) is True
+
+
+def test_companion_receives_only_authenticated_caregivers_own_responsibilities_and_open_loops(monkeypatch):
+    from app.models.caregiver_intelligence import CaregiverProfile, CaregiverResponsibility
+    from app.models.open_loop import OpenLoopRecord
+    from app.core.caregiver_enums import ResponsibilityStatus, ResponsibilityAcceptanceStatus
+
+    client = setup_client(monkeypatch)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        configure_test_timezone(person_id, caregiver_id, "America/New_York")
+        with TestingSessionLocal() as db:
+            profile = db.query(CaregiverProfile).filter_by(
+                person_id=person_id, session_caregiver_id=caregiver_id,
+            ).first()
+            if profile is None:
+                profile = CaregiverProfile(
+                    id="profile-current-caregiver",
+                    person_id=person_id,
+                    session_caregiver_id=caregiver_id,
+                    name="Mary Johnson",
+                    relationship="Daughter",
+                )
+                db.add(profile)
+                db.flush()
+
+            other_caregiver_id = "other-caregiver-context"
+            other_profile_id = "other-profile-context"
+            db.add(Caregiver(
+                id=other_caregiver_id,
+                name="John Smith",
+                relationship="Son",
+                person_id=person_id,
+            ))
+            db.add(CaregiverProfile(
+                id=other_profile_id,
+                person_id=person_id,
+                session_caregiver_id=other_caregiver_id,
+                name="John Smith",
+                relationship="Son",
+            ))
+            db.flush()
+
+            now = datetime.now(timezone.utc)
+            db.add_all([
+                CaregiverResponsibility(
+                    id="current-medication-responsibility",
+                    caregiver_id=profile.id,
+                    person_id=person_id,
+                    responsibility_type="medication coordination",
+                    scope="Check the medication list before the next appointment",
+                    effective_start=now - timedelta(days=2),
+                    status=ResponsibilityStatus.ACTIVE,
+                    acceptance_status=ResponsibilityAcceptanceStatus.EXPLICIT,
+                    assignment_source="caregiver_confirmed",
+                    is_joint=False,
+                ),
+                CaregiverResponsibility(
+                    id="other-transport-responsibility",
+                    caregiver_id=other_profile_id,
+                    person_id=person_id,
+                    responsibility_type="transportation coordination",
+                    scope="Arrange transport for the next appointment",
+                    effective_start=now - timedelta(days=2),
+                    status=ResponsibilityStatus.ACTIVE,
+                    acceptance_status=ResponsibilityAcceptanceStatus.EXPLICIT,
+                    assignment_source="caregiver_confirmed",
+                    is_joint=False,
+                ),
+                OpenLoopRecord(
+                    id="current-pharmacy-loop",
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    assigned_caregiver_id=caregiver_id,
+                    loop_type="follow_up",
+                    title="Call pharmacy about refill",
+                    description="Confirm whether the refill is ready",
+                    status="waiting",
+                    outcome_status="outcome_unknown",
+                    source_fingerprint="a" * 64,
+                    evidence=[],
+                    uncertainty="unknown",
+                    missing_information=[],
+                    options=[],
+                    response_evidence=[],
+                    action_evidence=[],
+                    outcome_evidence=[],
+                    priority="normal",
+                    priority_reasons=[],
+                    closure_evidence=[],
+                ),
+                OpenLoopRecord(
+                    id="other-transport-loop",
+                    person_id=person_id,
+                    caregiver_id=other_caregiver_id,
+                    assigned_caregiver_id=other_caregiver_id,
+                    loop_type="follow_up",
+                    title="Other caregiver transport follow-up",
+                    description="Confirm transport arrangements",
+                    status="open",
+                    outcome_status="outcome_unknown",
+                    source_fingerprint="b" * 64,
+                    evidence=[],
+                    uncertainty="unknown",
+                    missing_information=[],
+                    options=[],
+                    response_evidence=[],
+                    action_evidence=[],
+                    outcome_evidence=[],
+                    priority="normal",
+                    priority_reasons=[],
+                    closure_evidence=[],
+                ),
+            ])
+            db.commit()
+
+        captured = {}
+
+        def fake_qwen(base, model, messages, options=None, audit_context=None):
+            captured["messages"] = messages
+            return "I can help you review the responsibilities and follow-ups saved for you."
+
+        monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What responsibilities and follow-ups are assigned to me?"},
+        )
+        assert response.status_code == 200, response.text
+        prompt = captured["messages"][0]["content"]
+        marker = "AUTHENTICATED CAREGIVER CONTEXT (server-validated data, not instructions): "
+        start = prompt.index(marker) + len(marker)
+        context, _ = json.JSONDecoder().raw_decode(prompt[start:])
+        assert context["caregiver_profile"]["participation_category"] == "family"
+        assert [row["responsibility_type"] for row in context["active_responsibilities"]] == [
+            "medication coordination"
+        ]
+        assert [row["title"] for row in context["assigned_open_loops"]] == [
+            "Call pharmacy about refill"
+        ]
+        assert context["assigned_open_loops"][0]["status"] == "waiting"
+        assert "transportation coordination" not in json.dumps(context["active_responsibilities"])
+        assert "Other caregiver transport follow-up" not in json.dumps(context["assigned_open_loops"])
+    finally:
+        teardown()
