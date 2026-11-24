@@ -6245,6 +6245,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "ai_generated": not response_was_grounding_fallback,
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b") if not response_was_grounding_fallback else None,
         "response_origin": response_origin,
+        "response_mode": "deterministic_grounding_fallback" if response_was_grounding_fallback else "qwen_grounded",
         "grounding_status": grounding_status,
         "authority": "solenos_care_record_and_caregiver",
         "review_required": True,
