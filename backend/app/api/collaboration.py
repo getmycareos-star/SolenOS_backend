@@ -6317,23 +6317,32 @@ def _care_history_recall_context_lines(
 
     bounded_limit = max(1, min(int(limit), 100))
     topic_predicates = [CareEvent.description.ilike(f"%{term}%") for term in terms]
-    query = (
-        db.query(CareEvent)
-        .filter(
-            CareEvent.person_id == person_id,
-            CareEvent.status.in_(("recorded", "withdrawn", "superseded", "invalidated", "retracted", "deleted")),
-            CareEvent.created_by_caregiver_id.isnot(None),
-            or_(*topic_predicates),
-        )
-        .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
-    )
-    rows = query.limit(bounded_limit + 1).all()
-    has_more = len(rows) > bounded_limit
+    event_lookup_complete = True
+    try:
+        with db.begin_nested():
+            query = (
+                db.query(CareEvent)
+                .filter(
+                    CareEvent.person_id == person_id,
+                    CareEvent.status.in_(("recorded", "withdrawn", "superseded", "invalidated", "retracted", "deleted")),
+                    CareEvent.created_by_caregiver_id.isnot(None),
+                    or_(*topic_predicates),
+                )
+                .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+            )
+            rows = query.limit(bounded_limit + 1).all()
+    except SQLAlchemyError:
+        # Do not convert a failed care-event read into "no matching record".
+        # The shared LCR retrieval can still run independently, while this
+        # direct recall path reports its own incomplete source coverage.
+        rows = []
+        event_lookup_complete = False
+    has_more = not event_lookup_complete or len(rows) > bounded_limit
     rows = rows[:bounded_limit]
     event_ids = [str(row.id) for row in rows]
 
     corrections_by_event: dict[str, list[dict[str, Any]]] = {}
-    correction_lookup_complete = True
+    correction_lookup_complete = event_lookup_complete
     if event_ids:
         try:
             with db.begin_nested():
@@ -6450,7 +6459,7 @@ def _care_history_recall_context_lines(
         )
 
     evidence_lines: list[str] = []
-    evidence_lookup_complete = True
+    evidence_lookup_complete = event_lookup_complete
     if linked_evidence_ids:
         try:
             with db.begin_nested():
@@ -6494,9 +6503,11 @@ def _care_history_recall_context_lines(
 
     retrieval_complete = correction_lookup_complete and evidence_lookup_complete
     limits = []
-    if not correction_lookup_complete:
+    if not event_lookup_complete:
+        limits.append("Care-event history could not be retrieved for this request.")
+    if not correction_lookup_complete and event_lookup_complete:
         limits.append("Correction history could not be checked for every directly retrieved event.")
-    if not evidence_lookup_complete:
+    if not evidence_lookup_complete and event_lookup_complete:
         limits.append("Linked source evidence could not be retrieved for every directly retrieved event.")
     return {
         "event_lines": event_lines,
@@ -8411,6 +8422,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 ),
                 "event_count": len(care_history_recall_context["event_lines"]),
                 "evidence_count": len(care_history_recall_context["evidence_lines"]),
+                "correction_lineage_complete": care_history_recall_context.get("correction_lineage_complete", False),
+                "evidence_lookup_complete": care_history_recall_context.get("evidence_lookup_complete", False),
+                "retrieval_complete": care_history_recall_context.get("retrieval_complete", False),
+                "interpretation_limit": care_history_recall_context.get("interpretation_limit"),
                 "history_complete": not care_history_recall_context["has_more"],
             }
             if care_history_recall_context["has_more"]:
