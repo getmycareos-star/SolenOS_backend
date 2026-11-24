@@ -234,7 +234,12 @@ def _parse_model_json(content: str) -> dict[str, Any]:
     return data
 
 
-def _request_delta_json(messages: list[dict[str, str]], *, timeout: float) -> dict[str, Any]:
+def _request_delta_json(
+    messages: list[dict[str, str]],
+    *,
+    timeout: float,
+    audit_context: dict | None = None,
+) -> dict[str, Any]:
     """Generate a schema-valid Delta object, retrying one malformed model response.
 
     The retry is bounded within the request budget and never persists an incomplete
@@ -259,6 +264,7 @@ def _request_delta_json(messages: list[dict[str, str]], *, timeout: float) -> di
             timeout=attempt_timeout,
             response_format=DELTA_JSON_CONTRACT,
             options={"temperature": 0, "num_ctx": 4096, "num_predict": output_budget},
+            audit_context=audit_context,
         )
         try:
             return _parse_model_json(raw)
@@ -1540,6 +1546,12 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             timeout=timeout,
+            audit_context={
+                "person_id": person_id,
+                "caregiver_id": created_by_caregiver_id,
+                "source_event_ids": [source_event_id] if source_event_id else [],
+                "source_evidence_ids": evidence_ids,
+            },
         )
     except HTTPException as exc:
         if exc.status_code == 504:
