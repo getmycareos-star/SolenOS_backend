@@ -25,6 +25,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship, CareStateRevision
 from app.models.collaboration import ConversationMessage, ConversationSession, EvidenceUpload
+from app.models.memory import LearningEvent
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput, QwenSafetyEvaluation
 import app.api.daily_care_intelligence as daily_care_intelligence
 import app.api.collaboration as collaboration
@@ -943,6 +944,7 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
                 "/api/v1/conversation/message",
                 headers={"Authorization": f"Bearer {token}"},
                 json={
+                    "person_id": person_id,
                     "text": "What has been recorded about sleep?",
                     "client_turn_id": str(uuid.uuid4()),
                 },
@@ -989,6 +991,9 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
             ).delete(synchronize_session=False)
             db.query(CareEvent).filter(
                 CareEvent.person_id == person_id
+            ).delete(synchronize_session=False)
+            db.query(LearningEvent).filter(
+                LearningEvent.person_id == person_id
             ).delete(synchronize_session=False)
             db.query(Caregiver).filter(
                 Caregiver.person_id == person_id
