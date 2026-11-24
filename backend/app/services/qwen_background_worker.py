@@ -690,6 +690,13 @@ async def _process_daily_capture_extraction(db, job: QwenBackgroundJob, lease_st
             source_event_id=event_id,
             source_evidence_id=evidence_id,
             workflow_id=workflow,
+            audit_context={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "job_id": job_id,
+                "source_event_ids": [event_id],
+                "source_evidence_ids": [evidence_id],
+            },
         )
         if not isinstance(candidates, dict) or not isinstance(candidates.get("observations"), list):
             raise ValueError("daily_capture_extraction_invalid")
