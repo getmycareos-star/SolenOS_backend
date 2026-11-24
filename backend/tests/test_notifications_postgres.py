@@ -21,7 +21,7 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import Caregiver
 from app.models.notifications import CareNotification, CareNotificationPreference
-from app.models.privacy_delivery import NotificationReadReceipt
+from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False) if engine else None
@@ -299,6 +299,14 @@ def test_companion_and_notification_timezones_remain_independent_in_postgres():
         assert companion_saved.status_code == 200, companion_saved.text
         assert companion_saved.json()["timezone"] == "America/New_York"
         with Session() as db:
+            preference_audit = db.query(AuditLogEvent).filter_by(
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                action="caregiver.preferences.update",
+                target_type="caregiver_preferences",
+                target_id=caregiver_id,
+            ).one()
+            assert "timezone" in preference_audit.record_metadata["updated_fields"]
             caregiver = db.query(Caregiver).filter_by(
                 id=caregiver_id, person_id=person_id,
             ).one()
