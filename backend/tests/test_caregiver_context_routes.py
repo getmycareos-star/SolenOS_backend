@@ -1203,3 +1203,65 @@ def test_decision_and_outcome_history_support_stable_offset_pagination():
     )
     assert foreign.status_code == 403
 
+
+
+def test_care_continuity_rejects_links_to_caregiver_deleted_evidence():
+    client = TestClient(app)
+    session = _session(client, "Deleted evidence link reviewer")
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    record = client.post(
+        "/api/v1/care-continuity/living-records",
+        headers=headers,
+        json={"record_status": "active", "schema_version": "lcr.v1"},
+    )
+    assert record.status_code == 201, record.text
+    fact = client.post(
+        "/api/v1/care-continuity/facts",
+        headers=headers,
+        json={
+            "subject_type": "care_recipient",
+            "subject_id": record.json()["id"],
+            "fact_type": "care_need",
+            "fact_value": "Needs help getting dressed.",
+        },
+    )
+    assert fact.status_code == 201, fact.text
+
+    deleted_id = "deleted-evidence-care-continuity-link"
+    db = TestingSessionLocal()
+    try:
+        db.add(Evidence(
+            id=deleted_id,
+            person_id=session["person"]["id"],
+            type="caregiver_report",
+            source_text="This source was deleted by the caregiver.",
+            uploaded_by_caregiver_id=session["caregiver"]["id"],
+            evidence_status="deleted_by_caregiver",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    fact_link = client.post(
+        "/api/v1/care-continuity/fact-evidence",
+        headers=headers,
+        json={
+            "fact_id": fact.json()["id"],
+            "evidence_id": deleted_id,
+            "evidence_role": "supporting",
+        },
+    )
+    assert fact_link.status_code == 404, fact_link.text
+
+    provenance_link = client.post(
+        "/api/v1/care-continuity/record-provenance",
+        headers=headers,
+        json={
+            "source_type": "evidence",
+            "source_id": deleted_id,
+            "author_label": "Caregiver",
+            "method": "manual",
+            "reason": "Attempted link to deleted evidence",
+        },
+    )
+    assert provenance_link.status_code == 404, provenance_link.text
