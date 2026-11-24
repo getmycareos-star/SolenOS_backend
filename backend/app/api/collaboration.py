@@ -6144,6 +6144,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
+    response_was_grounding_fallback = False
+    response_origin = "qwen"
+    grounding_status = "source_validated"
     if rejection_reasons:
         _record_companion_output_validation(
             db,
@@ -6162,10 +6165,20 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_freshness_assessment_ids=source_freshness_assessment_ids,
         )
         logger.warning("Qwen repaired response rejected by grounding validators: %s", ",".join(rejection_reasons))
-        raise HTTPException(
-            status_code=503,
-            detail="Qwen could not produce a sufficiently grounded response. No suggestion was returned and nothing was written to the care record; please clarify the source or retry.",
-        )
+        response_was_grounding_fallback = True
+        response_origin = "backend_grounding_fallback"
+        grounding_status = "insufficient_evidence"
+        if is_critical_safety_message(payload.text):
+            reply = (
+                "I can't safely assess this from the care record. If someone is in immediate danger "
+                "or has sudden severe symptoms, call emergency services now. Otherwise, contact their "
+                "healthcare professional promptly."
+            )
+        else:
+            reply = (
+                "I can't confirm that from the care record right now, and I don't want to guess. "
+                "Please check the original source or tell me what you observed, and I can help you review it."
+            )
     claim_provenance = build_claim_provenance(
         reply, claim_source_records, validated_aggregates
     )
@@ -6207,29 +6220,32 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         if incomplete_notice and incomplete_notice not in reply:
             reply = reply.rstrip() + "\n\n" + incomplete_notice
             lcr_context_coverage["caregiver_notice"] = "incomplete_retrieval"
-    _record_companion_output_validation(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        request_id=companion_request_id,
-        reply=reply,
-        rejection_reasons=[],
-        ai_generated=ai_generated,
-        source_event_ids=source_event_ids,
-        source_evidence_ids=source_evidence_ids,
-        source_document_analysis_ids=source_document_analysis_ids,
-        source_appointment_ids=source_appointment_ids,
-        source_assertion_ids=source_assertion_ids,
-        source_lcr_context_ids=source_lcr_context_ids,
-        source_freshness_assessment_ids=source_freshness_assessment_ids,
-    )
+    if not response_was_grounding_fallback:
+        _record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id=companion_request_id,
+            reply=reply,
+            rejection_reasons=[],
+            ai_generated=ai_generated,
+            source_event_ids=source_event_ids,
+            source_evidence_ids=source_evidence_ids,
+            source_document_analysis_ids=source_document_analysis_ids,
+            source_appointment_ids=source_appointment_ids,
+            source_assertion_ids=source_assertion_ids,
+            source_lcr_context_ids=source_lcr_context_ids,
+            source_freshness_assessment_ids=source_freshness_assessment_ids,
+        )
     return {
         "workflow": payload.workflow,
         "reply": reply,
         "claim_provenance": claim_provenance,
         "lcr_context_coverage": lcr_context_coverage,
-        "ai_generated": True,
-        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b"),
+        "ai_generated": not response_was_grounding_fallback,
+        "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b") if not response_was_grounding_fallback else None,
+        "response_origin": response_origin,
+        "grounding_status": grounding_status,
         "authority": "solenos_care_record_and_caregiver",
         "review_required": True,
         "written_to_lcr": False,
