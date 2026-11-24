@@ -407,3 +407,75 @@ def test_postgres_companion_direct_event_context_marks_withdrawn_events_as_histo
         assert "recorded_care_event" not in prompt
     finally:
         app.dependency_overrides.clear()
+
+def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearchable_sources(monkeypatch):
+    from datetime import datetime, timezone
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    captured = []
+
+    def fake_chat(base, model, messages, options=None):
+        captured.append(messages)
+        return "The saved care record contains one caregiver-reported sleep observation."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
+    original_builder = collaboration.build_unified_lcr_context
+
+    def with_unsearchable_source(*args, **kwargs):
+        context = original_builder(*args, **kwargs)
+        context.setdefault("sources", {})["legacy_optional"] = {
+            "status": "unsearchable",
+            "items": [],
+            "candidate_count": None,
+            "returned_count": 0,
+            "candidate_scan_complete": False,
+            "has_more": False,
+            "interpretation_limit": "This source cannot be searched for the requested care topic.",
+        }
+        return context
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", with_unsearchable_source)
+    client = TestClient(app)
+    try:
+        session = create_session(client, "Prompt-budget caregiver")
+        with TestingSessionLocal() as db:
+            db.add(CareEvent(
+                id="prompt-budget-sleep-event",
+                person_id=session["person"]["id"],
+                event_type="observation",
+                status="recorded",
+                occurred_at=datetime.now(timezone.utc),
+                title="Sleep observation",
+                description="Caregiver reported that she slept poorly last night.",
+                evidence_ids=[],
+                created_by_caregiver_id=session["caregiver"]["id"],
+                time_provenance="caregiver_reported",
+            ))
+            db.commit()
+
+        response = client.post(
+            "/api/v1/assistant/assist",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json={
+                "workflow": "living_care_record",
+                "text": "What did I tell you about her sleep?",
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert captured, "the bounded assistant request must reach the model adapter"
+        user_message = next(item for item in captured[0] if item["role"] == "user")["content"]
+        coverage_line = next(
+            line for line in user_message.splitlines()
+            if line.startswith("Retrieval coverage: ")
+        )
+        model_coverage = json.loads(coverage_line.partition(": ")[2])
+        assert "legacy_optional" in model_coverage["failed_sources"]
+        assert model_coverage["sources"]["legacy_optional"]["status"] == "unsearchable"
+        assert "missing_optional_sources" not in model_coverage
+        assert "candidate_count" not in coverage_line
+        assert len(coverage_line) < 2000, "the model should receive compact coverage, not the full source inventory"
+        assert "prompt_context_chars" not in coverage_line
+    finally:
+        app.dependency_overrides.clear()
