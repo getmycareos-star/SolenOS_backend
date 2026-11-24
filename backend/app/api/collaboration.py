@@ -5347,6 +5347,8 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_event_ids: list[str] = []
     source_evidence_ids: list[str] = []
     source_document_analysis_ids: list[str] = []
+    source_assertion_ids: list[str] = []
+    source_lcr_context_ids: list[str] = []
     source_document_status = "not_authorized"
     source_appointment_ids: list[str] = []
     source_handoff_ids: list[str] = []
