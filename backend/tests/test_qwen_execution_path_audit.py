@@ -307,3 +307,22 @@ def test_companion_repair_inferences_preserve_the_original_trusted_audit_context
         "source_lcr_context_ids", "source_freshness_assessment_ids",
         "source_refs", "retrieval_coverage",
     }.issubset(context_keys)
+    coverage = next(
+        value for key, value in zip(
+            (item.value for item in context_assignment.value.keys),
+            context_assignment.value.values,
+        )
+        if key == "retrieval_coverage"
+    )
+    coverage_keys = {
+        key.value for key in coverage.keys
+        if isinstance(key, ast.Constant) and isinstance(key.value, str)
+    }
+    assert {
+        "status", "answer_restriction", "retrieval_scan_complete",
+        "retrieval_projection_complete", "page_limit_reached",
+        "context_truncated", "prompt_context_complete",
+        "missing_required_sources", "missing_optional_sources",
+        "failed_sources", "more_available_sources",
+        "selection_truncated_sources",
+    }.issubset(coverage_keys)
