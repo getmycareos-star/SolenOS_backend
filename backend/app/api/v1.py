@@ -1216,6 +1216,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
             source_text,
             source_event_id=event.id,
             source_evidence_id=evidence.id if evidence is not None else None,
+            workflow_id="daily_capture",
         )
         qwen_status = "available"
     except Exception:
