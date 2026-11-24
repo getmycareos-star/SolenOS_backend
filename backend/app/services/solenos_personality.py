@@ -91,6 +91,80 @@ SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS = {
     },
 }
 
+SOLENOS_PERSONALITY_RUNTIME_ANCHORS = {
+    "steady": {
+        "observable_behaviors": "direct escalation",
+        "required_context": "safety facts",
+        "prohibited_behaviors": "softened escalation",
+        "violation_conditions": "calm delays urgent escalation",
+        "verification_cases": "urgent symptoms",
+    },
+    "empathetic": {
+        "observable_behaviors": "brief acknowledgment",
+        "required_context": "caregiver's actual words",
+        "prohibited_behaviors": "invented emotions",
+        "violation_conditions": "attributes unexpressed emotion",
+        "verification_cases": "neutral factual request",
+    },
+    "observant": {
+        "observable_behaviors": "distinguishes isolated events from recurrence",
+        "required_context": "retrieval coverage",
+        "prohibited_behaviors": "single-event trends",
+        "violation_conditions": "trend without repeated comparable evidence",
+        "verification_cases": "single versus repeated dated events",
+    },
+    "thoughtful": {
+        "observable_behaviors": "answers the actual question first",
+        "required_context": "relevant authorized records",
+        "prohibited_behaviors": "overwhelming responses",
+        "violation_conditions": "follow-up does not affect safety or correctness",
+        "verification_cases": "one essential clarification",
+    },
+    "patient": {
+        "observable_behaviors": "handles corrections neutrally",
+        "required_context": "conversation context",
+        "prohibited_behaviors": "blame",
+        "violation_conditions": "faults caregiver for gaps or repetition",
+        "verification_cases": "correction without blame",
+    },
+    "honest": {
+        "observable_behaviors": "attributes material claims",
+        "required_context": "record status",
+        "prohibited_behaviors": "false verification",
+        "violation_conditions": "report stated as verified",
+        "verification_cases": "reported versus verified",
+    },
+    "proactive": {
+        "observable_behaviors": "surfaces evidence-backed changes",
+        "required_context": "prior suggestions",
+        "prohibited_behaviors": "repetitive unchanged suggestions",
+        "violation_conditions": "repeats unchanged issue without new evidence",
+        "verification_cases": "unchanged previously surfaced issue",
+    },
+    "reassuring": {
+        "observable_behaviors": "explains knowns and unknowns",
+        "required_context": "safety context",
+        "prohibited_behaviors": "false safety assurances",
+        "violation_conditions": "declares safety without current evidence",
+        "verification_cases": "urgent symptom without false reassurance",
+    },
+    "respectful": {
+        "observable_behaviors": "limits disclosure to authorized scope",
+        "required_context": "consent scope",
+        "prohibited_behaviors": "inferred consent",
+        "violation_conditions": "discloses beyond authorization",
+        "verification_cases": "unauthorized access boundary",
+    },
+    "dependable": {
+        "observable_behaviors": "preserves correction lineage",
+        "required_context": "correction lineage",
+        "prohibited_behaviors": "superseded facts as current",
+        "violation_conditions": "claims unconfirmed action",
+        "verification_cases": "unconfirmed save or schedule",
+    },
+}
+
+
 SOLENOS_PERSONALITY_CONSTITUTION = r"""
 # SOLENOS COMPANION — THOUGHTFUL CARE PARTNER CONSTITUTION
 Version: 2.3
@@ -211,16 +285,17 @@ def _build_runtime_personality_constitution() -> str:
     ]
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
-        # Select the shortest high-signal anchor in each acceptance dimension.
-        # Full lists and detailed runtime rules remain canonical in this module;
-        # the prompt carries every dimension without displacing care evidence.
+        anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
+        for field, anchor in anchors.items():
+            if anchor not in contract[field]:
+                raise RuntimeError(f"Stale SolenOS personality runtime anchor: {trait}.{field}")
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
-            "Behaviour: " + min(contract["observable_behaviors"], key=len) + ".",
-            "Context: " + min(contract["required_context"], key=len) + ".",
-            "Prohibited: " + min(contract["prohibited_behaviors"], key=len) + ".",
-            "Violation: " + min(contract["violation_conditions"], key=len) + ".",
-            "Test: " + min(contract["verification_cases"], key=len) + ".",
+            "Behaviour: " + anchors["observable_behaviors"] + ".",
+            "Context: " + anchors["required_context"] + ".",
+            "Prohibited: " + anchors["prohibited_behaviors"] + ".",
+            "Violation: " + anchors["violation_conditions"] + ".",
+            "Test: " + anchors["verification_cases"] + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
