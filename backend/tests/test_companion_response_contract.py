@@ -752,7 +752,7 @@ def test_companion_blocks_unproven_sleep_trend_without_writing_care_events(monke
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(messages, *, timeout=None, options=None):
+    def fake_qwen(messages, *, timeout=None, options=None, audit_context=None):
         captured["messages"] = messages
         captured["options"] = options
         return "Poor sleep was reported last night; one report cannot establish a trend."
@@ -908,7 +908,7 @@ def test_companion_reuses_prior_assistant_turns_as_non_evidence_context(monkeypa
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "I meant our earlier discussion about Mum's sleep."
 
@@ -1019,7 +1019,7 @@ def test_companion_greeting_uses_dynamic_inference_not_a_fixed_reply_map(monkeyp
     client = setup_client(monkeypatch)
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append(messages)
         return "I'm ready to help with whatever you'd like to work through."
 
@@ -1050,7 +1050,7 @@ def test_companion_revises_overlong_greeting_with_another_qwen_pass(monkeypatch)
     ])
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append((messages, options))
         return next(outputs)
 
@@ -1179,7 +1179,7 @@ def test_companion_uses_source_grounded_history_when_qwen_returns_http_unavailab
 def test_companion_qwen_failure_does_not_persist_a_message_pair_or_care_event(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def failed_qwen(base, model, messages, options=None):
+    def failed_qwen(base, model, messages, options=None, audit_context=None):
         raise RuntimeError("inference unavailable")
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1343,7 +1343,7 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(messages, *, timeout=None, options=None):
+    def fake_qwen(messages, *, timeout=None, options=None, audit_context=None):
         captured["messages"] = messages
         return "The record has one observation, so there is not enough information to establish a pattern."
 
@@ -1380,7 +1380,7 @@ def test_companion_context_filter_excludes_unrelated_records_for_specific_questi
 def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return "Caregiver-reported: “waking several times overnight and restless sleep.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1434,7 +1434,7 @@ def test_companion_retrieves_relevant_older_event_beyond_recent_event_window(mon
 def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_observation_exists(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return "Yes, her sleep has been getting worse over the last month."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1632,7 +1632,7 @@ def test_standalone_question_does_not_get_unrelated_history_added_to_retrieval()
 def test_companion_rejects_unverified_sync_claim_and_does_not_persist_it(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return "The record is synced."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1659,7 +1659,7 @@ def test_companion_allows_explicit_uncertainty_about_unverified_sync_state(monke
     client = setup_client(monkeypatch)
     expected = "I cannot verify whether the record is synced because no server receipt was supplied."
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return expected
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1708,7 +1708,7 @@ def test_companion_surfaces_freshness_policy_context_and_persists_reference(monk
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "The saved policy marks this evidence for review; that does not establish whether it is true."
 
@@ -1790,7 +1790,7 @@ def test_companion_surfaces_freshness_policy_context_and_persists_reference(monk
 def test_companion_returns_failure_when_message_pair_cannot_be_persisted(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return "The available record does not establish a cause."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -1826,7 +1826,7 @@ def test_companion_deterministically_blocks_conflicting_same_day_event_reports(m
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["called"] = True
         return "Yes, the records agree that a fall happened overnight."
 
@@ -1920,7 +1920,7 @@ def test_companion_client_turn_retry_replays_original_response_without_duplicate
     client = setup_client(monkeypatch)
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append(messages)
         return "The available record does not establish a change over time."
 
@@ -1981,7 +1981,7 @@ def test_historical_event_outside_recent_window_is_retrieved_with_synonym_matchi
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "The older record describes restless sleep overnight; it does not establish a trend."
 
@@ -2034,7 +2034,7 @@ def test_companion_temporal_question_retrieves_events_without_literal_temporal_v
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "Caregiver-reported: “Mum had a quieter night last week.”"
 
@@ -2081,7 +2081,7 @@ def test_companion_reports_missing_history_topic_instead_of_filling_it_in(monkey
     client = setup_client(monkeypatch)
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append(messages)
         return "Mum slept poorly, lunch was barely touched, and dinner went well."
 
@@ -2144,7 +2144,7 @@ def test_historical_document_outside_recent_window_is_retrieved_and_attributed(m
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "Caregiver-reported: “restless sleep and waking several times overnight.”"
 
@@ -2304,7 +2304,7 @@ def test_overwhelmed_caregiver_gets_safe_reply_when_qwen_is_unavailable(monkeypa
     client = setup_client(monkeypatch)
     calls = 0
 
-    def unavailable_qwen(base, model, messages, options=None):
+    def unavailable_qwen(base, model, messages, options=None, audit_context=None):
         nonlocal calls
         calls += 1
         raise collaboration.HTTPException(
@@ -2416,7 +2416,7 @@ def test_companion_returns_typed_document_extraction_and_original_evidence_refer
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "According to the document: “sleep disturbance was reported by the family.”"
 
@@ -2529,7 +2529,7 @@ def test_companion_care_update_list_is_scoped_by_bearer_session(monkeypatch):
 def test_companion_claim_source_trace_includes_event_reporter_and_original_document(monkeypatch):
     client = setup_client(monkeypatch)
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         return "According to the caregiver: “She felt unsteady near the kitchen.”"
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
@@ -3026,7 +3026,7 @@ def test_companion_injects_low_capacity_guidance_into_real_inference_prompt(monk
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "We can focus on the most important concern first. You do not need to work through everything at once."
 
@@ -3052,7 +3052,7 @@ def test_companion_injects_continuity_repair_guidance_into_real_inference_prompt
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "I'll use the information available in the care record rather than asking you to start again."
 
@@ -3105,7 +3105,7 @@ def test_companion_revises_overloaded_answer_before_persisting(monkeypatch):
     ])
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append((messages, options))
         return next(outputs)
 
@@ -3139,7 +3139,7 @@ def test_companion_repairs_unsupported_care_claim_before_failing_closed(monkeypa
     ])
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append((messages, options))
         return next(outputs)
 
@@ -3193,7 +3193,7 @@ def test_failed_caregiver_response_repair_never_falls_through_to_greeting_repair
     outputs = iter([invalid_answer, invalid_answer, invalid_answer])
     calls = []
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         calls.append((messages, options))
         return next(outputs)
 
@@ -3915,7 +3915,7 @@ def test_companion_retrieves_another_authorized_caregivers_lcr_evidence(monkeypa
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "The person prefers a quiet room after lunch, according to the saved caregiver report."
 
@@ -4039,7 +4039,7 @@ def test_companion_prompt_and_receipt_disclose_unsearchable_lcr_sources(monkeypa
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
         captured["messages"] = messages
         return "I cannot confirm this from the records retrieved for this response."
 
