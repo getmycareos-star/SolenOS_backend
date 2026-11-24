@@ -182,9 +182,9 @@ def test_runtime_personality_kernel_preserves_canonical_trait_anchors():
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         for anchor in canonical_anchors[trait]:
             assert " ".join(anchor.split()) in full, (trait, anchor)
-        for anchor in SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait].values():
-            assert anchor in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait].values() if False else anchor in str(SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]), (trait, anchor)
-            assert anchor in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION, (trait, anchor)
+        for field, anchor in SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait].items():
+            assert anchor in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait][field], (trait, field, anchor)
+            assert anchor in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION, (trait, field, anchor)
 
 
 def test_documented_identity_and_personality_versions_match_the_runtime_sources():
