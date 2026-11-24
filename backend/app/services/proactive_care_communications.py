@@ -217,6 +217,7 @@ def _evidence_source_summary(db: Session, person_id: str, evidence_ids: list[str
     rows = db.query(Evidence).filter(
         Evidence.person_id == person_id,
         Evidence.id.in_(valid_ids),
+        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
     ).all()
     labels = []
     for row in rows:
