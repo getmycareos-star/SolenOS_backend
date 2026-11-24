@@ -113,7 +113,16 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             source_evidence_id=evidence.id,
             source_text="SYNTHETIC-PRIVATE-SOURCE-TEXT-MUST-NOT-LEAK",
             extraction_status="completed",
-            candidates=[],
+            candidates={
+                "observations": [{
+                    "field": "mobility",
+                    "observation": "uses a walking aid",
+                    "source_quote": "The caregiver said she uses a walking aid.",
+                    "review_status": "pending",
+                }],
+                "open_questions": ["When was the walking aid first introduced?"],
+                "possible_safety_flags": [],
+            },
             review_history=[],
         )
         db.add(analysis)
@@ -254,14 +263,24 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
 
     by_kind = {item["kind"]: item for item in payload["items"]}
     assert by_kind["documents_and_extraction"]["details"]["evidence_count"] == 1
-    assert by_kind["documents_and_extraction"]["details"]["recent_documents"][0]["filename"] == "synthetic-discharge-summary.txt"
+    document_receipt = by_kind["documents_and_extraction"]["details"]["recent_documents"][0]
+    assert document_receipt["filename"] == "synthetic-discharge-summary.txt"
+    assert document_receipt["size_bytes"] == 24
+    assert document_receipt["sha256"] == hashlib.sha256(b"SYNTHETIC-PRIVATE-BINARY").hexdigest()
+    assert document_receipt["uploaded_by"] == "Primary caregiver"
+    assert "content" not in document_receipt
     assert by_kind["documents_and_extraction"]["details"]["extraction_status_counts"] == {"completed": 1}
-    assert by_kind["documents_and_extraction"]["details"]["recent_extractions"][0]["extraction_status"] == "completed"
+    extraction_receipt = by_kind["documents_and_extraction"]["details"]["recent_extractions"][0]
+    assert extraction_receipt["extraction_status"] == "completed"
+    assert extraction_receipt["candidate_summary"]["observations"][0]["observation"] == "uses a walking aid"
+    assert extraction_receipt["candidate_summary"]["open_questions"] == ["When was the walking aid first introduced?"]
     assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["decision"] == "accept"
     assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["reviewer_name"] == "Primary caregiver"
     assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["resulting_assertion_id"] == assertion_id
     lcr_details = by_kind["living_care_record_state"]["details"]
     assert lcr_details["assertion_status_counts"] == {"caregiver_reviewed": 1}
+    assert lcr_details["recent_assertions"][0]["asserted_value"] == "uses a walking aid"
+    assert lcr_details["recent_assertions"][0]["source_label"] == "caregiver report"
     assert lcr_details["recent_corrections"][0]["actor_name"] == "Primary caregiver"
     assert lcr_details["recent_corrections"][0]["original_text"] == "uses a walking aid"
     assert lcr_details["recent_corrections"][0]["corrected_text"] == "uses a walker"
