@@ -10,6 +10,10 @@ on:
       - ".github/workflows/companion-live-inference.yml"
       - "backend/app/services/qwen*"
       - "backend/app/services/solenos_identity.py"
+      - "backend/app/services/solenos_personality.py"
+      - "backend/tests/test_qwen_system_prompt.py"
+      - "backend/tests/test_qwen_specialized_prompts.py"
+      - "backend/tests/test_qwen_execution_path_audit.py"
       - "backend/tests/test_qwen_calm_personality.py"
       - "backend/app/services/delta_engine.py"
       - "backend/app/services/situation.py"
@@ -131,6 +135,8 @@ jobs:
         run: |
           python -m pytest backend/tests/test_qwen_calm_personality.py -q
           python -m pytest backend/tests/test_companion_response_contract.py -k "unsupported_reassurance or clear_uncertainty or emergency_language_remains_direct" -q
+      - name: Verify model-independent identity assembly and prompt budget
+        run: python -m pytest backend/tests/test_qwen_system_prompt.py backend/tests/test_qwen_specialized_prompts.py backend/tests/test_qwen_execution_path_audit.py -q
       - name: Run document semantic and lifecycle regression tests
         run: python -m pytest backend/tests/test_document_candidate_schema.py backend/tests/test_document_candidate_adversarial.py backend/tests/test_document_intelligence_lifecycle.py -q
       - name: Run bounded Qwen startup retry regression tests
