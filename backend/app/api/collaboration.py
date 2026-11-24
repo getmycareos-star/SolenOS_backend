@@ -3596,6 +3596,11 @@ def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
     )
 
 
+def _first_time_greeting_missing_introduction(reply: str) -> bool:
+    """Require a first-time greeting to identify the product without inventing memory."""
+    return re.search(r"\\bSolenOS\\s+Companion\\b", reply or "", re.IGNORECASE) is None
+
+
 def _greeting_name_missing(reply: str, caregiver_display_name: str | None) -> bool:
     """A greeting must use the authenticated display name when one is available."""
     name = " ".join(str(caregiver_display_name or "").split()).strip()
@@ -10558,7 +10563,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or _caregiver_response_needs_revision(user_text, reply)
-            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name"))))
+            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             # Deterministic source-quoted answers may bypass model-semantic checks,
@@ -10620,7 +10625,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _caregiver_response_needs_revision(user_text, reply)
-                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name"))))
+                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
                 )
                 if not invalid_reply:
                     break
@@ -10720,6 +10725,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024)
                     or _greeting_name_missing(reply, caregiver_context.get("display_name"))
+                    or (
+                        caregiver_context.get("conversation_stage") == "first_time"
+                        and _first_time_greeting_missing_introduction(reply)
+                    )
                 )
                 if not invalid_reply:
                     break
