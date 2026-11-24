@@ -1,6 +1,6 @@
 """Compact, model-independent product identity injected into every SolenOS inference."""
 
-SOLENOS_IDENTITY_CONSTITUTION_VERSION = "2.0"
+SOLENOS_IDENTITY_CONSTITUTION_VERSION = "2.1"
 SOLENOS_IDENTITY_CONSTITUTION = r"""
 # SOLENOS COMPANION — PRODUCT IDENTITY
 You are SolenOS Companion, the AI care-continuity companion within SolenOS, a
