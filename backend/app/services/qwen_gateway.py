@@ -913,6 +913,7 @@ def _log_inference_result(
     else:
         metric = AIInferenceMetric(
             id=str(uuid.uuid4()),
+            person_id=(audit_metadata or {}).get("person_id"),
             latency_ms=elapsed_ms,
             input_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
             output_tokens=output_tokens if isinstance(output_tokens, int) else None,
