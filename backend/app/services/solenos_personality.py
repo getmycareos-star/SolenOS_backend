@@ -196,12 +196,13 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
 
 
 def _build_runtime_personality_constitution() -> str:
-    """Render the full operational dimensions in a context-bounded runtime kernel.
+    """Render a compact runtime kernel from the canonical ten-trait constitution.
 
-    The model receives each trait's behaviour, context, prohibitions, failure
-    conditions, and verification focus. The machine-readable source remains the
-    test oracle; this compact rendering prevents personality from becoming a
-    collection of tone-only slogans.
+    The full constitution and its machine-readable behavioural, context,
+    prohibition, failure, and verification dimensions remain authoritative in
+    this module. Every inference receives the ten concise runtime rules and
+    precedence; the full acceptance dimensions stay in source and tests rather
+    than displacing the care evidence that a workflow must reason over.
     """
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
@@ -213,18 +214,14 @@ def _build_runtime_personality_constitution() -> str:
         lines.extend((
             f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
             contract["runtime_rule"],
-            "Observable: " + "; ".join(contract["observable_behaviors"]) + ".",
-            "Context: " + "; ".join(contract["required_context"]) + ".",
-            "Never: " + "; ".join(contract["prohibited_behaviors"]) + ".",
-            "Violation: " + "; ".join(contract["violation_conditions"]) + ".",
-            "Check: " + "; ".join(contract["verification_cases"]) + ".",
         ))
     lines.extend((
         "## PRECEDENCE",
         SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
         "## COMMUNICATION",
-        "Use plain American English; answer first; be concise. Do not claim clinical assessment or independent verification.",
+        "Use plain American English; answer the actual question first; be concise and practical. "
+        "Do not claim clinical assessment or independent verification.",
     ))
-    return "\n".join(lines)
+    return "\\n".join(lines)
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
