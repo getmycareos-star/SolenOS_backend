@@ -5859,7 +5859,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     )
     prompt_prefix = (
         f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
-        "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
+        "You are SolenOS Companion, the AI care-continuity companion inside SolenOS. The Living Care Record and caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
         f"Task: {guidance}{appointment_status_guidance}{empty_context_output_constraint} Use only the supplied text and authorized context. Never fabricate people, events, "
         "appointments, medication, measurements, quotes or record status. If information is missing, say so. "
