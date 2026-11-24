@@ -81,7 +81,10 @@ WORKFLOW_SPECIALISTS: dict[str, tuple[str, ...]] = {
     "medication_day": ("lcr_retrieval", "medication_continuity"),
     "care_coordination": ("lcr_retrieval", "caregiver_continuity"),
     "companion": ("lcr_retrieval", "companion"),
-    "caregiver_feedback": ("lcr_retrieval", "caregiver_continuity"),
+    # Feedback about an existing care entry can be a correction. Preserve
+    # the prior assertion and correction lineage rather than treating it as
+    # a generic coordination concern.
+    "caregiver_feedback": ("lcr_retrieval", "event_lifecycle"),
     "care_transition": ("lcr_retrieval", "handoff_appointment"),
     "incident_follow_through": ("lcr_retrieval", "caregiver_continuity"),
     "emergency_readiness": ("lcr_retrieval", "companion"),
