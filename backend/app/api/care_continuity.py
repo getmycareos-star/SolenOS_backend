@@ -195,10 +195,7 @@ def create_evidence_review(evidence_id: str, payload: dict[str, Any], request: R
         raise HTTPException(status_code=403, detail="A caregiver identity is required to review saved information")
     if not inspect(db.connection()).has_table("evidence_review_records"):
         raise HTTPException(status_code=503, detail="Evidence review storage is not available until schema migration completes")
-    evidence = db.query(Evidence).filter(
-        Evidence.id == evidence_id,
-        Evidence.person_id == person_id,
-    ).first()
+    evidence = _active_evidence_query(db, person_id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
@@ -416,10 +413,7 @@ def list_evidence_reviews(evidence_id: str, request: Request, db: Session = Depe
 def get_evidence_source_integrity(evidence_id: str, request: Request, db: Session = Depends(get_db)):
     """Compare the stored source-text hash with the current persisted text, within session scope."""
     person_id, _ = _scoped_identity(request, db)
-    evidence = db.query(Evidence).filter(
-        Evidence.id == evidence_id,
-        Evidence.person_id == person_id,
-    ).first()
+    evidence = _active_evidence_query(db, person_id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
 
@@ -641,10 +635,7 @@ def create_claim_assessment(
 
     evidence_rows = {}
     if evidence_ids:
-        rows = db.query(Evidence).filter(
-            Evidence.person_id == person_id,
-            Evidence.id.in_(evidence_ids),
-        ).all()
+        rows = _active_evidence_query(db, person_id).filter(Evidence.id.in_(evidence_ids)).all()
         evidence_rows = {row.id: row for row in rows}
         if set(evidence_rows) != set(evidence_ids):
             raise HTTPException(
@@ -1262,6 +1253,17 @@ WRITABLE = {
     "record-retractions": {"care_record_id", "target_type", "target_id", "reason", "provenance_id"},
     "record-restorations": {"care_record_id", "retraction_id", "reason", "provenance_id"},
 }
+
+def _active_evidence_query(db: Session, person_id: str):
+    """Return only evidence still available to the caregiver for this person."""
+    return db.query(Evidence).filter(
+        Evidence.person_id == str(person_id),
+        or_(
+            Evidence.evidence_status.is_(None),
+            func.lower(Evidence.evidence_status) != "deleted_by_caregiver",
+        ),
+    )
+
 
 def _table(db: Session, name: str) -> Table:
     try:
@@ -2152,10 +2154,7 @@ def current_care_projection(
     authorized_evidence_ids: set[str] = set()
     authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_rows = db.query(Evidence).filter(
-            Evidence.person_id == person_id,
-            Evidence.id.in_(candidate_evidence_ids),
-        ).all()
+        authorized_evidence_rows = _active_evidence_query(db, person_id).filter(Evidence.id.in_(candidate_evidence_ids)).all()
         authorized_evidence_by_id = {
             str(row.id): row for row in authorized_evidence_rows
         }
@@ -2887,10 +2886,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
     authorized_evidence_ids: set[str] = set()
     authorized_evidence_by_id: dict[str, Evidence] = {}
     if candidate_evidence_ids:
-        authorized_evidence_rows = db.query(Evidence).filter(
-            Evidence.person_id == person_id,
-            Evidence.id.in_(candidate_evidence_ids),
-        ).all()
+        authorized_evidence_rows = _active_evidence_query(db, person_id).filter(Evidence.id.in_(candidate_evidence_ids)).all()
         authorized_evidence_by_id = {
             str(row.id): row for row in authorized_evidence_rows
         }
@@ -3687,9 +3683,7 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
                 ).all()
             }
             evidence_by_id = {
-                str(row.id): row for row in db.query(Evidence).filter(
-                    Evidence.person_id == person_id, Evidence.id.in_(source_record_ids)
-                ).all()
+                str(row.id): row for row in _active_evidence_query(db, person_id).filter(Evidence.id.in_(source_record_ids)).all()
             }
 
         # Keep evidence confidence, significance and follow-up state as separate
@@ -5777,10 +5771,7 @@ def get_fact_evidence_integrity(fact_id: str, request: Request, db: Session = De
         .order_by(links.c.evidence_id.asc())
     ).all()
     evidence_ids = [str(row.evidence_id) for row in link_rows]
-    evidence_rows = db.query(Evidence).filter(
-        Evidence.person_id == person_id,
-        Evidence.id.in_(evidence_ids or ["__no_evidence__"]),
-    ).all()
+    evidence_rows = _active_evidence_query(db, person_id).filter(Evidence.id.in_(evidence_ids or ["__no_evidence__"])).all()
     evidence_by_id = {str(row.id): row for row in evidence_rows}
     latest_reliability_reviews: dict[str, EvidenceReviewRecord] = {}
     if inspect(db.connection()).has_table("evidence_review_records") and evidence_ids:
@@ -6537,13 +6528,9 @@ def create_evidence_source_relationship(
     """Append source-lineage/corroboration metadata; never infer independence from wording."""
     person_id, caregiver_id = _scoped_identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
-    source = db.query(Evidence).filter(
-        Evidence.id == evidence_id, Evidence.person_id == person_id
-    ).first()
+    source = _active_evidence_query(db, person_id).filter(Evidence.id == evidence_id).first()
     related_id = payload.get("related_evidence_id")
-    related = db.query(Evidence).filter(
-        Evidence.id == related_id, Evidence.person_id == person_id
-    ).first() if isinstance(related_id, str) else None
+    related = _active_evidence_query(db, person_id).filter(Evidence.id == related_id).first() if isinstance(related_id, str) else None
     if source is None or related is None:
         raise HTTPException(status_code=404, detail="Evidence item not found in this care record")
     if source.id == related.id:
@@ -6755,7 +6742,7 @@ def create_evidence_observation(
     supersedes_id = payload.get("supersedes_observation_id")
     if supersedes_id is not None:
         require_caregiver_permission(db, person_id, caregiver_id, "correct_records")
-    evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    evidence = _active_evidence_query(db, person_id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     kind = payload.get("observation_kind")
@@ -7082,7 +7069,7 @@ def assess_evidence_freshness(payload: dict[str, Any], request: Request, db: Ses
     policy_id = str(payload.get("policy_id") or "").strip()
     if not evidence_id or not policy_id:
         raise HTTPException(status_code=422, detail="evidence_id and policy_id are required")
-    evidence = db.query(Evidence).filter(Evidence.id == evidence_id, Evidence.person_id == person_id).first()
+    evidence = _active_evidence_query(db, person_id).filter(Evidence.id == evidence_id).first()
     if evidence is None:
         raise HTTPException(status_code=404, detail="Evidence not found")
     policy = db.query(EvidenceFreshnessPolicy).filter(
