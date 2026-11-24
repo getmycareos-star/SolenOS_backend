@@ -145,6 +145,9 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
                             record_metadata["record_status"] = str(source_status)
                         if source_attribution is not None:
                             record_metadata["source_attribution"] = str(source_attribution)
+                        record_metadata["person_id"] = (
+                            str(record_payload.get("person_id")) if record_payload.get("person_id") is not None else None
+                        )
                         record_metadata["reported_by"] = (
                             record_payload.get("reported_by_label")
                             or record_payload.get("original_author")
@@ -431,7 +434,13 @@ def _exact_attributed_source_quote(statement: str) -> str | None:
     return None
 
 
-def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], validated_aggregates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_claim_provenance(
+    reply: str,
+    source_records: list[dict[str, Any]],
+    validated_aggregates: list[dict[str, Any]] | None = None,
+    *,
+    expected_person_id: str | None = None,
+) -> dict[str, Any]:
     """Link only exact source wording or an explicitly attributed exact source quote.
 
     A match is not an independence assessment and does not establish clinical
@@ -471,6 +480,11 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
             break
         if normalized_claim:
             for source in source_records:
+                # A source reference is not authority to cross care-recipient
+                # boundaries. When the caller supplies the authenticated person,
+                # require an explicit, exact scope match before matching wording.
+                if expected_person_id is not None and str(source.get("person_id") or "") != str(expected_person_id):
+                    continue
                 source_text = str(source.get("source_text") or "")
                 normalized_source = _normalise(source_text)
                 quoted_passage = _exact_attributed_source_quote(statement)
@@ -495,6 +509,7 @@ def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], val
                         "match_type": "attributed_exact_quote" if quoted_match and not exact_match else "exact_statement",
                         "record_type": source.get("record_type"),
                         "record_id": str(source.get("record_id")),
+                        "person_scope_status": "matched" if expected_person_id is not None else "not_checked",
                         "label": source.get("label") or "Saved care record",
                         "matched_passage": matched_passage,
                         "source_excerpt": source_text[:700],
