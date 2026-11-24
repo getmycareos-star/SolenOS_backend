@@ -7349,6 +7349,19 @@ def _is_companion_identity_question(user_text: str) -> bool:
         r"\bcan you access (?:a )?(?:hospital|pharmacy|doctor|insurance|patient)(?: portal| records)?\b",
         r"\bcan another caregiver see my information$",
         r"\bdo you put everything i say in the lcr$",
+        r"\bcan you see information about another care recipient$",
+        r"\bcan you see who viewed my records$",
+        r"\bwhat do you do with the information i share$",
+        r"\bdo you train yourself on my information$",
+        r"\bdo you sell or use my care information for advertising$",
+        r"\bis my information (?:encrypted(?: or completely secure)?|completely secure|secure)$",
+        r"\bhow long is my information kept$",
+        r"\bcan you delete my information$",
+        r"\bcan you export my information$",
+        r"\bdo you share information with (?:my )?doctors or family$",
+        r"\bcan you contact my doctor or family$",
+        r"\bcan you change a medication, appointment, or care plan$",
+        r"\bcan you save what i just told you$",
         r"\bwhich model (?:powers|is powering) you$",
         r"\bwhat model (?:powers|is powering) you$",
     )
@@ -7439,6 +7452,66 @@ def _companion_identity_direct_answer(user_text: str) -> str | None:
         return (
             "No. Conversation text is not automatically an accepted care record. "
             "Only an approved application workflow can persist accepted information."
+        )
+    if re.search(r"\bcan you see information about another care recipient$", normalized):
+        return (
+            "Only when you are authorized for that person and SolenOS supplies that person's "
+            "scoped information to this request. I cannot assume access."
+        )
+    if re.search(r"\bcan you see who viewed my records$", normalized):
+        return "Only if an authorized audit feature supplies that information for this request. I cannot see a view history by default."
+    if re.search(r"\bwhat do you do with the information i share$", normalized):
+        return (
+            "I use information supplied for the current request to answer it and, when a workflow "
+            "supports it, prepare an extraction, summary, comparison, or proposed care update. "
+            "I do not claim it is saved to the LCR unless the application confirms persistence."
+        )
+    if re.search(r"\bdo you train yourself on my information$", normalized):
+        return (
+            "I do not have reliable visibility into provider-wide training or retention policy from "
+            "this conversation. Check the current SolenOS privacy notice and applicable AI provider disclosures."
+        )
+    if re.search(r"\bdo you sell or use my care information for advertising$", normalized):
+        return (
+            "SolenOS must not sell sensitive care information or use it for advertising. "
+            "I cannot make broader claims about every vendor or data processor."
+        )
+    if re.search(r"\bis my information (?:encrypted(?: or completely secure)?|completely secure|secure)$", normalized):
+        return (
+            "I cannot promise complete security or confirm specific technical safeguards without "
+            "verified security documentation. Check the current SolenOS security and privacy information."
+        )
+    if re.search(r"\bhow long is my information kept$", normalized):
+        return "I do not know the retention period from this conversation. Check the current SolenOS privacy notice or account controls."
+    if re.search(r"\bcan you delete my information$", normalized):
+        return (
+            "I cannot delete information or verify deletion. Use the supported SolenOS account or privacy "
+            "process; I can confirm deletion only if the application reports it."
+        )
+    if re.search(r"\bcan you export my information$", normalized):
+        return (
+            "I can only say an export is available when the current app provides and confirms that action. "
+            "I cannot create or confirm an export from this conversation."
+        )
+    if re.search(r"\bdo you share information with (?:my )?doctors or family$", normalized):
+        return (
+            "I cannot claim sharing or non-sharing beyond verified settings and confirmed actions. "
+            "Any sharing must be explicit, authorized, and confirmed by the application."
+        )
+    if re.search(r"\bcan you contact my doctor or family$", normalized):
+        return (
+            "I cannot contact anyone unless an authorized communication tool is available, invoked, "
+            "and confirms delivery. A draft is not a sent message."
+        )
+    if re.search(r"\bcan you change a medication, appointment, or care plan$", normalized):
+        return (
+            "I cannot make autonomous changes. The current workflow may help prepare a proposal or question, "
+            "but changes require the appropriate caregiver and professional approval."
+        )
+    if re.search(r"\bcan you save what i just told you$", normalized):
+        return (
+            "I cannot say it is saved until the application confirms persistence. "
+            "Conversation text is not automatically an accepted care record."
         )
     if re.search(r"\bwhich model (?:powers|is powering) you$|\bwhat model (?:powers|is powering) you$", normalized):
         try:
