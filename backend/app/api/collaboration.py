@@ -766,6 +766,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "recorded_at": item.recorded_at.isoformat() if item.recorded_at else None,
                 "entered_by": caregiver_names.get(str(item.created_by_caregiver_id or "")),
                 "record_status": item.status,
+                "source_attribution": item.time_provenance,
                 "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
                 "related_evidence": [
                     summary for evidence_id in (item.evidence_ids or [])
