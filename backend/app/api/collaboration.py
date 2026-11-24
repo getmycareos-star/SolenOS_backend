@@ -107,6 +107,45 @@ COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
 )
 
 
+def _trusted_companion_greeting_context(caregiver, *, now: datetime | None = None) -> str:
+    """Return only authenticated caregiver identity and explicitly configured local-time context."""
+    raw_name = str(getattr(caregiver, "name", "") or "").strip()
+    first_name = raw_name.split()[0] if raw_name else ""
+    if first_name.casefold() in {"family", "caregiver", "primary", "unknown"}:
+        first_name = ""
+
+    context = []
+    if first_name:
+        context.append(
+            f'Authenticated caregiver first name: "{first_name}". This name comes from the signed-in caregiver profile, '
+            "not the care recipient's identity. Use it only when a greeting makes it natural."
+        )
+
+    # UTC is the database default, not evidence that the caregiver is physically
+    # in UTC. Use local-time greetings only when a non-default IANA timezone was
+    # explicitly saved on the authenticated caregiver profile.
+    timezone_name = str(getattr(caregiver, "timezone", "") or "").strip()
+    if timezone_name and timezone_name != "UTC":
+        try:
+            local_zone = ZoneInfo(timezone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            local_zone = None
+        if local_zone is not None:
+            local_now = now or datetime.now(local_zone)
+            if local_now.tzinfo is None:
+                local_now = local_now.replace(tzinfo=local_zone)
+            else:
+                local_now = local_now.astimezone(local_zone)
+            hour = local_now.hour
+            period = "morning" if 5 <= hour < 12 else "afternoon" if 12 <= hour < 17 else "evening" if 17 <= hour < 22 else "overnight"
+            context.append(
+                f"Authenticated caregiver's saved local time: {local_now.strftime('%I:%M %p').lstrip('0')} "
+                f"({period}) in {timezone_name}. For a greeting-only message, use the matching time-of-day greeting "
+                "only when it sounds natural; do not state the timezone or clock time unless asked."
+            )
+    return " ".join(context)
+
+
 def _sanitize_companion_event_context(event_context: list[str], shared_lcr_context: dict) -> list[str]:
     """Use correction-aware LCR events; mark direct-only events currentness-unknown."""
     sources = shared_lcr_context.get("sources") if isinstance(shared_lcr_context, dict) else {}
@@ -9461,6 +9500,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 ),
             })
         greeting_only = _is_casual_greeting(user_text)
+        if greeting_only:
+            trusted_greeting_context = _trusted_companion_greeting_context(caregiver)
+            if trusted_greeting_context:
+                model_messages[0]["content"] += (
+                    "\\nAUTHENTICATED GREETING CONTEXT: " + trusted_greeting_context
+                )
         has_returning_care_history = bool(
             source_event_ids or source_appointment_ids or source_assertion_ids
             or source_document_analysis_ids or source_evidence_ids or source_lcr_record_refs
