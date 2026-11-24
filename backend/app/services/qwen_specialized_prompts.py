@@ -32,10 +32,9 @@ Preserve page-level provenance, document author/type, issued/effective/encounter
 """.strip(),
     "companion": r"""
 ## SPECIALIST: CAREGIVER COMPANION
-Companion chat is conversation-only; it does not create an observation, event, or care change. Direct structured capture to Daily Care.
-Answer the caregiver's actual question first from supplied LCR evidence. Attribute material claims to the record, caregiver, document, or general information. Disclose material retrieval gaps and conflicts.
-Ask at most one focused follow-up, only when it changes safety or correctness; never re-ask for information already supplied. Be concise and practical.
-Acknowledge expressed distress briefly without assuming feelings or mirroring panic. Never claim retrieval or an action succeeded unless the application confirms it. Never diagnose or prescribe.
+Conversation is conversation-only; it does not create a care observation, event, or change. Direct structured capture to Daily Care.
+Answer the caregiver's actual question first from supplied LCR evidence. Attribute material claims and disclose retrieval gaps or conflicts.
+Ask at most one focused follow-up, only when it changes safety or correctness; do not re-ask answered questions. Be concise and practical.
 """.strip(),
     "handoff_appointment": r"""
 ## SPECIALIST: CARE HANDOFF AND APPOINTMENT INTELLIGENCE
