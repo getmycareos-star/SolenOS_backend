@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import func, inspect, or_
+from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session
 
 from app.models.anonymous_session import AnonymousSession
@@ -642,18 +642,113 @@ def build_transparency_evidence(
         })
         coverage["privacy_requests"] = "unavailable"
 
-    # No runtime-authoritative policy registry or user-scoped integration inventory
-    # is currently wired into this provider. Explicitly surface the gap; never infer.
-    items.extend([
-        {
-            "kind": "privacy_security_retention_policy",
-            "source_service": None,
-            "scope": {"person_id": person_id},
-            "observed_at": now.isoformat(),
-            "status": "unavailable",
-            "completeness": "not_verified",
-            "reason": "No authoritative runtime policy/configuration evidence is connected to this request.",
+    # Reuse the migration-owned privacy processing and legal-hold tables.
+    # These are legacy SQL tables rather than ORM models; query only the current
+    # care-recipient scope and expose no reviewer secrets or unrestricted rows.
+    processing_policy_available = _table_available(db, "data_processing_records")
+    processing_rows = []
+    processing_count = None
+    processing_has_more = False
+    if processing_policy_available:
+        processing_scope = "person_id = :person_id OR subject_id = :person_id"
+        processing_count = db.execute(
+            text(f"SELECT COUNT(*) FROM data_processing_records WHERE ({processing_scope}) "
+                 "AND (active_from IS NULL OR active_from <= :now) "
+                 "AND (active_until IS NULL OR active_until > :now)"),
+            {"person_id": person_id, "now": now},
+        ).scalar() or 0
+        processing_rows = db.execute(
+            text(f"SELECT id, processing_purpose, data_categories, legal_basis, retention_policy, "
+                 f"active_from, active_until FROM data_processing_records WHERE ({processing_scope}) "
+                 "AND (active_from IS NULL OR active_from <= :now) "
+                 "AND (active_until IS NULL OR active_until > :now) "
+                 "ORDER BY active_from DESC, id DESC LIMIT :limit"),
+            {"person_id": person_id, "now": now, "limit": MAX_RECENT_ITEMS + 1},
+        ).mappings().all()
+        processing_has_more = len(processing_rows) > MAX_RECENT_ITEMS
+
+    legal_holds_available = _table_available(db, "legal_holds")
+    legal_hold_rows = []
+    legal_hold_count = None
+    legal_holds_have_more = False
+    if legal_holds_available:
+        legal_hold_count = db.execute(
+            text("SELECT COUNT(*) FROM legal_holds WHERE subject_id = :person_id"),
+            {"person_id": person_id},
+        ).scalar() or 0
+        legal_hold_rows = db.execute(
+            text("SELECT id, resource_type, resource_id, hold_status, reason_code, "
+                 "effective_at, released_at FROM legal_holds "
+                 "WHERE subject_id = :person_id ORDER BY effective_at DESC, id DESC LIMIT :limit"),
+            {"person_id": person_id, "limit": MAX_RECENT_ITEMS + 1},
+        ).mappings().all()
+        legal_holds_have_more = len(legal_hold_rows) > MAX_RECENT_ITEMS
+    terminal_hold_states = {"released", "expired", "closed", "cancelled", "inactive"}
+    recent_holds = [{
+        "hold_id": str(row["id"]),
+        "resource_type": row["resource_type"],
+        "resource_id": row["resource_id"],
+        "hold_status": row["hold_status"],
+        "reason_code": row["reason_code"],
+        "effective_at": _iso(row["effective_at"]),
+        "released_at": _iso(row["released_at"]),
+        "blocks_deletion": str(row["hold_status"] or "").strip().lower() not in terminal_hold_states,
+    } for row in legal_hold_rows[:MAX_RECENT_ITEMS]]
+    active_hold_count = sum(1 for row in recent_holds if row["blocks_deletion"])
+    items.append({
+        "kind": "privacy_security_retention_policy",
+        "source_service": "data_processing_records_and_legal_holds",
+        "scope": {"person_id": person_id},
+        "observed_at": now.isoformat(),
+        "status": (
+            "available" if processing_policy_available and legal_holds_available
+            else "partial" if processing_policy_available or legal_holds_available
+            else "unavailable"
+        ),
+        "completeness": (
+            "partial" if processing_has_more or legal_holds_have_more
+            else "scoped_runtime_records"
+            if processing_policy_available and legal_holds_available
+            else "partial_or_unavailable_schema"
+        ),
+        "details": {
+            "processing_policy_record_count": int(processing_count) if processing_count is not None else None,
+            "active_processing_policies": [{
+                "record_id": str(row["id"]),
+                "purpose": row["processing_purpose"],
+                "data_categories": row["data_categories"],
+                "legal_basis": row["legal_basis"],
+                "retention_policy": row["retention_policy"],
+                "active_from": _iso(row["active_from"]),
+                "active_until": _iso(row["active_until"]),
+            } for row in processing_rows[:MAX_RECENT_ITEMS]],
+            "has_more_processing_policies": processing_has_more if processing_policy_available else None,
+            "processing_policy_inventory_status": (
+                "available" if processing_policy_available and processing_count
+                else "no_active_records" if processing_policy_available
+                else "unavailable"
+            ),
+            "legal_hold_record_count": int(legal_hold_count) if legal_hold_count is not None else None,
+            "active_or_unclassified_hold_count_in_returned_window": active_hold_count if legal_holds_available else None,
+            "recent_legal_holds": recent_holds,
+            "has_more_legal_holds": legal_holds_have_more if legal_holds_available else None,
+            "legal_hold_inventory_status": (
+                "available" if legal_holds_available and legal_hold_count
+                else "no_records_found" if legal_holds_available
+                else "unavailable"
+            ),
         },
+    })
+    coverage["privacy_policy"] = (
+        "partial" if (
+            not processing_policy_available or not legal_holds_available
+            or processing_has_more or legal_holds_have_more
+        ) else "scoped_runtime_records"
+    )
+
+    # No user-scoped integration inventory is wired into this request. Explicitly
+    # surface that gap; a missing registry is not evidence that no integrations exist.
+    items.extend([
         {
             "kind": "connected_integrations",
             "source_service": None,
