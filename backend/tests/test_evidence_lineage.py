@@ -353,3 +353,20 @@ def test_explicit_shared_origin_status_and_forwarded_from_relationship_group_sou
     lineage, independence = build_evidence_lineage(rows, [link], ["a", "b"])
     assert lineage["a"] == lineage["b"]
     assert independence["a"] == independence["b"] == "shared_origin"
+
+def test_copied_or_same_origin_status_unifies_lineage():
+    rows = [
+        SimpleNamespace(id="copied-a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="copied-b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    relationship = SimpleNamespace(
+        source_evidence_id="copied-a",
+        related_evidence_id="copied-b",
+        source_independence_status="copied_or_same_origin",
+        relationship_type="related",
+        origin_group_key="copied-source-family",
+    )
+    lineage, independence = build_evidence_lineage(rows, [relationship], ["copied-a", "copied-b"])
+    assert lineage["copied-a"] == lineage["copied-b"]
+    assert independence == {"copied-a": "shared_origin", "copied-b": "shared_origin"}
+
