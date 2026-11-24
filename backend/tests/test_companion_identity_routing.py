@@ -14,6 +14,7 @@ from app.api.collaboration import _is_companion_identity_question
         "Who owns you?",
         "Are you human?",
         "Are you a doctor?",
+        "Are you human or a doctor?",
         "Are you ChatGPT?",
         "What is your purpose?",
         "What can you do?",
