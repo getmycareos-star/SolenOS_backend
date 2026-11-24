@@ -836,11 +836,12 @@ def build_transparency_evidence(
             "source_service": "data_subject_requests_privacy_export_artifacts",
             "scope": {"person_id": person_id, "caregiver_id": caregiver_id},
             "observed_at": now.isoformat(),
-            "status": "available",
-            "completeness": "recent_bounded_requests_and_exports",
+            "status": "available" if exports_available else "partial",
+            "completeness": "recent_bounded_requests_and_exports" if exports_available else "requests_available_export_inventory_unavailable",
             "details": {
                 "requests": [{
                     "request_id": str(row.id),
+                    "external_request_id": row.request_id,
                     "request_type": row.request_type,
                     "request_status": row.request_status,
                     "requested_at": _iso(row.requested_at),
@@ -851,6 +852,9 @@ def build_transparency_evidence(
                 "exports": [{
                     "artifact_id": str(row.id),
                     "request_id": str(row.request_id),
+                    "filename": row.filename,
+                    "size_bytes": int(row.size_bytes),
+                    "sha256": row.sha256,
                     "created_at": _iso(row.created_at),
                     "expires_at": _iso(row.expires_at),
                     "downloaded_at": _iso(row.downloaded_at),
