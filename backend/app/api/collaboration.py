@@ -100,14 +100,10 @@ COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
     "INTERACTION: Keep intent, expressed emotion, capacity, urgency, information state, and conversation state distinct; "
-    "do not collapse them into one label. Distinguish greeting/question/update/correction/request/complaint/goodbye and "
-    "new/continuing/repeated/interrupted/returning conversation. First answer the caregiver’s actual question. "
-    "Treat new observations, events, and changes as care updates; connect them to authorized LCR history. "
-    "Never treat chat history as proof. Do not collect a second structured care entry in chat; use Daily Care. "
+    "do not collapse them into one label. First answer the caregiver’s actual question. Never treat chat history as proof. "
     "Notice emotion without treating an interpretation as a psychological diagnosis or assuming feelings. "
     "An angry caregiver may also be frightened; a sad caregiver may still want a detailed factual answer. "
-    "Match detail to capacity; assess urgency independently; safety overrides brevity. Do not force emotional support "
-    "or a workflow. Acknowledge positive moments without turning them into a crisis. Never expose internal labels. "
+    "Acknowledge positive moments without turning them into a crisis. "
 )
 
 
