@@ -135,3 +135,29 @@ def test_qwen_context_budget_reduces_output_reservation_before_discarding_contex
     assert selected_raw == context_lines
     assert rendered
     assert truncated is False
+
+def test_qwen_context_budget_never_reduces_safety_response_reservation(monkeypatch):
+    attempts = []
+
+    def reject_oversized_prompt(messages, *, options=None):
+        attempts.append(options["num_predict"])
+        raise HTTPException(status_code=413, detail="safety response reservation must be preserved")
+
+    monkeypatch.setattr(collaboration, "qwen_chat", reject_oversized_prompt)
+    try:
+        asyncio.run(
+            collaboration._qwen_chat_with_bounded_context(
+                "Safety instructions. Authorized context:\\n",
+                "I think Mum may be having trouble breathing.",
+                ["Canonical source: " + json.dumps({"source_type": "events", "status": "available"})],
+                options={"temperature": 0, "num_predict": 256},
+                allow_output_budget_fallback=False,
+            )
+        )
+    except HTTPException as exc:
+        assert exc.status_code == 413
+    else:
+        raise AssertionError("an oversized safety prompt must fail closed instead of shortening its response budget")
+
+    assert attempts
+    assert set(attempts) == {256}
