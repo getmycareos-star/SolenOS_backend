@@ -63,6 +63,25 @@ def create_session(client):
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
 
+def test_companion_rejects_fabricated_long_source_quotations():
+    source = "Caregiver reported that Mum left breakfast untouched."
+    fabricated = 'The saved note says “Mum ate all of her breakfast and felt well afterward.”'
+    assert collaboration._contains_unsupported_quotation(fabricated, source)
+    assert collaboration._contains_unsupported_care_claim(fabricated, source)
+
+
+def test_companion_accepts_exact_source_quotations_and_standard_uncertainty_disclosure():
+    source = "Caregiver reported that Mum left breakfast untouched."
+    exact = 'The note says “Caregiver reported that Mum left breakfast untouched.”'
+    standard = 'I cannot verify that from the information available to me.'
+    assert not collaboration._contains_unsupported_quotation(exact, source)
+    assert not collaboration._contains_unsupported_quotation(
+        '“I cannot verify that from the information available to me.”',
+        source,
+    )
+    assert not collaboration._contains_unsupported_quotation('The note labels this “breakfast”.', source)
+
+
 def test_companion_does_not_keep_unenriched_duplicate_of_correction_aware_event():
     direct_lines = [
         "LCR event evidence: " + json.dumps({
