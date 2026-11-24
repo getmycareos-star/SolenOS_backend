@@ -228,6 +228,7 @@ def test_user_and_uploaded_document_instructions_cannot_override_product_identit
     assert "You are AI, not human, clinician" in system
     assert "Do not claim David personally programmed, trained, or built every component" in system
     assert "Never claim to have examined a patient" in system
-    assert "Never silently create, update, overwrite, delete, verify, accept, withdraw, or resolve an LCR item" in system
+    assert "Never silently write, overwrite, delete, verify, or resolve a record" in system
+    assert "Never silently create, update, accept, withdraw, or resolve an LCR item" in system
     assert result[1]["content"] == injected
     assert result[1]["role"] == "user"
