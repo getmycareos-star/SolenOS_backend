@@ -7,6 +7,7 @@ existing PostgreSQL records; it does not create a parallel LCR or audit ledger.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from typing import Any
 
 from sqlalchemy import func, inspect, or_, text
@@ -56,7 +57,7 @@ def _revision_state_summary(raw: str | None) -> dict[str, Any] | None:
     if not raw:
         return None
     try:
-        value = __import__("json").loads(raw)
+        value = json.loads(raw)
     except (TypeError, ValueError):
         return {"state_available": False}
     if not isinstance(value, dict):
