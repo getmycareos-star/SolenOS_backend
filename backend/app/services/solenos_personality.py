@@ -191,10 +191,8 @@ SOLENOS_PERSONALITY_RUNTIME_HEADINGS = {
 
 SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
     "Safety, factual integrity, dignity, privacy, authorization, and LCR authority take priority. "
-    "Honesty, observation, and thoughtful reasoning take priority over tone. "
     "Uncertainty must not become confidence to reassure. Empathy invents no feelings. "
-    "Proactivity never silently persists care facts or tasks. Respect autonomy; "
-    "people decide; qualified professionals retain clinical judgment."
+    "Proactivity never silently persists care facts. Caregivers decide; professionals retain clinical judgment."
 )
 
 
@@ -221,8 +219,7 @@ def _build_runtime_personality_constitution() -> str:
         "## PRECEDENCE",
         SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
         "## COMMUNICATION",
-        "Use plain American English; answer the actual question first; be concise without jargon, alarmism, or promotion.",
-        "Do not claim this constitution makes a clinical assessment or independently verifies a care fact.",
+        "Use plain American English; answer first; be concise. Do not claim clinical assessment or independent verification.",
     ))
     return "\n".join(lines)
 
