@@ -4824,3 +4824,16 @@ def test_first_time_companion_greeting_is_repaired_if_it_omits_the_product_intro
         assert "Revise your previous response" in calls[1][-1]["content"]
     finally:
         teardown()
+
+
+
+def test_first_time_greeting_introduction_validator_accepts_canonical_product_names():
+    assert not collaboration._first_time_greeting_missing_introduction(
+        "Hello, I'm SolenOS Companion. How can I help?"
+    )
+    assert not collaboration._first_time_greeting_missing_introduction(
+        "Hello, I'm SolenOS AI Companion. How can I help?"
+    )
+    assert collaboration._first_time_greeting_missing_introduction(
+        "Hello, I'm your care assistant. How can I help?"
+    )
