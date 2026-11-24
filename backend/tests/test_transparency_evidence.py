@@ -23,6 +23,7 @@ from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.care_continuity import CareAssertion, CareStateRevision
 from app.models.collaboration import EvidenceUpload
 from app.models.privacy_delivery import AuditLogEvent
+from app.models.privacy_export import PrivacyExportArtifact
 from app.models.privacy_request import DataSubjectRequest
 
 TEST_POSTGRES_URL = os.getenv("TEST_POSTGRES_URL")
@@ -204,7 +205,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             target_id=evidence.id,
             outcome="success",
         ))
-        db.add(DataSubjectRequest(
+        privacy_request = DataSubjectRequest(
             requester_id=caregiver_id,
             actor_id=caregiver_id,
             subject_id=person_id,
@@ -213,6 +214,19 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             request_type="access",
             request_status="received_pending_authority_review",
             requested_at=datetime.now(timezone.utc),
+        )
+        db.add(privacy_request)
+        db.flush()
+        export_bytes = b"SYNTHETIC-PRIVATE-EXPORT-ARCHIVE"
+        db.add(PrivacyExportArtifact(
+            request_id=privacy_request.id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            filename="solenos-care-export.zip",
+            content=export_bytes,
+            size_bytes=len(export_bytes),
+            sha256=hashlib.sha256(export_bytes).hexdigest(),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
         ))
         assertion_id = assertion.id
         if inspect(db.get_bind()).has_table("data_processing_records"):
@@ -294,11 +308,17 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert lcr_details["recent_proposals"][0]["status"] == "accepted"
     assert lcr_details["recent_proposals"][0]["decisions"][0]["decision"] == "accept"
     assert by_kind["audit_activity"]["details"]["recent_events"][0]["action"] == "synthetic.document.uploaded"
-    assert by_kind["privacy_data_control_operations"]["details"]["requests"][0]["request_type"] == "access"
+    privacy_details = by_kind["privacy_data_control_operations"]["details"]
+    assert privacy_details["requests"][0]["request_type"] == "access"
+    assert privacy_details["exports"][0]["filename"] == "solenos-care-export.zip"
+    assert privacy_details["exports"][0]["size_bytes"] == len(b"SYNTHETIC-PRIVATE-EXPORT-ARCHIVE")
+    assert privacy_details["exports"][0]["sha256"] == hashlib.sha256(b"SYNTHETIC-PRIVATE-EXPORT-ARCHIVE").hexdigest()
+    assert privacy_details["exports"][0]["status"] == "artifact_present"
 
     serialized = response.text
     assert "SYNTHETIC-PRIVATE-SOURCE-TEXT-MUST-NOT-LEAK" not in serialized
     assert "SYNTHETIC-PRIVATE-BINARY" not in serialized
+    assert "SYNTHETIC-PRIVATE-EXPORT-ARCHIVE" not in serialized
     assert "content" not in by_kind["documents_and_extraction"]["details"]["recent_documents"][0]
     policy_evidence = by_kind["privacy_security_retention_policy"]
     if POSTGRES_URL and inspect(engine).has_table("data_processing_records"):
