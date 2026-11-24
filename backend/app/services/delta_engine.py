@@ -384,10 +384,11 @@ def evaluate_longitudinal_interpretations(
                         source = db.query(Evidence).filter(
                             Evidence.id == record_id, Evidence.person_id == person_id
                         ).first()
-                        exists = source is not None
+                        source_status = str(source.evidence_status or "").casefold() if source is not None else ""
+                        exists = source is not None and source_status != "deleted_by_caregiver"
                         database_stale = bool(
-                            source is not None and str(source.evidence_status or "").casefold()
-                            in {"stale", "historical", "historical_only", "archived", "superseded", "needs_confirmation"}
+                            source is not None and source_status
+                            in {"stale", "historical", "historical_only", "archived", "superseded", "needs_confirmation", "deleted_by_caregiver"}
                         )
                     elif record_type == "care_assertion":
                         source = db.query(CareAssertion).filter(
@@ -712,7 +713,11 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
     if not ids:
         return []
     events = db.query(CareEvent).filter(CareEvent.person_id == person_id, CareEvent.id.in_(ids)).all()
-    evidence_rows = db.query(Evidence).filter(Evidence.person_id == person_id, Evidence.id.in_(ids)).all()
+    evidence_rows = db.query(Evidence).filter(
+        Evidence.person_id == person_id,
+        Evidence.id.in_(ids),
+        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
+    ).all()
     assertions = db.query(CareAssertion).filter(CareAssertion.person_id == person_id, CareAssertion.id.in_(ids)).all()
     observations = db.query(EvidenceObservation).filter(
         EvidenceObservation.person_id == person_id,
@@ -1407,7 +1412,10 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         prior_events_query = prior_events_query.filter(CareEvent.id != source_event_id)
     prior_events_total = prior_events_query.count()
     prior_events = prior_events_query.order_by(CareEvent.occurred_at.desc()).limit(25).all()
-    prior_evidence_query = db.query(Evidence).filter(Evidence.person_id == person_id)
+    prior_evidence_query = db.query(Evidence).filter(
+        Evidence.person_id == person_id,
+        Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
+    )
     if evidence_ids:
         # These evidence rows belong to the incoming event; the new-event text is
         # supplied separately and must not be counted again as prior evidence.
@@ -1751,6 +1759,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         source_evidence_rows.extend(db.query(Evidence).filter(
             Evidence.person_id == person_id,
             Evidence.id.in_(evidence_ids),
+            Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
         ).all())
     source_evidence_rows = list({str(row.id): row for row in source_evidence_rows}.values())
     source_evidence_by_id = {str(row.id): row for row in source_evidence_rows}
@@ -2402,6 +2411,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
                 db.query(Evidence).filter(
                     Evidence.person_id == person_id,
                     Evidence.id.in_(evidence_ids),
+                    Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
                 ).all()
                 if evidence_ids else []
             )
