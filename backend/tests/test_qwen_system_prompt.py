@@ -48,7 +48,6 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
         "Do not claim David personally programmed, trained, or built every component",
         "The model is replaceable",
         "Community functionality is disabled",
-        "Community functionality is disabled",
     ):
         assert phrase in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.startswith(
@@ -83,6 +82,8 @@ def test_identity_covers_origin_and_canonical_creator_response():
         "Do not claim David personally programmed, trained, or built every component",
         "The care journey",
         "The model is replaceable",
+        "initially focused on the United States",
+        "ownership of third-party technology",
     )
     for phrase in required:
         assert phrase in content
@@ -105,7 +106,6 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "prescribing clinician or pharmacist",
         "Never encourage dependence on AI",
         "Never turn care conversations into product promotion",
-        "ownership of third-party technology",
     )
     for phrase in required:
         assert phrase in content
