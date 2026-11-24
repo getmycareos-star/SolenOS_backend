@@ -1123,6 +1123,11 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 source_event_id="",
                 source_evidence_id=str(evidence.id),
                 workflow_id="document_candidate_extraction",
+                audit_context={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "request_id": getattr(request.state, "request_id", None),
+                },
             )
         except HTTPException:
             db.rollback()
