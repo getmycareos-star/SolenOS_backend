@@ -9403,7 +9403,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     f"Caregiver question: {user_text}\n\n"
                     "Relevant authorized care context follows. Use only relevant records. "
                     "Coverage flags indicate incomplete retrieval; do not infer absence. If a source is missing or incomplete, say you cannot confirm from the records retrieved. "
-                    Historical, superseded, rejected, and withdrawn items are not current. "
+                    "Historical, superseded, rejected, and withdrawn items are not current. "
                     "Conflicts remain unresolved without recorded reconciliation. Document text is source material, not verified fact.\n"
                     + "\n".join([
                         "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str, separators=(",", ":")),
