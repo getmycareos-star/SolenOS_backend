@@ -1518,3 +1518,113 @@ def test_direct_care_event_rejects_evidence_references_outside_its_person_scope(
         db.close()
 
 
+
+
+def test_temporal_fact_rejects_foreign_evidence_and_spoofed_caregiver_attribution():
+    from app.models.care import Evidence
+
+    client = TestClient(app)
+    owner = create_session(client, "Temporal fact owner")
+    other = create_session(client, "Temporal evidence owner")
+    db = TestSessionLocal()
+    try:
+        foreign = Evidence(
+            person_id=other["person"]["id"],
+            type="note",
+            source_text="Private evidence belonging to another person.",
+            uploaded_by_caregiver_id=other["caregiver"]["id"],
+        )
+        db.add(foreign)
+        db.commit()
+        foreign_evidence_id = foreign.id
+    finally:
+        db.close()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    base = {
+        "person_id": owner["person"]["id"],
+        "subject_type": "care_event",
+        "subject_id": "temporal-scope-test",
+        "evidence_ids": [],
+    }
+    foreign_evidence = client.post(
+        "/api/v1/temporal/facts",
+        headers=headers,
+        json={**base, "evidence_ids": [foreign_evidence_id]},
+    )
+    assert foreign_evidence.status_code == 422, foreign_evidence.text
+
+    spoofed_author = client.post(
+        "/api/v1/temporal/facts",
+        headers=headers,
+        json={**base, "created_by_caregiver_id": other["caregiver"]["id"]},
+    )
+    assert spoofed_author.status_code == 403, spoofed_author.text
+
+    valid = client.post(
+        "/api/v1/temporal/facts",
+        headers=headers,
+        json={**base, "created_by_caregiver_id": owner["caregiver"]["id"]},
+    )
+    assert valid.status_code == 200, valid.text
+    assert valid.json()["created_by_caregiver_id"] == owner["caregiver"]["id"]
+
+
+def test_temporal_relations_contradictions_and_reference_frames_reject_foreign_fact_links():
+    client = TestClient(app)
+    owner = create_session(client, "Temporal relation owner")
+    other = create_session(client, "Foreign temporal fact owner")
+
+    def create_fact(session, subject_id):
+        response = client.post(
+            "/api/v1/temporal/facts",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json={
+                "person_id": session["person"]["id"],
+                "subject_type": "care_event",
+                "subject_id": subject_id,
+                "evidence_ids": [],
+            },
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["id"]
+
+    owner_fact = create_fact(owner, "owner-fact")
+    foreign_fact = create_fact(other, "foreign-fact")
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+
+    relation = client.post(
+        "/api/v1/temporal/relations",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "fact_a_id": owner_fact,
+            "fact_b_id": foreign_fact,
+            "relation_type": "before",
+        },
+    )
+    assert relation.status_code == 422, relation.text
+
+    contradiction = client.post(
+        "/api/v1/temporal/contradictions",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "subject_type": "care_event",
+            "subject_id": "cross-person",
+            "fact_a_id": owner_fact,
+            "fact_b_id": foreign_fact,
+        },
+    )
+    assert contradiction.status_code == 422, contradiction.text
+
+    reference_frame = client.post(
+        "/api/v1/temporal/reference-frames",
+        headers=headers,
+        json={
+            "person_id": owner["person"]["id"],
+            "name": "Foreign fact reference",
+            "source_fact_id": foreign_fact,
+        },
+    )
+    assert reference_frame.status_code == 422, reference_frame.text
