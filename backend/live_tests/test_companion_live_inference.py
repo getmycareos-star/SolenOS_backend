@@ -1373,8 +1373,8 @@ def test_live_qwen_concurrent_authenticated_companion_requests_remain_person_sco
 
 
 
-def test_live_qwen_companion_identity_is_consistent_across_fresh_conversations():
-    """Real Qwen answers identity questions without inventing origin, authority, or memory."""
+def test_companion_identity_is_consistent_without_model_or_patient_context():
+    """Canonical identity answers bypass Qwen and patient-specific context."""
     with TestClient(app) as client:
         caregiver = _create_session(client, "Live Qwen identity constitution evaluator")
         questions = (
@@ -1388,9 +1388,10 @@ def test_live_qwen_companion_identity_is_consistent_across_fresh_conversations()
             response = _ask(client, caregiver, question)
             assert response.status_code == 200, response.text
             body = response.json()
-            assert body.get("ai_generated") is True, body
+            assert body.get("ai_generated") is False, body
             assert body.get("written_to_lcr") is False, body
             assert body.get("persistence") == "conversation_only", body
+            assert "versioned SolenOS product identity" in (body.get("safety_note") or ""), body
             coverage = body.get("lcr_context_coverage") or {}
             assert coverage.get("identity_question_context_skipped") is True, body
             assert body.get("source_event_ids") == [], body
