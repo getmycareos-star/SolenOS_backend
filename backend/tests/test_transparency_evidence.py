@@ -205,6 +205,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             request_status="received_pending_authority_review",
             requested_at=datetime.now(timezone.utc),
         ))
+        assertion_id = assertion.id
         db.commit()
     finally:
         db.close()
@@ -228,7 +229,7 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert by_kind["documents_and_extraction"]["details"]["recent_extractions"][0]["extraction_status"] == "completed"
     assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["decision"] == "accept"
     assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["reviewer_name"] == "Primary caregiver"
-    assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["resulting_assertion_id"] == assertion.id
+    assert by_kind["document_review_history"]["details"]["recent_reviews"][0]["resulting_assertion_id"] == assertion_id
     lcr_details = by_kind["living_care_record_state"]["details"]
     assert lcr_details["assertion_status_counts"] == {"caregiver_reviewed": 1}
     assert lcr_details["recent_corrections"][0]["actor_name"] == "Primary caregiver"
