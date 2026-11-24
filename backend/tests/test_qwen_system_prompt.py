@@ -269,12 +269,17 @@ def test_shared_enforcement_is_reasserted_after_workflow_and_specialist_instruct
 
 def test_every_enabled_workflow_keeps_shared_enforcement_after_its_task_prompt():
     from app.services.qwen_workflows import ENABLED_WORKFLOWS
+    from app.services.qwen_specialized_prompts import WORKFLOW_SPECIALISTS, apply_specialized_intelligence
 
     for workflow in ENABLED_WORKFLOWS:
-        system = apply_solenos_system_contract([
+        messages = apply_specialized_intelligence([
             {"role": "system", "content": f"SOLENOS_WORKFLOW_ID: {workflow}"},
-        ])[0]["content"]
+        ])
+        system = apply_solenos_system_contract(messages)[0]["content"]
         workflow_index = system.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS")
-        enforcement_index = system.index("NON-OVERRIDABLE SHARED EVIDENCE AND AUTHORITY RULES") if "NON-OVERRIDABLE SHARED EVIDENCE AND AUTHORITY RULES" in system else system.index("NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES")
+        enforcement_index = system.index("NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES")
         identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
         assert workflow_index < enforcement_index < identity_index, workflow
+        if workflow in WORKFLOW_SPECIALISTS:
+            specialist_index = system.index("ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES")
+            assert workflow_index < specialist_index < enforcement_index, workflow
