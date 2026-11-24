@@ -4855,6 +4855,108 @@ def reconstruct_recorded_state_as_of(
             "recorded_change_at": row.changed_at.isoformat() if row.changed_at else None,
             "changed_by_caregiver_id": row.changed_by_caregiver_id,
         })
+    schema_inspector = inspect(db.get_bind())
+    evidence_review_history = []
+    claim_assessment_history = []
+    evidence_review_history_status = "unavailable_schema"
+    claim_assessment_history_status = "unavailable_schema"
+    append_only_history_truncated = False
+
+    if schema_inspector.has_table(EvidenceReviewRecord.__tablename__):
+        review_rows = (
+            db.query(EvidenceReviewRecord)
+            .join(Evidence, Evidence.id == EvidenceReviewRecord.evidence_id)
+            .filter(
+                EvidenceReviewRecord.person_id == person_id,
+                Evidence.person_id == person_id,
+                EvidenceReviewRecord.created_at <= as_of,
+            )
+            .order_by(EvidenceReviewRecord.created_at.asc(), EvidenceReviewRecord.id.asc())
+            .limit(limit + 1)
+            .all()
+        )
+        append_only_history_truncated = append_only_history_truncated or len(review_rows) > limit
+        review_rows = review_rows[:limit]
+        evidence_review_history_status = "available" if review_rows else "empty"
+        evidence_review_history = [{
+            "review_id": str(row.id),
+            "evidence_id": str(row.evidence_id),
+            "review_type": row.review_type,
+            "outcome": row.outcome,
+            "rationale": row.rationale,
+            "criteria": list(row.criteria or []),
+            "policy_version": row.policy_version,
+            "reviewed_by_caregiver_id": str(row.reviewed_by_caregiver_id) if row.reviewed_by_caregiver_id else None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        } for row in review_rows]
+
+    if schema_inspector.has_table(EvidenceClaimAssessment.__tablename__):
+        assessment_rows = (
+            db.query(EvidenceClaimAssessment)
+            .join(CareAssertion, CareAssertion.id == EvidenceClaimAssessment.claim_id)
+            .filter(
+                EvidenceClaimAssessment.person_id == person_id,
+                CareAssertion.person_id == person_id,
+                EvidenceClaimAssessment.created_at <= as_of,
+            )
+            .order_by(EvidenceClaimAssessment.created_at.asc(), EvidenceClaimAssessment.id.asc())
+            .limit(limit + 1)
+            .all()
+        )
+        append_only_history_truncated = append_only_history_truncated or len(assessment_rows) > limit
+        assessment_rows = assessment_rows[:limit]
+        assessment_evidence_ids = set()
+        for row in assessment_rows:
+            for link in row.evidence_links or []:
+                if isinstance(link, str) and link.strip():
+                    assessment_evidence_ids.add(link.strip())
+                elif isinstance(link, dict):
+                    evidence_id = link.get("evidence_id") or link.get("id")
+                    if evidence_id:
+                        assessment_evidence_ids.add(str(evidence_id))
+        authorized_assessment_evidence_ids = set()
+        if assessment_evidence_ids:
+            authorized_assessment_evidence_ids = {
+                str(value) for (value,) in db.query(Evidence.id).filter(
+                    Evidence.person_id == person_id,
+                    Evidence.id.in_(assessment_evidence_ids),
+                ).all()
+            }
+        claim_assessment_history_status = "available" if assessment_rows else "empty"
+        for row in assessment_rows:
+            linked_evidence = []
+            for link in row.evidence_links or []:
+                if isinstance(link, str):
+                    evidence_id = link.strip()
+                    relationship = None
+                    scope_note = None
+                    source_passage = None
+                elif isinstance(link, dict):
+                    evidence_id = str(link.get("evidence_id") or link.get("id") or "").strip()
+                    relationship = link.get("relationship")
+                    scope_note = link.get("scope_note")
+                    source_passage = link.get("source_passage")
+                else:
+                    continue
+                if evidence_id and evidence_id in authorized_assessment_evidence_ids:
+                    linked_evidence.append({
+                        "evidence_id": evidence_id,
+                        "relationship": relationship,
+                        "scope_note": scope_note,
+                        "source_passage": source_passage,
+                    })
+            claim_assessment_history.append({
+                "assessment_id": str(row.id),
+                "claim_id": str(row.claim_id),
+                "claim_version": row.claim_version,
+                "status": row.status,
+                "rationale": row.rationale,
+                "policy_version": row.policy_version,
+                "evidence_links": linked_evidence,
+                "reviewed_by_caregiver_id": str(row.reviewed_by_caregiver_id) if row.reviewed_by_caregiver_id else None,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            })
+
     return {
         "person_id": person_id,
         "requested_as_of": as_of.isoformat(),
@@ -4863,6 +4965,13 @@ def reconstruct_recorded_state_as_of(
         "target_count": len(items),
         "truncated": truncated,
         "items": items,
+        "append_only_history": {
+            "evidence_reviews": evidence_review_history,
+            "evidence_reviews_status": evidence_review_history_status,
+            "claim_assessments": claim_assessment_history,
+            "claim_assessments_status": claim_assessment_history_status,
+            "truncated": append_only_history_truncated,
+        },
         "interpretation_limit": (
             "This projection reconstructs only targets with persisted care_state_revisions at or before the requested instant. "
             "It is not a complete historical Living Care Record, does not establish unrecorded facts, and does not prove the truth of stored content."
