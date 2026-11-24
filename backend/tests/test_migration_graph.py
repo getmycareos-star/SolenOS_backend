@@ -81,3 +81,16 @@ def test_caregiver_context_orm_alignment_migration_is_reachable_from_canonical_h
     assert len(heads) == 1
     reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261120_10_caregiver_context_model_alignment" in reachable
+
+
+
+def test_caregiver_timezone_authority_migration_is_reachable_from_canonical_head():
+    backend_dir = Path(__file__).resolve().parents[1]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "alembic"))
+    script = ScriptDirectory.from_config(config)
+    heads = script.get_heads()
+    assert len(heads) == 1
+    reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
+    assert "20261124_01_caregiver_preferences" in reachable
+    assert "20261124_02_caregiver_timezone_authority" in reachable
