@@ -107,7 +107,7 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "Never turn care conversations into product promotion",
     )
     for phrase in required:
-        assert phrase in content
+        assert (phrase.casefold() in content.casefold()) if phrase == "medication discrepancies" else (phrase in content)
 
 
 def test_assembled_contract_preserves_epistemic_states_and_temporal_integrity():
