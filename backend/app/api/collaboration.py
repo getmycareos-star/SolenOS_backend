@@ -7183,6 +7183,29 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
     return False
 
 
+def _contains_fabricated_empathy(reply: str) -> bool:
+    """Reject claims of human experience or emotions assigned without evidence.
+
+    This deliberately narrow language guard does not attempt to infer emotion.
+    It blocks common phrases that falsely imply the AI has lived experience or
+    knows the caregiver's internal state.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return False
+    patterns = (
+        r"\\bi know exactly how you feel\\b",
+        r"\\bi know how you feel\\b",
+        r"\\bi understand exactly how you feel\\b",
+        r"\\bi feel your pain\\b",
+        r"\\bi(?:'ve| have) been through (?:this|the same thing)\\b",
+        r"\\bi(?:'ve| have) been there\\b",
+        r"\\bas a caregiver myself\\b",
+        r"\\byou must (?:be )?feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\\b",
+        r"\\byou are probably feeling (?:guilty|afraid|scared|overwhelmed|lonely|angry|helpless|exhausted|ashamed)\\b",
+    )
+    return any(re.search(pattern, reply, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
@@ -7201,6 +7224,8 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     # caregiver explicitly labels their emotion. Critical-safety requests use
     # the deterministic emergency fast path and must never be softened.
     if _contains_unsupported_reassurance(text):
+        return True
+    if _contains_fabricated_empathy(text):
         return True
     if not guidance:
         return False
