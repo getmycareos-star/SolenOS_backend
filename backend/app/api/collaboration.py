@@ -5889,48 +5889,46 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     rejection_reasons = response_rejection_reasons(reply)
     if rejection_reasons:
         logger.warning("Qwen response rejected by grounding validators: %s", ",".join(rejection_reasons))
-        # Ask the same local model to repair style and source fidelity. A second
-        # unsupported high-impact claim is rejected instead of shown to a caregiver.
-        reply = await asyncio.to_thread(
-            qwen_chat,
-            [
-                {
-                    "role": "system",
-                    "content": (
-                        "Revise the draft into a clear, natural, accessible response. "
-                        + response_length_instruction + " "
-                        "Never expose internal record identifiers, UUIDs, source IDs or opaque keys. "
-                        "Preserve only claims directly supported by the exact caregiver text or authorized context. "
-                        "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
-                        "unreported clinical outcome into a fact. "
-                        + appointment_status_guidance
-                        + " Do not infer diagnosis, treatment response, test results, "
-                        "medication status, symptom change, appointments, tasks, owners or deadlines. "
-                        "Never ask for a password, verification code, one-time code or recovery secret. "
-                        "If a detail is absent, "
-                        "say it was not supplied or ask for clarification. Remove internal jargon and repetition. "
-                        + ("For an empty-context emergency-readiness request, return exactly this one sentence and nothing else: "
-                           "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' "
-                           if empty_context_emergency_readiness else "")
-                        + "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
-                        "Return only the revised response, not an explanation."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {
-                            "workflow": payload.workflow,
-                            "caregiver_request": payload.text.strip(),
-                            "authorized_context": context_lines,
-                            "draft_response": reply,
-                        },
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-            options={"temperature": 0, "num_predict": response_token_budget},
+        # Repair with the same bounded, source-balanced context. Do not serialize
+        # the raw LCR projection into a second unbounded user message.
+        repair_prompt_prefix = (
+            f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
+            "Revise the draft into a clear, natural, accessible response. "
+            + response_length_instruction + " "
+            "Never expose internal record identifiers, UUIDs, source IDs or opaque keys. "
+            "Preserve only claims directly supported by the exact caregiver text or authorized context. "
+            "Do not convert requested into scheduled, possible into confirmed, unknown into known, or an "
+            "unreported clinical outcome into a fact. "
+            + appointment_status_guidance
+            + " Do not infer diagnosis, treatment response, test results, "
+            "medication status, symptom change, appointments, tasks, owners or deadlines. "
+            "Never ask for a password, verification code, one-time code or recovery secret. "
+            "If a detail is absent, say it was not supplied or ask for clarification. "
+            "Remove internal jargon and repetition. "
+            + ("For an empty-context emergency-readiness request, return exactly this one sentence and nothing else: "
+               "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.' "
+               if empty_context_emergency_readiness else "")
+            + "SolenOS and the caregiver remain authoritative; do not claim anything was saved. "
+            "Return only the revised response, not an explanation.\\n\\nAuthorized context (may be empty):\\n"
         )
+        repair_user_text = json.dumps(
+            {
+                "workflow": payload.workflow,
+                "caregiver_request": payload.text.strip(),
+                "draft_response": reply,
+            },
+            ensure_ascii=False,
+        )
+        reply, context_lines, prompt_context_lines, repair_context_truncated = (
+            await _qwen_chat_with_bounded_context(
+                repair_prompt_prefix,
+                repair_user_text,
+                context_lines,
+                options={"temperature": 0, "num_predict": response_token_budget},
+            )
+        )
+        shared_context_truncated = shared_context_truncated or repair_context_truncated
+        source_context = payload.text + "\\n" + "\\n".join(prompt_context_lines)
     reply = strip_internal_identifiers(reply)
     rejection_reasons = response_rejection_reasons(reply)
     if rejection_reasons:
