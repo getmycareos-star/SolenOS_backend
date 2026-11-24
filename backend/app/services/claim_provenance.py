@@ -394,10 +394,9 @@ def _claim_preserves_source_qualifiers(statement: str, source: dict[str, Any], m
 
 
 _ATTRIBUTED_QUOTE_FRAME_RE = re.compile(
-    r"^(?:(?:the )?(?:caregiver|family(?: member)?|patient|person|professional|clinician|doctor|nurse|staff) "
-    r"(?:reported|observed|documented|said|noted|recorded|stated)|"
+    r"^(?:(?:the )?(?:caregiver|family(?: member)?|patient|person|professional|clinician|doctor|nurse|staff)\s+(?:reported|observed|documented|said|noted|recorded|stated)|"
     r"(?:caregiver|family|patient|professional|clinician)[- ](?:reported|observed|documented)|"
-    r"according to (?:the )?(?:caregiver|family|patient|professional|clinician))\\s*:?$",
+    r"according to (?:the )?(?:caregiver|family|patient|professional|clinician))\s*:?$",
     re.IGNORECASE,
 )
 
@@ -405,8 +404,22 @@ _ATTRIBUTED_QUOTE_FRAME_RE = re.compile(
 def _exact_attributed_source_quote(statement: str) -> str | None:
     """Accept a source quote only when the surrounding words are attribution framing."""
     patterns = (
-        r'^(?P<prefix>[^“”"‘’]{1,120})“(?P<quote>[^“”"‘’]{4,500})”\\s*[.!?]?
-    """Link only statements whose wording occurs in a saved source.
+        r'^(?P<prefix>[^“”]{1,120})“(?P<quote>[^“”]{4,500})”\s*[.!?]?$',
+        r'^(?P<prefix>[^‘’]{1,120})‘(?P<quote>[^‘’]{4,500})’\s*[.!?]?$',
+    )
+    for pattern in patterns:
+        match = re.match(pattern, (statement or "").strip())
+        if not match:
+            continue
+        prefix = match.group("prefix").strip().rstrip(":").strip()
+        quote = match.group("quote").strip()
+        if prefix and _ATTRIBUTED_QUOTE_FRAME_RE.fullmatch(prefix):
+            return quote
+    return None
+
+
+def build_claim_provenance(reply: str, source_records: list[dict[str, Any]], validated_aggregates: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """Link only exact source wording or an explicitly attributed exact source quote.
 
     A match is not an independence assessment and does not establish clinical
     truth. Duplicate records remain separate references and are not counted as
