@@ -3899,6 +3899,7 @@ def test_monthly_incident_aggregate_uses_person_scoped_events_and_blocks_correct
             relationship="Family",
             person_id=person.id,
             timezone="UTC",
+            timezone_configured=True,
         )
         evidence = Evidence(
             id="monthly-aggregate-evidence",
