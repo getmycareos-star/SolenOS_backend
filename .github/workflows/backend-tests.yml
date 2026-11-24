@@ -528,6 +528,8 @@ jobs:
         run: python -m pytest backend/tests/test_unified_lcr_retrieval.py -q -vv
       - name: Verify Companion conversation recovery and source references across a new account session on PostgreSQL
         run: python -m pytest backend/tests/test_companion_conversation_postgres.py -q -vv
+      - name: Verify Companion care-update proposal and caregiver-approval boundaries on PostgreSQL
+        run: python -m pytest backend/tests/test_companion_care_update_postgres.py -q -vv
 
       - name: Run persisted change-pattern lifecycle tests against PostgreSQL
         run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
