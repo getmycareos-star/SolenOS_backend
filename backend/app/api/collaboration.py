@@ -6119,7 +6119,7 @@ async def _qwen_chat_with_bounded_context(
         )
         if truncated:
             prompt += (
-                "\\n\\nContext coverage note: Some authorized records were omitted to fit "
+                "\n\nContext coverage note: Some authorized records were omitted to fit "
                 "the model input limit. Do not imply a complete review of the care history; "
                 "disclose when relevant information may be missing."
             )
