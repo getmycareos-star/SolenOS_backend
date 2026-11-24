@@ -549,7 +549,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 for row in db.query(Correction.target_id).filter(
                     Correction.person_id == person_id,
                     Correction.target_type == "care_event",
-                    Correction.created_at >= change_window_start,
+                    or_(
+                        Correction.created_at >= change_window_start,
+                        Correction.processed_at >= change_window_start,
+                        Correction.processing_started_at >= change_window_start,
+                    ),
                 ).all()
             }
     except SQLAlchemyError:
