@@ -204,7 +204,7 @@ def build_shared_origin_evidence_pairs(evidence_records: list[Any]) -> set[froze
         if parent_id and parent_id in rows and parent_id != evidence_id:
             pairs.add(frozenset((evidence_id, parent_id)))
         reference = re.sub(
-            r"\\s+",
+            r"\s+",
             " ",
             str(getattr(row, "original_source_reference", "") or "").strip(),
         ).casefold()
