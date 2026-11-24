@@ -103,6 +103,16 @@ def test_unmapped_explicit_workflow_fails_closed():
         ])
 
 
+def test_duplicate_specialist_mapping_fails_closed(monkeypatch):
+    import pytest
+
+    monkeypatch.setitem(WORKFLOW_SPECIALISTS, "companion", ("companion", "companion"))
+    with pytest.raises(RuntimeError, match="duplicate_specialist_domain:companion"):
+        select_specialized_domains([
+            {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion"}
+        ])
+
+
 def test_operational_workflow_intentionally_uses_only_global_contract():
     assert select_specialized_domains([
         {"role": "system", "content": "SOLENOS_WORKFLOW_ID: reminders_notifications"}
