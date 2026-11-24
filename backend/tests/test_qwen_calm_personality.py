@@ -38,7 +38,8 @@ def test_personality_constitution_has_all_ten_characteristics():
 
 def test_personality_and_product_identity_versions_are_independently_versioned():
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.3"
-    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.1"
+    assert "Version: 2.3" in SOLENOS_PERSONALITY_CONSTITUTION
 
 
 def test_every_qwen_request_receives_the_complete_personality_after_workflow_instructions():
