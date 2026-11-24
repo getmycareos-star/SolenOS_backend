@@ -4886,7 +4886,15 @@ def reconstruct_recorded_state_as_of(
             "rationale": row.rationale,
             "criteria": list(row.criteria or []),
             "policy_version": row.policy_version,
-            "reviewed_by_caregiver_id": str(row.reviewed_by_caregiver_id) if row.reviewed_by_caregiver_id else None,
+            "reviewed_by_caregiver_id": (
+                str(row.reviewed_by_caregiver_id)
+                if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_reviewer_ids else None
+            ),
+            "reviewer_scope_validation": (
+                "same_person_verified"
+                if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_reviewer_ids
+                else "reviewer_not_verified"
+            ),
             "created_at": row.created_at.isoformat() if row.created_at else None,
         } for row in review_rows]
 
@@ -4905,6 +4913,19 @@ def reconstruct_recorded_state_as_of(
         )
         append_only_history_truncated = append_only_history_truncated or len(assessment_rows) > limit
         assessment_rows = assessment_rows[:limit]
+        reviewer_ids = {
+            str(row.reviewed_by_caregiver_id)
+            for row in [*review_rows, *assessment_rows]
+            if row.reviewed_by_caregiver_id
+        }
+        authorized_reviewer_ids = set()
+        if reviewer_ids:
+            authorized_reviewer_ids = {
+                str(value) for (value,) in db.query(Caregiver.id).filter(
+                    Caregiver.person_id == person_id,
+                    Caregiver.id.in_(reviewer_ids),
+                ).all()
+            }
         assessment_evidence_ids = set()
         for row in assessment_rows:
             for link in row.evidence_links or []:
@@ -4953,7 +4974,15 @@ def reconstruct_recorded_state_as_of(
                 "rationale": row.rationale,
                 "policy_version": row.policy_version,
                 "evidence_links": linked_evidence,
-                "reviewed_by_caregiver_id": str(row.reviewed_by_caregiver_id) if row.reviewed_by_caregiver_id else None,
+                "reviewed_by_caregiver_id": (
+                    str(row.reviewed_by_caregiver_id)
+                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_reviewer_ids else None
+                ),
+                "reviewer_scope_validation": (
+                    "same_person_verified"
+                    if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_reviewer_ids
+                    else "reviewer_not_verified"
+                ),
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             })
 
