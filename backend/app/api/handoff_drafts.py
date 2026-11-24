@@ -1118,7 +1118,16 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                     stale.append(f"{source_table}:{source_id}")
                     continue
                 # Use the same canonical JSONList representation as the snapshot writer.
-                current = _fingerprint(_normalize_reflected_fingerprint_row(dict(row)))
+                fingerprint_row = _normalize_reflected_fingerprint_row(dict(row))
+                if source_table == "care_events":
+                    correction_lineage = _care_event_correction_fingerprint_snapshot(
+                        db, draft.person_id, source_id,
+                    )
+                    if correction_lineage.get("status") != "checked":
+                        unknown.append(f"{source_table}:{source_id}:correction_lineage")
+                        continue
+                    fingerprint_row["correction_lineage"] = correction_lineage
+                current = _fingerprint(fingerprint_row)
             if current != expected:
                 stale.append(f"{source_table}:{source_id}")
         snapshot_ids_by_table = {}
@@ -2816,7 +2825,14 @@ def prepare_handoff_draft(
                     record_status = "current" if row.get("is_current") else "historical"
                 if table_name == "uncertainty_assessments":
                     record_status = "active" if row.get("is_active") else "superseded"
-                source_fingerprint = _fingerprint(_normalize_reflected_fingerprint_row(row))
+                fingerprint_row = _normalize_reflected_fingerprint_row(row)
+                if table_name == "care_events":
+                    correction_lineage = _care_event_correction_fingerprint_snapshot(
+                        db, person_id, str(source_id),
+                    )
+                    details["correction_lineage"] = correction_lineage
+                    fingerprint_row["correction_lineage"] = correction_lineage
+                source_fingerprint = _fingerprint(fingerprint_row)
                 source_revision_value = next((row.get(key) for key in ("version", "revision", "record_version", "updated_at", "recorded_at") if row.get(key) is not None), None)
                 records.append({
                     "source_type": spec["kind"],
