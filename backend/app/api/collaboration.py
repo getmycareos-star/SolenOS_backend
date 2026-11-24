@@ -7080,7 +7080,7 @@ def _contains_unsupported_reassurance(reply: str) -> bool:
                 r"\b(?:not|no|never|cannot|can't|won't|wouldn't|don't|doesn't|"
                 r"isn't|aren't|unable to|not enough evidence to|not possible to|"
                 r"can't promise|cannot promise|can't confirm|cannot confirm)\b"
-                r"(?:\s+[\w']+){0,5}\s*$",
+                r"(?:\s+[\w']+){0,8}\s*$",
                 prefix,
             )
             if explicit_limit:
