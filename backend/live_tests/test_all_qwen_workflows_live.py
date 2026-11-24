@@ -88,7 +88,8 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
         _production_qwen_answer_checks,
         _production_qwen_evaluation_cases,
     )
-    from app.services.qwen_gateway import qwen_chat
+    from app.services import qwen_gateway
+    from app.services.qwen_gateway import _estimate_prompt_tokens, qwen_chat
     from app.services.qwen_specialized_prompts import (
         WORKFLOW_SPECIALISTS,
         apply_specialized_intelligence,
@@ -99,6 +100,16 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
     cases = _production_qwen_evaluation_cases()
     assert len(cases) == 10
     results = []
+    original_urlopen = qwen_gateway.urllib.request.urlopen
+
+    def capture_real_ollama_request(request, *args, **kwargs):
+        if str(getattr(request, "full_url", "")).endswith("/api/chat"):
+            payload = json.loads(request.data.decode("utf-8"))
+            captured_requests.append(payload)
+        return original_urlopen(request, *args, **kwargs)
+
+    captured_requests = []
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_real_ollama_request)
 
     # Do not abort on the first behavioural failure. Every controlled scenario
     # must execute independently so the artifact contains all ten real outputs.
@@ -116,6 +127,9 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
             "assembled_system_context": None,
             "workflow": None,
             "selected_specialists": [],
+            "gateway_request_messages": None,
+            "gateway_prompt_token_estimate": None,
+            "gateway_input_token_budget": None,
             "answer": None,
             "checks": {},
             "passed": False,
@@ -145,16 +159,36 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
             )
             result["assembled_system_context"] = assembled[0]["content"]
 
+            captured_requests.clear()
             answer = qwen_chat(
                 messages,
                 timeout=180.0,
                 options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
             )
+            if len(captured_requests) != 1:
+                raise AssertionError(
+                    f"expected_one_real_ollama_request_got_{len(captured_requests)}"
+                )
+            actual_payload = captured_requests[-1]
+            actual_messages = actual_payload.get("messages")
+            if not isinstance(actual_messages, list):
+                raise AssertionError("gateway_request_missing_messages")
+            result["gateway_request_messages"] = actual_messages
+            result["gateway_prompt_token_estimate"] = _estimate_prompt_tokens(actual_messages)
+            actual_options = actual_payload.get("options") or {}
+            result["gateway_input_token_budget"] = (
+                int(actual_options.get("num_ctx", 4096))
+                - int(actual_options.get("num_predict", 96))
+                - 128
+            )
             result["answer"] = answer
             checks = _production_qwen_answer_checks(case, answer)
             result["checks"] = checks
             result["passed"] = bool(
-                result["routing_passed"] and checks and all(checks.values())
+                result["routing_passed"]
+                and result["gateway_prompt_token_estimate"] <= result["gateway_input_token_budget"]
+                and checks
+                and all(checks.values())
             )
         except Exception as exc:
             result["error"] = f"{type(exc).__name__}: {str(exc)[:1200]}"
