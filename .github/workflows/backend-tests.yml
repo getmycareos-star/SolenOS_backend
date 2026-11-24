@@ -529,6 +529,8 @@ jobs:
       - name: Verify Companion conversation recovery and source references across a new account session on PostgreSQL
         run: python -m pytest backend/tests/test_companion_conversation_postgres.py -q -vv
       - name: Verify Companion care-update proposal and caregiver-approval boundaries on PostgreSQL
+        env:
+          SOLENOS_COMPANION_TEST_DATABASE_URL: ${{ env.DATABASE_URL }}
         run: python -m pytest backend/tests/test_companion_care_update_postgres.py -q -vv
 
       - name: Run persisted change-pattern lifecycle tests against PostgreSQL
