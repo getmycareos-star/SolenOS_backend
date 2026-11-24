@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 pytestmark = pytest.mark.session_security
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -206,6 +206,36 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
             requested_at=datetime.now(timezone.utc),
         ))
         assertion_id = assertion.id
+        if inspect(db.get_bind()).has_table("data_processing_records"):
+            db.execute(text(
+                "INSERT INTO data_processing_records "
+                "(id, subject_id, person_id, processing_purpose, data_categories, legal_basis, retention_policy, active_from) "
+                "VALUES (:id, :subject_id, :person_id, :purpose, CAST(:categories AS JSON), :basis, :retention, :active_from)"
+            ), {
+                "id": "transparency-policy-" + secrets.token_hex(8),
+                "subject_id": person_id,
+                "person_id": person_id,
+                "purpose": "Care continuity record",
+                "categories": '["care records", "uploaded documents"]',
+                "basis": "Caregiver-authorized service operation",
+                "retention": "Retain while the care record remains active; review on account closure.",
+                "active_from": datetime.now(timezone.utc),
+            })
+        if inspect(db.get_bind()).has_table("legal_holds"):
+            db.execute(text(
+                "INSERT INTO legal_holds "
+                "(id, subject_id, person_id, resource_type, resource_id, hold_status, reason_code, effective_at) "
+                "VALUES (:id, :subject_id, :person_id, :resource_type, :resource_id, :status, :reason, :effective_at)"
+            ), {
+                "id": "transparency-hold-" + secrets.token_hex(8),
+                "subject_id": person_id,
+                "person_id": person_id,
+                "resource_type": "care_record",
+                "resource_id": person_id,
+                "status": "active",
+                "reason": "synthetic_test_hold",
+                "effective_at": datetime.now(timezone.utc),
+            })
         db.commit()
     finally:
         db.close()
@@ -243,7 +273,14 @@ def test_transparency_evidence_is_authenticated_and_person_scoped():
     assert "SYNTHETIC-PRIVATE-SOURCE-TEXT-MUST-NOT-LEAK" not in serialized
     assert "SYNTHETIC-PRIVATE-BINARY" not in serialized
     assert "content" not in by_kind["documents_and_extraction"]["details"]["recent_documents"][0]
-    assert by_kind["privacy_security_retention_policy"]["status"] == "unavailable"
+    policy_evidence = by_kind["privacy_security_retention_policy"]
+    if POSTGRES_URL and inspect(engine).has_table("data_processing_records"):
+        assert policy_evidence["details"]["processing_policy_inventory_status"] == "available"
+        assert policy_evidence["details"]["active_processing_policies"][0]["retention_policy"].startswith("Retain while")
+        assert policy_evidence["details"]["active_or_unclassified_hold_count_in_returned_window"] == 1
+        assert policy_evidence["details"]["recent_legal_holds"][0]["blocks_deletion"] is True
+    else:
+        assert policy_evidence["status"] == "unavailable"
     assert by_kind["connected_integrations"]["status"] == "unavailable"
 
     # Caller-supplied identifiers cannot change the bearer session's record scope.
