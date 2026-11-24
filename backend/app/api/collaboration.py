@@ -8452,9 +8452,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ).limit(9).all()
     open_loops_truncated = len(open_loop_rows) > 8
     assigned_open_loops = open_loop_rows[:8]
+    authenticated_session_id = _resolve_anonymous_session_id(
+        request, db, person_id, caregiver_id,
+    )
+    authenticated_session = db.query(AnonymousSession).filter(
+        AnonymousSession.id == authenticated_session_id,
+        AnonymousSession.person_id == person_id,
+        AnonymousSession.caregiver_id == caregiver_id,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if authenticated_session is None:
+        raise HTTPException(status_code=401, detail="Caregiver session could not be confirmed")
     caregiver_context = build_companion_caregiver_context(
         caregiver,
         access_grant,
+        authenticated_account_id=(
+            str(authenticated_session.account_id)
+            if authenticated_session.account_id is not None else None
+        ),
         caregiver_profile=caregiver_profile,
         active_roles=active_roles,
         active_roles_truncated=active_roles_truncated,
