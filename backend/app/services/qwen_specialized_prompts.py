@@ -334,7 +334,7 @@ LEGACY_ROUTES: tuple[tuple[str, tuple[str, ...]], ...] = (
 
 def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
     """Select specialist responsibilities from backend-owned system metadata."""
-    system_text = "\\n".join(
+    system_text = "\n".join(
         str(message.get("content") or "").casefold()
         for message in messages
         if isinstance(message, dict) and str(message.get("role", "")).casefold() == "system"
@@ -343,7 +343,7 @@ def select_specialized_domains(messages: list[dict]) -> tuple[str, ...]:
         return ()
 
     workflow_ids = re.findall(
-        r"solenos_workflow_id\\s*:\\s*([a-z0-9_]+)",
+        r"solenos_workflow_id\s*:\s*([a-z0-9_]+)",
         system_text,
         flags=re.IGNORECASE,
     )
@@ -371,9 +371,9 @@ def apply_specialized_intelligence(messages: list[dict]) -> list[dict]:
     domains = select_specialized_domains(copied)
     if not domains:
         return copied
-    instructions = "\\n\\n".join(SPECIALIZED_PROMPTS[name] for name in domains)
+    instructions = "\n\n".join(SPECIALIZED_PROMPTS[name] for name in domains)
     copied.append({
         "role": "system",
-        "content": "# ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES\\n" + instructions,
+        "content": "# ACTIVE SOLENOS SPECIALIST RESPONSIBILITIES\n" + instructions,
     })
     return copied
