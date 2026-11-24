@@ -3598,7 +3598,7 @@ def _greeting_reply_needs_revision(reply: str, max_words: int = 40) -> bool:
 
 def _first_time_greeting_missing_introduction(reply: str) -> bool:
     """Require a first-time greeting to identify the product without inventing memory."""
-    return re.search(r"\\bSolenOS\\s+Companion\\b", reply or "", re.IGNORECASE) is None
+    return re.search(r"\bSolenOS\s+Companion\b", reply or "", re.IGNORECASE) is None
 
 
 def _greeting_name_missing(reply: str, caregiver_display_name: str | None) -> bool:
