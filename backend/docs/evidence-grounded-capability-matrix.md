@@ -65,4 +65,15 @@ At the latest observed frontend production workflow, the production build and va
 - Companion instructions now require exact wording and preserved attribution/time/negation/uncertainty for material care facts; unsupported paraphrases must not be presented as established facts.
 - Regression coverage was added for unsupported paraphrases, attribution preservation, attributed exact quotes, source-type mapping, unresolved/cross-person source IDs, and fail-closed Companion responses.
 - **Verification limitation:** the GitHub connector available in this session exposed Railway commit statuses but not push-triggered GitHub Actions check runs or logs. The tests were committed and the push workflows are configured, but their results have not been observed here. Live Qwen acceptance remains unverified.
+## Direct-main historical projection increment — 2026-11-24
+
+**Status: Implemented, verification pending; overall historical LCR coverage remains partial.**
+
+- The bounded as-of projection now includes append-only evidence-review and claim-assessment events in addition to CareStateRevision snapshots.
+- Both streams are filtered by the requested historical instant and joined to same-person persisted evidence or care assertions.
+- Claim-assessment evidence links are revalidated against the requested person's persisted evidence; foreign links are withheld.
+- Reviewer identifiers are returned only when the caregiver belongs to the same care record. Unverified reviewer attribution is explicitly marked.
+- Missing or incomplete review-history schemas are reported as unavailable rather than silently treated as empty.
+- Regression coverage was added for historical cutoffs, cross-person review/assessment isolation, reviewer-scope redaction, and evidence-link filtering.
+- Exact-current-main backend and PostgreSQL execution evidence remains pending. The endpoint continues to report partial revision-history coverage and is not a complete historical Living Care Record reconstruction.
 
