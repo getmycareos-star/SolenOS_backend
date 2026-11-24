@@ -64,6 +64,15 @@ def create_session(client):
     data = response.json()
     return data["access_token"], data["person"]["id"], data["caregiver"]["id"]
 
+def configure_test_timezone(person_id, caregiver_id, timezone_name="UTC"):
+    with TestingSessionLocal() as db:
+        caregiver = db.query(Caregiver).filter_by(
+            id=caregiver_id, person_id=person_id,
+        ).one()
+        caregiver.timezone = timezone_name
+        caregiver.timezone_configured = True
+        db.commit()
+
 
 def test_greeting_context_uses_authenticated_preferred_name_and_saved_local_time():
     caregiver = SimpleNamespace(
@@ -2032,6 +2041,7 @@ def test_companion_temporal_question_retrieves_events_without_literal_temporal_v
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     try:
         token, person_id, caregiver_id = create_session(client)
+        configure_test_timezone(person_id, caregiver_id, "America/Los_Angeles")
         db = TestingSessionLocal()
         now = datetime.now(timezone.utc)
         # Place the event inside the previous calendar week in every CI
@@ -3474,6 +3484,7 @@ def test_medication_dose_recall_quotes_saved_uncertainty_instead_of_model_comple
     )
     try:
         token, person_id, caregiver_id = create_session(client)
+        configure_test_timezone(person_id, caregiver_id, "America/Los_Angeles")
         db = TestingSessionLocal()
         event_time = datetime(2026, 11, 14, 20, 0, tzinfo=timezone.utc)
         description = (
