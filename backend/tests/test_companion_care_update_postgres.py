@@ -504,3 +504,43 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
         assert "prompt_context_chars" not in coverage_line
     finally:
         app.dependency_overrides.clear()
+
+def test_postgres_anonymous_caregiver_preferences_are_readable_and_isolated(monkeypatch):
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    client = TestClient(app)
+    try:
+        first = create_session(client, "Preferences caregiver one")
+        first_headers = {"Authorization": f"Bearer {first['access_token']}"}
+
+        initial = client.get("/api/v1/caregiver/preferences", headers=first_headers)
+        assert initial.status_code == 200, initial.text
+        assert initial.json()["timezone_configured"] is False
+
+        updated = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=first_headers,
+            json={
+                "preferred_name": "Alex",
+                "timezone": "America/New_York",
+                "locale": "en-US",
+                "date_format": "MM/DD/YYYY",
+                "measurement_system": "us_customary",
+                "communication_style": "balanced",
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["preferred_name"] == "Alex"
+        assert updated.json()["timezone"] == "America/New_York"
+        assert updated.json()["timezone_configured"] is True
+
+        second = create_session(client, "Preferences caregiver two")
+        second_response = client.get(
+            "/api/v1/caregiver/preferences",
+            headers={"Authorization": f"Bearer {second['access_token']}"},
+        )
+        assert second_response.status_code == 200, second_response.text
+        assert second_response.json()["preferred_name"] is None
+        assert second_response.json()["timezone_configured"] is False
+    finally:
+        app.dependency_overrides.clear()
