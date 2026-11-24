@@ -851,6 +851,7 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
             row.id for row in db.query(Evidence).filter(
                 Evidence.person_id == person_id,
                 Evidence.id.in_(evidence_ids),
+                Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
             ).all()
         }
         if verified_ids != evidence_ids:
