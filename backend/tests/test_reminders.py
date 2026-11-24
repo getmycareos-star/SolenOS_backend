@@ -614,6 +614,8 @@ def test_browser_push_is_never_advertised_under_in_app_only_policy():
 
 def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
     from app.models.notifications import CareNotification, CareNotificationPreference
+    from app.models.care import Caregiver
+    from app.models.caregiver_intelligence import CaregiverProfile
     from app.models.reminder import CareReminder
     from app.services.reminder_delivery import deliver_due_reminders
 
@@ -660,6 +662,17 @@ def test_timezone_preference_change_releases_stale_quiet_hours_deferral():
     try:
         stored = db.query(CareReminder).filter_by(id=reminder_id).one()
         assert stored.notification_deferred_until is None
+        caregiver = db.query(Caregiver).filter_by(
+            id=session["caregiver"]["id"], person_id=session["person"]["id"],
+        ).one()
+        assert caregiver.timezone == "Asia/Tokyo"
+        assert caregiver.timezone_configured is True
+        profile = db.query(CaregiverProfile).filter_by(
+            person_id=session["person"]["id"],
+            session_caregiver_id=session["caregiver"]["id"],
+        ).first()
+        if profile is not None:
+            assert profile.timezone == "Asia/Tokyo"
         # 02:00 in Tokyo is outside the configured 09:00-18:00 quiet window.
         assert deliver_due_reminders(db=db, now=now) == 1
         assert db.query(CareNotification).filter(
