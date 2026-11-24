@@ -3062,14 +3062,10 @@ def update_temporal_contradiction_endpoint(contradiction_id: str, update: Tempor
         )
     if update.resolved_by_caregiver_id and str(update.resolved_by_caregiver_id) != str(session.caregiver_id):
         raise HTTPException(status_code=403, detail="Temporal contradiction attribution must match the authenticated caregiver.")
-    result = update_temporal_contradiction(
-        db,
-        contradiction_id,
-        update.model_copy(update={
-            "resolved_by_caregiver_id": session.caregiver_id
-            if update.resolved_by_caregiver_id else None
-        }),
-    )
+    # Preserve the existing resolver attribution when this patch only
+    # changes notes/status. The update schema intentionally supports partial
+    # updates, so omitted fields must not be rewritten to null.
+    result = update_temporal_contradiction(db, contradiction_id, update)
     if not result:
         raise HTTPException(status_code=404, detail="Temporal contradiction not found")
     return result
