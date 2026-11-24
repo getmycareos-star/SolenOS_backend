@@ -33,6 +33,15 @@ def _enum_value(value):
     return getattr(value, "value", value)
 
 
+def _recorded_relationship(value) -> str | None:
+    relationship = _clean(value, limit=80)
+    if relationship and relationship.casefold() in {
+        "family", "unknown", "unspecified", "not specified",
+    }:
+        return None
+    return relationship
+
+
 def _iso_value(value):
     return value.isoformat() if hasattr(value, "isoformat") else value
 
@@ -195,7 +204,7 @@ def build_companion_caregiver_context(
         "full_name": full_name,
         "preferred_name": preferred_name,
         "display_name": display_name,
-        "relationship": _clean(getattr(caregiver, "relationship", None), limit=80),
+        "relationship": _recorded_relationship(getattr(caregiver, "relationship", None)),
         "caregiver_role": _clean(getattr(access_grant, "role", None), limit=32),
         "access_scope": access_scope,
         "permissions": permissions,
