@@ -6246,6 +6246,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "model": os.getenv("OLLAMA_MODEL", "qwen3.5:4b") if not response_was_grounding_fallback else None,
         "response_origin": response_origin,
         "response_mode": "deterministic_grounding_fallback" if response_was_grounding_fallback else "qwen_grounded",
+        "safety_note": (
+            "The answer could not be verified against the saved care information. Nothing was changed in your Care Record."
+            if response_was_grounding_fallback else None
+        ),
         "grounding_status": grounding_status,
         "authority": "solenos_care_record_and_caregiver",
         "review_required": True,
