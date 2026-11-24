@@ -8403,6 +8403,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ).first()
     if not person or not caregiver or access_grant is None:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
+    # Notification settings are included as delivery preferences only;
+    # their timezone is never used for Companion local-time resolution.
+    notification_preference = db.query(CareNotificationPreference).filter_by(
+        person_id=person_id, caregiver_id=caregiver_id,
+    ).first()
     # Companion time resolution uses only the caregiver-owned, explicitly
     # configured IANA timezone. Notification delivery settings are independent.
     caregiver_profile = db.query(CaregiverProfile).filter_by(
@@ -8479,6 +8484,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             str(authenticated_session.account_id)
             if authenticated_session.account_id is not None else None
         ),
+        notification_preferences=notification_preference,
         caregiver_profile=caregiver_profile,
         active_roles=active_roles,
         active_roles_truncated=active_roles_truncated,
