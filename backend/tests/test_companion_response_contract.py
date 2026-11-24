@@ -19,6 +19,7 @@ from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareRecordRelationship, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.uncertainty import OpenQuestion
+from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
 from app.core.uncertainty_enums import Priority
 from app.services.unified_lcr_retrieval import _conversation_context
 from app.services.companion_caregiver_context import build_companion_caregiver_context
@@ -115,6 +116,71 @@ def test_greeting_context_does_not_treat_default_utc_as_caregiver_local_time():
     assert context["timezone_status"] == "not_configured"
     assert context["local_datetime"] is None
     assert context["greeting_period"] == "neutral"
+
+
+def test_companion_output_validation_audit_persists_pass_and_rejection_without_raw_text(monkeypatch):
+    client = setup_client(monkeypatch)
+    try:
+        _, person_id, caregiver_id = create_session(client, "Mary Johnson")
+        db = TestingSessionLocal()
+        passed_reply = "PRIVATE_MODEL_REPLY_PASS_9c1"
+        collaboration._record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id="companion-request-pass",
+            reply=passed_reply,
+            rejection_reasons=[],
+            source_event_ids=["event-1"],
+            source_evidence_ids=["evidence-1"],
+            source_document_analysis_ids=[],
+            source_appointment_ids=[],
+            source_assertion_ids=["assertion-1"],
+            source_lcr_context_ids=[],
+            source_freshness_assessment_ids=[],
+        )
+        db.commit()
+        passed = db.query(AISafetyCheck).filter_by(
+            person_id=person_id,
+            check_name="companion_response_grounding",
+            result="passed",
+        ).one()
+        assert passed.details_json["request_id"] == "companion-request-pass"
+        assert passed.details_json["source_references"]["event_ids"] == ["event-1"]
+        assert passed_reply not in json.dumps(passed.details_json)
+
+        rejected_reply = "PRIVATE_MODEL_REPLY_REJECTED_9c1"
+        collaboration._record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id="companion-request-rejected",
+            reply=rejected_reply,
+            rejection_reasons=["unsupported_medication_claim", "unsupported_appointment_status"],
+            source_event_ids=["event-2"],
+            source_evidence_ids=["evidence-2"],
+            source_document_analysis_ids=[],
+            source_appointment_ids=["appointment-2"],
+            source_assertion_ids=[],
+            source_lcr_context_ids=[],
+            source_freshness_assessment_ids=[],
+        )
+        rejected = db.query(AIOutputRejection).filter_by(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            reason_code="companion_grounding_validation_failed",
+        ).one()
+        assert rejected.reason_text == "unsupported_medication_claim,unsupported_appointment_status"
+        assert rejected.metadata_json["request_id"] == "companion-request-rejected"
+        assert rejected_reply not in json.dumps(rejected.metadata_json)
+        assert db.query(AISafetyCheck).filter_by(
+            person_id=person_id,
+            check_name="companion_response_grounding",
+            result="rejected",
+        ).count() == 1
+        db.close()
+    finally:
+        teardown()
 
 
 def test_companion_rejects_fabricated_long_source_quotations():
