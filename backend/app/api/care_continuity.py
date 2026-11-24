@@ -5242,7 +5242,7 @@ def reconstruct_recorded_state_as_of(
             "truncated": append_only_history_truncated,
         },
         "interpretation_limit": (
-            "This projection reconstructs only targets with persisted care_state_revisions at or before the requested instant. "
+            "This projection reconstructs targets with persisted care_state_revisions and the append-only review and assessment streams explicitly listed above at or before the requested instant. "
             "It is not a complete historical Living Care Record, does not establish unrecorded facts, and does not prove the truth of stored content."
         ),
     }
