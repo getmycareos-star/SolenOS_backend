@@ -102,7 +102,7 @@ def test_greeting_context_does_not_treat_default_utc_as_caregiver_local_time():
         caregiver, grant, now=datetime(2026, 11, 24, 9, 15, tzinfo=timezone.utc)
     )
 
-    assert context["display_name"] == "Mary Johnson"
+    assert context["display_name"] == "Mary"
     assert context["timezone_status"] == "not_configured"
     assert context["local_datetime"] is None
     assert context["greeting_period"] == "neutral"
