@@ -76,6 +76,11 @@ def context_lines_to_source_records(lines: list[str]) -> list[dict[str, Any]]:
         record_type = "care_record"
         prefix = text.casefold()
         for marker, kind in (
+            ("lcr event evidence", "care_event"),
+            ("lcr care event", "care_event"),
+            ("lcr evidence", "care_evidence"),
+            ("lcr document extraction", "document_extraction"),
+            ("lcr appointment evidence", "appointment"),
             ("recorded care event", "care_event"),
             ("medication-related care event", "care_event"),
             ("caregiver-reported medication source evidence", "care_evidence"),
