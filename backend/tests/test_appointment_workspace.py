@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
@@ -4030,4 +4031,105 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
     assert "asof-completeness-foreign" not in response.text
     assert "asof-completeness-foreign-subject" not in response.text
     assert "Private evidence belonging to another care record." not in response.text
+
+def test_as_of_reconstruction_separates_event_time_from_late_recording_time(client):
+    test_client, owner, _other = client
+    person_id = owner["person"]["id"]
+    caregiver_id = owner["caregiver"]["id"]
+    monday = datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc)
+    wednesday = datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc)
+    friday = datetime(2026, 11, 6, 12, 0, tzinfo=timezone.utc)
+    original_event = {
+        "id": "asof-late-arrival-event",
+        "title": "Mobility observation",
+        "description": "Caregiver reported that Mum felt unsteady on Monday.",
+        "occurred_at": "2026-11-02T09:00:00+00:00",
+        "recorded_at": "2026-11-02T10:00:00+00:00",
+        "epistemic_status": "caregiver_reported",
+    }
+    corrected_event = {
+        **original_event,
+        "description": "Caregiver corrected the observation: Mum felt unsteady on Tuesday.",
+        "occurred_at": "2026-11-03T09:00:00+00:00",
+        "recorded_at": "2026-11-04T11:00:00+00:00",
+        "correction_status": "corrected",
+    }
+    late_document = {
+        "id": "asof-late-arrival-document",
+        "title": "Uploaded care note",
+        "text": "The note describes an unsteady episode on Sunday, November 1.",
+        "occurred_at": "2026-11-01T09:00:00+00:00",
+        "recorded_at": "2026-11-06T12:00:00+00:00",
+        "source_type": "document_extraction",
+    }
+    with TestSessionLocal() as db:
+        db.add_all([
+            CareStateRevision(
+                id="asof-late-event-revision-1",
+                person_id=person_id,
+                target_type="care_events",
+                target_id="asof-late-arrival-event",
+                revision_number=1,
+                change_kind="created",
+                before_state=None,
+                after_state=json.dumps(original_event),
+                evidence_ids=[],
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=monday,
+            ),
+            CareStateRevision(
+                id="asof-late-event-revision-2",
+                person_id=person_id,
+                target_type="care_events",
+                target_id="asof-late-arrival-event",
+                revision_number=2,
+                change_kind="updated",
+                before_state=json.dumps(original_event),
+                after_state=json.dumps(corrected_event),
+                evidence_ids=[],
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=wednesday,
+            ),
+            CareStateRevision(
+                id="asof-late-document-revision-1",
+                person_id=person_id,
+                target_type="capture_analyses",
+                target_id="asof-late-arrival-document",
+                revision_number=1,
+                change_kind="created",
+                before_state=None,
+                after_state=json.dumps(late_document),
+                evidence_ids=[],
+                changed_by_caregiver_id=caregiver_id,
+                changed_at=friday,
+            ),
+        ])
+        db.commit()
+
+    def reconstruct(as_of):
+        response = test_client.get(
+            "/api/v1/care-continuity/state-reconstruction/as-of",
+            headers={"Authorization": f"Bearer {owner['access_token']}"},
+            params={"as_of": as_of.isoformat()},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    tuesday = reconstruct(datetime(2026, 11, 3, 23, 59, tzinfo=timezone.utc))
+    tuesday_items = {item["target_id"]: item for item in tuesday["items"]}
+    assert set(tuesday_items) == {"asof-late-arrival-event"}
+    assert tuesday_items["asof-late-arrival-event"]["after_state"]["occurred_at"] == "2026-11-02T09:00:00+00:00"
+
+    thursday = reconstruct(datetime(2026, 11, 5, 23, 59, tzinfo=timezone.utc))
+    thursday_items = {item["target_id"]: item for item in thursday["items"]}
+    assert set(thursday_items) == {"asof-late-arrival-event"}
+    assert thursday_items["asof-late-arrival-event"]["after_state"]["occurred_at"] == "2026-11-03T09:00:00+00:00"
+    assert "corrected" == thursday_items["asof-late-arrival-event"]["after_state"]["correction_status"]
+
+    saturday = reconstruct(datetime(2026, 11, 7, 23, 59, tzinfo=timezone.utc))
+    saturday_items = {item["target_id"]: item for item in saturday["items"]}
+    assert set(saturday_items) == {"asof-late-arrival-event", "asof-late-arrival-document"}
+    assert saturday_items["asof-late-arrival-document"]["after_state"]["occurred_at"] == "2026-11-01T09:00:00+00:00"
+    assert saturday_items["asof-late-arrival-document"]["after_state"]["recorded_at"] == "2026-11-06T12:00:00+00:00"
+    assert saturday["coverage_status"] == "partial_revision_history"
 
