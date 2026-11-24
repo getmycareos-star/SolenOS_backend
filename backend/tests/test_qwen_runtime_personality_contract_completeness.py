@@ -154,9 +154,16 @@ def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_person
         assert system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION), workflow
         assert "NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES" in system, workflow
         for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
-            contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
-            assert contract["runtime_rule"] in system, (workflow, trait)
+            anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
             assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system, (workflow, trait)
+            for field, label in (
+                ("observable_behaviors", "Behaviour: "),
+                ("required_context", "Context: "),
+                ("prohibited_behaviors", "Prohibited: "),
+                ("violation_conditions", "Violation: "),
+                ("verification_cases", "Test: "),
+            ):
+                assert label + anchors[field] in system, (workflow, trait, field)
 
 def test_aggregate_contract_manifest_pins_all_constitution_versions():
     assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.1"
