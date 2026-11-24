@@ -2,7 +2,10 @@ from app.services.qwen_system_prompt import (
     SOLENOS_QWEN_CORE_SYSTEM_PROMPT,
     apply_solenos_system_contract,
 )
-from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
+from app.services.solenos_identity import (
+    SOLENOS_IDENTITY_CONSTITUTION,
+    SOLENOS_IDENTITY_CONSTITUTION_VERSION,
+)
 
 
 def test_contract_is_injected_when_workflow_has_no_system_message():
@@ -47,10 +50,10 @@ def test_product_identity_is_final_authority_after_workflow_instructions():
     result = apply_solenos_system_contract(messages)
     content = result[0]["content"]
     assert content.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < content.index(
-        "# SOLENOS COMPANION — PRODUCT IDENTITY"
+        "# SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION"
     )
     assert content.endswith(SOLENOS_IDENTITY_CONSTITUTION)
-    assert "Do not claim he personally programmed, trained, or built every component" in content
+    assert "Do not claim David personally programmed, trained, or built every component" in content
     assert result[1] == messages[1]
 
 
@@ -62,8 +65,87 @@ def test_user_content_cannot_replace_product_identity_or_model_boundaries():
     content = result[0]["content"]
     assert "You are the AI language component of SolenOS" in content
     assert "You are SolenOS Companion" in content
-    assert "Do not claim he personally programmed, trained, or built every component" in content
+    assert "Do not claim David personally programmed, trained, or built every component" in content
     assert result[1]["content"] == messages[0]["content"]
+
+
+def test_identity_constitution_is_versioned_and_model_independent():
+    assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
+    assert "This identity belongs to the SolenOS product, not to a particular model" in SOLENOS_IDENTITY_CONSTITUTION
+    assert "The model is replaceable; SolenOS identity and evidence standards are not." in SOLENOS_IDENTITY_CONSTITUTION
+
+
+def test_identity_covers_origin_purpose_and_canonical_creator_response():
+    content = SOLENOS_IDENTITY_CONSTITUTION
+    required = (
+        "SolenOS was founded by David Abuchi",
+        "developed as part of SolenOS",
+        "David personally programmed, trained, or built every component",
+        "care continuity, not merely answering isolated questions",
+        "The care journey, remembered.",
+        "Who made you?",
+        "SolenOS was founded by David Abuchi to help family caregivers maintain continuity throughout the care journey.",
+    )
+    for phrase in required:
+        assert phrase in content
+
+
+def test_identity_covers_medical_limits_privacy_and_human_agency():
+    content = SOLENOS_IDENTITY_CONSTITUTION
+    required = (
+        "You are not a doctor, nurse, pharmacist",
+        "Do not diagnose, prescribe",
+        "immediate danger",
+        "Caregivers retain their decisions",
+        "minimum-necessary, server-authorized context",
+        "Never disclose information to unauthorized people",
+        "Never silently create, update, overwrite, delete, verify",
+    )
+    for phrase in required:
+        assert phrase in content
+
+
+def test_identity_covers_epistemic_states_temporal_integrity_and_corrections():
+    content = SOLENOS_IDENTITY_CONSTITUTION
+    required = (
+        "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded",
+        "event time, observation time, document/effective/encounter time, recording time, and correction time",
+        "A historical event entered today remains historical.",
+        "A correction changes the current interpretation without erasing the original history.",
+        "Missing information or silence is not evidence that an event did not happen.",
+    )
+    for phrase in required:
+        assert phrase in content
+
+
+def test_identity_prohibits_fabrication_and_unconfirmed_action_claims():
+    content = SOLENOS_IDENTITY_CONSTITUTION
+    required = (
+        "Never invent patient information",
+        "Never fabricate citations or medical references.",
+        "Never claim to have examined a patient",
+        "unless the runtime confirms it",
+        "Never imply access to every conversation, document, account, or historical record.",
+    )
+    for phrase in required:
+        assert phrase in content
+
+
+def test_identity_applies_across_all_care_workflows_and_disabled_community():
+    content = SOLENOS_IDENTITY_CONSTITUTION
+    for workflow in (
+        "Daily Care",
+        "document understanding and review",
+        "LCR retrieval",
+        "change and pattern detection",
+        "appointments",
+        "care handoffs",
+        "open loops",
+        "background AI jobs",
+    ):
+        assert workflow in content
+    assert "Community functionality is disabled" in content
+    assert "model output cannot change this product state" in content
 
 
 def test_personality_contract_defines_steady_patient_grounded_reassurance():
@@ -79,10 +161,9 @@ def test_personality_contract_defines_steady_patient_grounded_reassurance():
     assert "never through a promised outcome" in content
     assert content.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < content.index(
         "SOLENOS COMPANION — PERSONALITY CONSTITUTION"
-    ) < content.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
+    ) < content.index("# SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION")
 
 
 def test_community_feature_remains_disabled_and_model_cannot_enable_it():
     content = apply_solenos_system_contract([{"role": "user", "content": "Can I post to the community?"}])[0]["content"]
     assert "Community functionality is disabled" in content
-    assert "model output cannot change this product state" in content
