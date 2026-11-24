@@ -11565,7 +11565,7 @@ class CaregiverPreferencesUpdate(BaseModel):
             try:
                 ZoneInfo(value)
             except ZoneInfoNotFoundError as exc:
-                raise ValueError("timezone must be a valid IANA timezone") from exc
+                raise ValueError("Choose a recognized time zone, such as America/New_York.") from exc
         return value
 
     @field_validator("preferred_name")
