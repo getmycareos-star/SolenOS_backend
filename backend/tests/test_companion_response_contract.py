@@ -136,7 +136,16 @@ def test_direct_care_history_recall_preserves_correction_lineage_and_never_answe
             evidence_ids=[], created_by_caregiver_id=caregiver.id,
             time_provenance="caregiver_reported",
         )
-        db.add_all([original, pending, current])
+        failed = CareEvent(
+            id="history-lineage-failed-event", person_id=person.id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2025, 2, 6, 9, 0, tzinfo=timezone.utc),
+            title="Sleep report with failed correction",
+            description="Caregiver reported that Mum slept badly.",
+            evidence_ids=[], created_by_caregiver_id=caregiver.id,
+            time_provenance="caregiver_reported",
+        )
+        db.add_all([original, pending, current, failed])
         db.flush()
         applied = Correction(
             id="history-lineage-applied-correction", person_id=person.id,
@@ -158,7 +167,17 @@ def test_direct_care_history_recall_preserves_correction_lineage_and_never_answe
             processing_status="pending",
             processing_attempts=0,
         )
-        db.add_all([applied, waiting])
+        failed_correction = Correction(
+            id="history-lineage-failed-correction", person_id=person.id,
+            target_type="care_event", target_id=failed.id,
+            original_text="Mum slept badly.",
+            corrected_text="The caregiver cannot confirm the sleep report.",
+            reason="Correction processing failed and needs review.",
+            caregiver_id=caregiver.id,
+            processing_status="failed",
+            processing_attempts=3,
+        )
+        db.add_all([applied, waiting, failed_correction])
         db.add(CareRecordRelationship(
             id="history-lineage-applied-link", person_id=person.id,
             source_type="correction", source_id=applied.id,
@@ -182,6 +201,7 @@ def test_direct_care_history_recall_preserves_correction_lineage_and_never_answe
             "Caregiver did not observe Mum sleeping poorly."
         )
         assert records[pending.id]["information_status"] == "event_correction_pending"
+        assert records[failed.id]["information_status"] == "event_currentness_unknown"
         assert records[current.id]["information_status"] == "caregiver_reported"
 
         answer = collaboration._care_history_extractive_answer(
@@ -191,6 +211,7 @@ def test_direct_care_history_recall_preserves_correction_lineage_and_never_answe
         assert "slept well" in answer.casefold()
         assert "slept poorly" not in answer.casefold()
         assert "slept through the night" not in answer.casefold()
+        assert "slept badly" not in answer.casefold()
     finally:
         db.close()
         teardown()
