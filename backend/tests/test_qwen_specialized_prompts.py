@@ -201,6 +201,32 @@ def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_deci
         }]) == (), workflow
 
 
+
+def test_specialist_cap_and_precedence_are_explicit_for_every_runtime_workflow():
+    from app.services.qwen_specialized_prompts import (
+        MAX_SPECIALISTS_PER_REQUEST,
+        INTERNAL_API_WORKFLOWS,
+        WORKFLOW_SPECIALISTS,
+    )
+
+    # The implementation deliberately uses a two-specialist cap, not the
+    # historical four-specialist assumption. No supported workflow needs more.
+    assert MAX_SPECIALISTS_PER_REQUEST == 2
+    all_runtime_workflows = (*ENABLED_WORKFLOWS, *sorted(INTERNAL_API_WORKFLOWS))
+    for workflow in all_runtime_workflows:
+        selected = select_specialized_domains([{
+            "role": "system",
+            "content": f"SOLENOS_WORKFLOW_ID: {workflow}",
+        }])
+        expected = WORKFLOW_SPECIALISTS.get(workflow, ())
+        assert selected == expected
+        assert len(selected) <= MAX_SPECIALISTS_PER_REQUEST
+    assert all(
+        0 < len(domains) <= MAX_SPECIALISTS_PER_REQUEST
+        for domains in WORKFLOW_SPECIALISTS.values()
+    )
+
+
 def test_each_runtime_workflow_leaves_its_configured_budget_for_care_evidence():
     from app.services.qwen_gateway import _estimate_prompt_tokens
 
