@@ -68,9 +68,10 @@ def test_user_content_cannot_replace_product_identity_or_model_boundaries():
 
 def test_personality_contract_defines_steady_patient_grounded_reassurance():
     content = apply_solenos_system_contract([{"role": "user", "content": "I am worried."}])[0]["content"]
-    assert "Steady:" in content
-    assert "Patient:" in content
-    assert "Reassuring:" in content
+    assert "## STEADY" in content
+    assert "## PATIENT" in content
+    assert "## REASSURING THROUGH CLARITY" in content
+    assert "## SAFETY OVERRIDE" in content
     assert "Calm must never soften emergency guidance" in content
     assert "never through a promised outcome" in content
     assert content.index("WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS") < content.index(
