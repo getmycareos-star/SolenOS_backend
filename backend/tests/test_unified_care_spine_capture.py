@@ -765,15 +765,15 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
     engine = create_engine(_postgres_url(), pool_pre_ping=True)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     suffix = uuid.uuid4().hex
-    person_id = f"companion-lineage-person-{suffix}"
-    caregiver_id = f"companion-lineage-caregiver-{suffix}"
-    corrected_event_id = f"companion-lineage-corrected-{suffix}"
-    pending_event_id = f"companion-lineage-pending-{suffix}"
-    current_event_id = f"companion-lineage-current-{suffix}"
-    applied_correction_id = f"companion-lineage-applied-{suffix}"
-    pending_correction_id = f"companion-lineage-waiting-{suffix}"
-    aggregate_event_id = f"companion-lineage-unsteadiness-{suffix}"
-    aggregate_correction_id = f"companion-lineage-unsteadiness-correction-{suffix}"
+    person_id = str(uuid.uuid4())
+    caregiver_id = str(uuid.uuid4())
+    corrected_event_id = str(uuid.uuid4())
+    pending_event_id = str(uuid.uuid4())
+    current_event_id = str(uuid.uuid4())
+    applied_correction_id = str(uuid.uuid4())
+    pending_correction_id = str(uuid.uuid4())
+    aggregate_event_id = str(uuid.uuid4())
+    aggregate_correction_id = str(uuid.uuid4())
     relationship_id = str(uuid.uuid4())
     aggregate_event_time = datetime.now(timezone.utc) - timedelta(hours=1)
 
