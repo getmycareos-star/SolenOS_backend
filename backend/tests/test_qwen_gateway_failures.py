@@ -224,6 +224,32 @@ def test_qwen_gateway_rejects_valid_json_with_unexpected_response_shape(monkeypa
     assert error.value.detail["reason"] == "unexpected_response_shape"
 
 
+@pytest.mark.parametrize(
+    ("metadata", "reason"),
+    [
+        ({"done": False}, "generation_not_completed"),
+        ({"done": True, "done_reason": "length"}, "generation_limit_reached"),
+        ({"done": "false"}, "invalid_completion_metadata"),
+    ],
+)
+def test_qwen_gateway_rejects_explicitly_incomplete_generation(monkeypatch, metadata, reason):
+    configure_gateway(monkeypatch)
+    payload = {"message": {"role": "assistant", "content": "A plausible but incomplete answer."}, **metadata}
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps(payload).encode()),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "incomplete_model_response"
+    assert error.value.detail["reason"] == reason
+    assert "No answer was accepted" in error.value.detail["message"]
+
+
 def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
     configure_gateway(monkeypatch)
     monkeypatch.setattr(
