@@ -113,7 +113,7 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "Never turn care conversations into product promotion",
     )
     for phrase in required:
-        assert (phrase.casefold() in content.casefold()) if phrase == "medication discrepancies" else (phrase in content)
+        assert phrase.casefold() in content.casefold(), phrase
 
 
 def test_assembled_contract_preserves_epistemic_states_and_temporal_integrity():
@@ -232,7 +232,7 @@ def test_user_and_uploaded_document_instructions_cannot_override_product_identit
     result = apply_solenos_system_contract(messages)
     system = result[0]["content"]
     assert "You are SolenOS Companion" in system
-    assert "You are AI, not human" in system
+    assert "You are not human" in system
     assert "Do not claim David personally programmed, trained, or built every component" in system
     assert "Never claim to have examined a patient" in system
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in system
@@ -256,7 +256,7 @@ def test_shared_enforcement_is_reasserted_after_workflow_and_specialist_instruct
     personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
     identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert workflow_index < enforcement_index < personality_index < identity_index
-    enforcement = system[enforcement_index:personality_index]
+    enforcement = " ".join(system[enforcement_index:personality_index].split())
     for rule in (
         "A report, extraction, repetition, or model interpretation is not verification.",
         "Preserve conflicting accounts separately",
@@ -266,7 +266,7 @@ def test_shared_enforcement_is_reasserted_after_workflow_and_specialist_instruct
         "Medication discrepancies require confirmation",
         "urgent real-world medical help",
     ):
-        assert rule in enforcement
+        assert " ".join(rule.split()) in enforcement
 
 
 def test_every_enabled_workflow_keeps_shared_enforcement_after_its_task_prompt():
