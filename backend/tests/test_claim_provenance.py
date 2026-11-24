@@ -641,3 +641,14 @@ def test_source_text_attribution_marker_cannot_be_dropped_from_claim():
     )
     assert result["claims"][0]["support_status"] == "not_matched_to_saved_wording"
 
+def test_document_extraction_context_resolves_capture_analysis_id():
+    from app.services.claim_provenance import context_lines_to_source_records
+
+    records = context_lines_to_source_records([
+        'LCR document extraction: {"capture_analysis_id":"capture-analysis-42",'
+        '"text":"The uploaded note describes restless sleep."}'
+    ])
+    assert len(records) == 1
+    assert records[0]["record_type"] == "document_extraction"
+    assert records[0]["record_id"] == "capture-analysis-42"
+
