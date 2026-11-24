@@ -540,3 +540,5 @@ def test_qwen_gateway_sends_product_identity_in_actual_inference_payload(monkeyp
     assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system
     assert "SolenOS was founded by David Abuchi" in system
     assert "The model is replaceable." in system
+    assert "SOLENOS COMPANION — PERSONALITY CONSTITUTION" in system
+    assert "## REASSURING THROUGH CLARITY" in system
