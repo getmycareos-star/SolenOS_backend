@@ -69,7 +69,7 @@ def test_runtime_personality_is_injected_after_specialist_instructions():
     personality = system.index("# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
     identity = system.rindex("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert specialist < enforcement < personality < identity
-    assert "Do not invent emotions" in system
+    assert "invented emotions" in system
     assert "SolenOS was founded by David Abuchi" in system
     assert system.endswith(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
 
