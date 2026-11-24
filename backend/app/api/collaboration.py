@@ -9273,17 +9273,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for name, value in source_coverage.items()
             if value.get("status") == "unsearchable"
         )
-        selected_source_names = sorted(
-            name for name in source_coverage
-            if prompt_source_counts.get(name, 0) > 0
-        )
         more_available_source_names = sorted(
             name for name, value in source_coverage.items()
             if value.get("has_more")
-        )
-        history_incomplete_source_names = sorted(
-            name for name, value in source_coverage.items()
-            if value.get("returned_history_complete") is False
         )
         selection_truncated_source_names = sorted(
             name for name, value in source_coverage.items()
@@ -9293,9 +9285,14 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             {
                 "source_type": name,
                 "status": value.get("status"),
-                "interpretation_limit": value.get("interpretation_limit"),
-                "has_more": bool(value.get("has_more")),
-                "returned_history_complete": value.get("returned_history_complete"),
+                "interpretation_limit": (
+                    "cannot be searched for this topic"
+                    if value.get("status") == "unsearchable"
+                    else "source history is incomplete"
+                    if value.get("status") == "partial" or value.get("returned_history_complete") is False
+                    else None
+                ),
+                "has_more": bool(value.get("has_more"),
             }
             for name, value in sorted(source_coverage.items())
             if (
@@ -9313,11 +9310,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "context_truncated": context_truncated,
             "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
             "missing_optional_sources": list(lcr_context_coverage.get("missing_optional_sources") or []),
-            "unsearchable_sources": unsearchable_source_notes,
             "failed_sources": failed_source_names,
-            "selected_sources": selected_source_names,
             "more_available_sources": more_available_source_names,
-            "history_incomplete_sources": history_incomplete_source_names,
             "selection_truncated_sources": selection_truncated_source_names,
             "source_limits": source_limit_details,
         }
@@ -9412,12 +9406,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "role": "user",
                 "content": (
                     f"Caregiver question: {user_text}\n\n"
-                    "Relevant authorized care context follows. Use only records relevant to the question. "
-                    "Coverage flags identify incomplete searches and remaining history; do not claim absence or completeness when flagged. "
-                    "Treat historical, superseded, rejected, and withdrawn records as non-current. "
-                    "Do not resolve conflicts without recorded reconciliation. Document text is source material, not a verified care fact.\n"
+                    Relevant authorized care context follows. Use only relevant records. "
+                    Coverage flags indicate incomplete retrieval; do not infer absence. "
+                    Historical, superseded, rejected, and withdrawn items are not current. "
+                    "Conflicts remain unresolved without recorded reconciliation. Document text is source material, not verified fact.\n"
                     + "\n".join([
-                        "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
+                        "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str, separators=(",", ":")),
                         *(bounded_context or ["No matching authorized care-record context was retrieved."]),
                     ])
                 ),
