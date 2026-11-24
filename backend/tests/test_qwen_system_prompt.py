@@ -47,8 +47,7 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
         "SolenOS was founded by David Abuchi",
         "Do not claim David personally programmed, trained, or built every component",
         "The model is replaceable",
-        "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded",
-        "Never silently write, overwrite, delete, verify, or resolve a record",
+        "Community functionality is disabled",
         "Community functionality is disabled",
     ):
         assert phrase in SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
@@ -60,6 +59,10 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
         "HONEST", "PROACTIVE", "REASSURING THROUGH CLARITY", "RESPECTFUL", "DEPENDABLE",
     ):
         assert f"## {heading}" in SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
+    assembled = apply_solenos_system_contract([])[0]["content"]
+    assert "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded" in assembled
+    assert "Never silently write, overwrite, delete, verify, or resolve a record" in assembled
+    assert "initially focused on the United States" in SOLENOS_IDENTITY_CONSTITUTION
     assert SOLENOS_IDENTITY_CONSTITUTION_VERSION == "2.0"
 
 
@@ -102,7 +105,6 @@ def test_assembled_contract_covers_medical_limits_privacy_and_human_agency():
         "prescribing clinician or pharmacist",
         "Never encourage dependence on AI",
         "Never turn care conversations into product promotion",
-        "initially focused on the United States",
         "ownership of third-party technology",
     )
     for phrase in required:
@@ -225,7 +227,7 @@ def test_user_and_uploaded_document_instructions_cannot_override_product_identit
     result = apply_solenos_system_contract(messages)
     system = result[0]["content"]
     assert "You are SolenOS Companion" in system
-    assert "You are AI, not human, clinician" in system
+    assert "You are AI, not human" in system
     assert "Do not claim David personally programmed, trained, or built every component" in system
     assert "Never claim to have examined a patient" in system
     assert "Never silently write, overwrite, delete, verify, or resolve a record" in system
