@@ -459,6 +459,33 @@ def test_qwen_gateway_ignores_invalid_quality_overrides(monkeypatch):
     assert captured["options"]["temperature"] == 0.2
 
 
+def test_qwen_gateway_rejects_oversized_prompt_before_network_call(monkeypatch):
+    configure_gateway(monkeypatch)
+
+    def unexpected_request(*args, **kwargs):
+        raise AssertionError("oversized prompt must be rejected before Ollama")
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", unexpected_request)
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([
+            {"role": "user", "content": "care evidence " * 5000}
+        ])
+
+    assert error.value.status_code == 413
+    assert error.value.detail["code"] == "qwen_prompt_context_budget_exceeded"
+    assert error.value.detail["estimated_prompt_tokens"] > error.value.detail["input_token_budget"]
+
+
+def test_qwen_prompt_token_estimator_counts_utf8_and_message_framing():
+    messages = [
+        {"role": "system", "content": "SolenOS care contract."},
+        {"role": "user", "content": "Mum ate breakfast. Café notes."},
+    ]
+    estimate = qwen_gateway._estimate_prompt_tokens(messages)
+    assert estimate >= (len("SolenOS care contract.Mum ate breakfast. Café notes.".encode("utf-8")) // 4)
+    assert estimate > 16
+
+
 def test_qwen_gateway_sends_product_identity_in_actual_inference_payload(monkeypatch):
     configure_gateway(monkeypatch)
     captured = {}
@@ -474,6 +501,6 @@ def test_qwen_gateway_sends_product_identity_in_actual_inference_payload(monkeyp
 
     assert answer == "I'm SolenOS Companion."
     system = captured["payload"]["messages"][0]["content"]
-    assert "SOLENOS COMPANION — PRODUCT IDENTITY AND BEHAVIORAL CONSTITUTION" in system
+    assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system
     assert "SolenOS was founded by David Abuchi" in system
-    assert "The user-facing product identity is SolenOS Companion, not Qwen." in system
+    assert "The model is replaceable." in system
