@@ -63,7 +63,7 @@ The shared gateway now uses the existing PostgreSQL-backed `ai_inference_metrics
 - If the successful model response cannot be durably finalized, the gateway withholds the answer and returns `inference_audit_unavailable`. A process termination after the start receipt leaves a durable `started` record for operational reconciliation.
 - Context-budget and configuration rejections are recorded as failed preflight outcomes; they are not represented as completed model invocations.
 
-The audit currently does not attach person/caregiver identifiers or individual source-record IDs at the gateway boundary. Those relationships remain in the workflow's existing conversation, output, job, and provenance records. A cross-table correlation contract is still required before claiming one-click reconstruction of every inference's full source lineage.
+For the Companion workflow, the authenticated server route now supplies the person, caregiver, conversation-session, request, source-record IDs, and bounded retrieval-coverage flags to the gateway. The metric's `person_id` foreign key and metadata-only source-reference lists connect the invocation to the exact authorized retrieval set. Raw source text, user text, and model output remain excluded. Other Qwen workflows that do not yet pass trusted `audit_context` retain workflow/prompt/context hashes but do not yet have the same person/source-level linkage; those call sites remain an explicit coverage gap.
 
 ## Verification boundary
 
