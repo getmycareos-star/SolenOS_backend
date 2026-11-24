@@ -5951,7 +5951,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     claim_source_records = _enrich_qwen_claim_source_records(
         db, person_id, context_lines_to_source_records(context_lines)
     )
-    claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
+    claim_provenance = (
+        []
+        if identity_direct_answer_used
+        else build_claim_provenance(reply, claim_source_records, validated_aggregates)
+    )
     lcr_context_coverage = None
     if shared_lcr_context is not None:
         lcr_context_coverage = {
