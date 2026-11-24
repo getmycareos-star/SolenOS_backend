@@ -3,6 +3,8 @@
 This is operational instruction, not a claim that the model is sentient or conscious.
 """
 
+from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
+
 SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 # SOLENOS — CORE INTELLIGENCE CONTRACT
 Version: 1.0
