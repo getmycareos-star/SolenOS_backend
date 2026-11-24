@@ -8,6 +8,8 @@ from app.services.qwen_specialized_prompts import (
 from app.services.qwen_workflows import ENABLED_WORKFLOWS
 from app.services.qwen_system_prompt import (
     SOLENOS_QWEN_CORE_SYSTEM_PROMPT,
+    SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
+    SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
     apply_solenos_system_contract,
 )
 from app.services.solenos_identity import SOLENOS_IDENTITY_CONSTITUTION
@@ -133,8 +135,20 @@ def test_every_enabled_workflow_has_an_explicit_specialist_or_no_specialist_deci
     assert all(workflow in ENABLED_WORKFLOWS for workflow in WORKFLOWS_WITHOUT_SPECIALISTS)
 
 
-def test_shared_system_contract_fits_a_bounded_prompt_budget():
-    assert len(SOLENOS_QWEN_CORE_SYSTEM_PROMPT) + len(SOLENOS_IDENTITY_CONSTITUTION) <= 7500
+def test_runtime_contract_and_two_specialists_fit_the_configured_context_budget():
+    runtime_base = (
+        len(SOLENOS_QWEN_CORE_SYSTEM_PROMPT)
+        + len(SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION)
+        + len(SOLENOS_RUNTIME_IDENTITY_CONSTITUTION)
+    )
+    largest_two_specialists = sum(sorted(
+        (len(value) for value in SPECIALIZED_PROMPTS.values()),
+        reverse=True,
+    )[:2])
+    # At 4096 context, reserve 96 output tokens and 128 safety tokens.
+    # 3.5 UTF-8 bytes/token is the gateway's conservative preflight estimate.
+    estimated_tokens = (runtime_base + largest_two_specialists + 8 * 3.5) / 3.5
+    assert estimated_tokens < 4096 - 96 - 128
     assert max(len(value) for value in SPECIALIZED_PROMPTS.values()) <= 1200
 
 
@@ -148,7 +162,7 @@ def test_gateway_contract_keeps_core_and_only_selected_specialist():
     system = final[0]["content"]
     assert "## LCR AUTHORITY" in system
     assert "SPECIALIST: LCR RETRIEVAL AND CONTEXT INTELLIGENCE" in system
-    assert "SPECIALIST: CAREGIVER COMPANION INTELLIGENCE" in system
+    assert "SPECIALIST: CAREGIVER COMPANION" in system
     assert "SPECIALIST: MEDICATION AND TREATMENT CONTINUITY" not in system
     assert final[1] == messages[1]
 
@@ -158,7 +172,7 @@ def test_every_qwen_request_receives_product_identity_constitution():
     system = final[0]["content"]
     assert "SOLENOS COMPANION — PRODUCT IDENTITY" in system
     assert "SolenOS was founded by David Abuchi" in system
-    assert "Do not claim he personally programmed" in system
+    assert "Do not claim David personally programmed" in system
     assert "The model is replaceable" in system
 
 
