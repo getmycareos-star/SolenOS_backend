@@ -1202,20 +1202,38 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                         stale.append("new_records:daily_care")
             if inspector.has_table("capture_analyses"):
                 analysis_table = Table("capture_analyses", metadata, autoload_with=bind)
-                if {"id", "person_id", "caregiver_id", "source_evidence_id", "created_at"}.issubset(set(analysis_table.c.keys())):
+                required_analysis_columns = {"id", "person_id", "source_evidence_id", "created_at"}
+                if required_analysis_columns.issubset(set(analysis_table.c.keys())):
                     extraction_changed = analysis_table.c.created_at > created_after
                     if "updated_at" in analysis_table.c:
                         extraction_changed = or_(extraction_changed, analysis_table.c.updated_at > created_after)
-                    new_extractions = db.execute(
-                        select(analysis_table.c.id).where(
-                            analysis_table.c.person_id == draft.person_id,
-                            analysis_table.c.caregiver_id == draft.caregiver_id,
-                            extraction_changed,
-                        )
-                    ).scalars().all()
-                    known_extractions = snapshot_ids_by_table.get("capture_analyses", set())
-                    if any(str(value) not in known_extractions for value in new_extractions):
-                        stale.append("new_records:document_extractions")
+                    if not inspector.has_table("evidence"):
+                        unknown.append("new_source_check:document_extractions")
+                    else:
+                        evidence_table = Table("evidence", metadata, autoload_with=bind)
+                        required_evidence_columns = {"id", "person_id", "type"}
+                        if not required_evidence_columns.issubset(set(evidence_table.c.keys())):
+                            unknown.append("new_source_check:document_extractions")
+                        else:
+                            extraction_query = (
+                                select(analysis_table.c.id)
+                                .select_from(analysis_table.join(
+                                    evidence_table,
+                                    analysis_table.c.source_evidence_id == evidence_table.c.id,
+                                ))
+                                .where(
+                                    analysis_table.c.person_id == draft.person_id,
+                                    evidence_table.c.person_id == draft.person_id,
+                                    evidence_table.c.type == "document",
+                                    extraction_changed,
+                                )
+                            )
+                            new_extractions = db.execute(extraction_query).scalars().all()
+                            known_extractions = snapshot_ids_by_table.get("capture_analyses", set())
+                            if any(str(value) not in known_extractions for value in new_extractions):
+                                stale.append("new_records:document_extractions")
+                else:
+                    unknown.append("new_source_check:document_extractions")
             if inspector.has_table("evidence"):
                 evidence_table = Table("evidence", metadata, autoload_with=bind)
                 if {"id", "person_id", "type", "uploaded_by_caregiver_id", "uploaded_at"}.issubset(set(evidence_table.c.keys())):
@@ -1223,7 +1241,6 @@ def _draft_source_freshness(db: Session, draft: HandoffDraft) -> dict:
                         select(evidence_table.c.id).where(
                             evidence_table.c.person_id == draft.person_id,
                             evidence_table.c.type == "document",
-                            evidence_table.c.uploaded_by_caregiver_id == draft.caregiver_id,
                             evidence_table.c.uploaded_at > created_after,
                         )
                     ).scalars().all()
@@ -1670,6 +1687,24 @@ def _daily_care_fingerprint_payload(
     observations: dict | None = None,
     correction_lineage: dict | None = None,
 ) -> dict:
+    # Model extraction is a proposal pipeline, not an authoritative LCR write.
+    # Pending, failed, and unreviewed candidate changes must not invalidate a
+    # handoff snapshot of the caregiver's persisted report. Caregiver review
+    # decisions and accepted/rejected assertions remain part of the fingerprint.
+    if isinstance(analyses, dict):
+        analysis_records = analyses.get("analyses") if isinstance(analyses.get("analyses"), list) else []
+        assertions = analyses.get("assertions") if isinstance(analyses.get("assertions"), list) else []
+    elif isinstance(analyses, list):
+        analysis_records = analyses
+        assertions = []
+    else:
+        analysis_records = []
+        assertions = []
+    caregiver_review_history = [
+        {"id": item.get("id"), "review_history": item.get("review_history")}
+        for item in analysis_records
+        if isinstance(item, dict) and item.get("review_history")
+    ]
     return {
         "id": event.id,
         "event_type": event.event_type,
@@ -1685,7 +1720,10 @@ def _daily_care_fingerprint_payload(
             {"id": row.id, "source_text_sha256": row.source_text_sha256, "source_type": row.source_type}
             for row in linked_evidence
         ],
-        "daily_review_state": analyses or [],
+        "daily_review_state": {
+            "caregiver_review_history": caregiver_review_history,
+            "assertions": assertions,
+        },
         "source_observations": observations or {"status": "not_checked", "records": []},
         "correction_lineage": correction_lineage or {
             "status": "not_checked", "corrections": [], "relationships": [],

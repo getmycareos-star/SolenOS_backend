@@ -530,3 +530,194 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
     assert member_revoked.status_code == 200, member_revoked.text
     stale_inbox = client.get("/api/v1/handoffs/inbox", headers=recipient_headers)
     assert stale_inbox.status_code == 401, stale_inbox.text
+
+
+def test_postgres_handoff_freshness_ignores_unreviewed_daily_extraction_but_detects_new_document_extraction():
+    from types import SimpleNamespace
+
+    import app.api.handoff_drafts as handoff_drafts
+    from app.models.care import CareEvent, Evidence
+    from app.models.capture_analysis import CaptureAnalysis
+    from app.models.collaboration import EvidenceUpload
+
+    client = TestClient(app)
+    session = _create_session(client, "PostgreSQL freshness caregiver")
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    draft_created_at = datetime.now(timezone.utc)
+    source_created_at = draft_created_at - timedelta(minutes=2)
+
+    daily_text = "Caregiver reports Mum ate only part of breakfast."
+    daily_evidence_id = str(uuid.uuid4())
+    daily_event_id = str(uuid.uuid4())
+    document_id = str(uuid.uuid4())
+    document_bytes = b"Care plan: current mobility support instructions."
+    document_sha = hashlib.sha256(document_bytes).hexdigest()
+
+    db = SessionLocal()
+    try:
+        daily_evidence = Evidence(
+            id=daily_evidence_id,
+            person_id=person_id,
+            type="caregiver_observation",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+            source_text=daily_text,
+            source_text_sha256=hashlib.sha256(daily_text.encode("utf-8")).hexdigest(),
+            source_type="caregiver_report",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            reported_by_label="Family caregiver",
+            uploaded_at=source_created_at,
+        )
+        daily_event = CareEvent(
+            id=daily_event_id,
+            person_id=person_id,
+            event_type="structured_daily_capture",
+            status="recorded",
+            occurred_at=source_created_at - timedelta(hours=1),
+            recorded_at=source_created_at,
+            updated_at=source_created_at,
+            title="Breakfast observation",
+            description=daily_text,
+            evidence_ids=[daily_evidence_id],
+            created_by_caregiver_id=caregiver_id,
+        )
+        document = Evidence(
+            id=document_id,
+            person_id=person_id,
+            type="document",
+            evidence_kind="uploaded_document",
+            epistemic_status="source_document",
+            source_text="Uploaded care plan; original file is preserved.",
+            source_text_sha256=hashlib.sha256(b"Uploaded care plan; original file is preserved.").hexdigest(),
+            source_type="uploaded_document",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="care-plan/freshness-test",
+            uploaded_at=source_created_at,
+        )
+        upload = EvidenceUpload(
+            evidence_id=document_id,
+            filename="care-plan.txt",
+            mime_type="text/plain",
+            content=document_bytes,
+            storage_backend="postgres",
+            size_bytes=len(document_bytes),
+            sha256=document_sha,
+            created_at=source_created_at,
+        )
+        db.add_all([daily_evidence, daily_event, document, upload])
+        db.flush()
+
+        lineage = handoff_drafts._care_event_correction_fingerprint_snapshot(
+            db, person_id, daily_event_id,
+        )
+        daily_observations = handoff_drafts._evidence_observation_snapshot(
+            db, person_id, [daily_evidence_id],
+        )
+        document_observations = handoff_drafts._evidence_observation_snapshot(
+            db, person_id, [document_id],
+        )
+        daily_fingerprint = handoff_drafts._fingerprint(
+            handoff_drafts._daily_care_fingerprint_payload(
+                daily_event,
+                [daily_evidence],
+                {"analyses": [], "assertions": []},
+                daily_observations,
+                lineage,
+            )
+        )
+        document_fingerprint = handoff_drafts._fingerprint(
+            handoff_drafts._document_upload_fingerprint_payload(
+                document, upload, [], document_observations,
+            )
+        )
+        source_records = [
+            {
+                "source_type": "daily_care_observation",
+                "source_table": "care_events",
+                "source_id": daily_event_id,
+                "source_fingerprint": daily_fingerprint,
+            },
+            {
+                "source_type": "uploaded_document",
+                "source_table": "evidence_uploads",
+                "source_id": document_id,
+                "source_fingerprint": document_fingerprint,
+            },
+        ]
+        snapshot = {
+            "integrity_version": 2,
+            "authority": "living_care_record",
+            "person_scope": person_id,
+            "source_statuses": {"daily_care": "available", "documents": "available"},
+            "source_records": source_records,
+            "evidence_lineage": {},
+            "limitations": [],
+            "retrieval_complete": True,
+            "partial_sources": [],
+            "window": {"days": 30},
+            "appointment_id": None,
+            "selected_appointment": None,
+            "snapshot_id": str(uuid.uuid4()),
+            "snapshot_at": draft_created_at.isoformat(),
+            "caregiver_scope": caregiver_id,
+        }
+        snapshot_hash_payload = {
+            key: snapshot.get(key)
+            for key in (
+                "authority", "person_scope", "source_statuses", "source_records",
+                "evidence_lineage", "limitations", "retrieval_complete", "partial_sources",
+                "window", "appointment_id", "selected_appointment", "snapshot_id",
+                "snapshot_at", "caregiver_scope",
+            )
+        }
+        snapshot["snapshot_sha256"] = handoff_drafts._fingerprint(snapshot_hash_payload)
+        draft = SimpleNamespace(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            created_at=draft_created_at,
+            source_snapshot=snapshot,
+        )
+
+        daily_analysis_time = draft_created_at + timedelta(seconds=1)
+        db.add(CaptureAnalysis(
+            id=str(uuid.uuid4()),
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=daily_event_id,
+            source_evidence_id=daily_evidence_id,
+            source_text=daily_text,
+            extraction_status="processing",
+            candidates={"observations": [], "open_questions": []},
+            review_history=[],
+            created_at=daily_analysis_time,
+            updated_at=daily_analysis_time,
+        ))
+        db.flush()
+
+        daily_freshness = handoff_drafts._draft_source_freshness(db, draft)
+        assert daily_freshness["status"] == "current", daily_freshness
+
+        document_analysis_time = draft_created_at + timedelta(seconds=2)
+        db.add(CaptureAnalysis(
+            id=str(uuid.uuid4()),
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_event_id=None,
+            source_evidence_id=document_id,
+            source_text="Care plan: current mobility support instructions.",
+            extraction_status="processing",
+            candidates={"kind": "document_extraction_v1"},
+            review_history=[],
+            created_at=document_analysis_time,
+            updated_at=document_analysis_time,
+        ))
+        db.flush()
+
+        document_freshness = handoff_drafts._draft_source_freshness(db, draft)
+        assert document_freshness["status"] == "stale", document_freshness
+        assert document_freshness["stale_source_count"] >= 1
+    finally:
+        db.rollback()
+        db.close()
