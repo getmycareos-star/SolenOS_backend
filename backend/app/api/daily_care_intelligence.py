@@ -528,6 +528,10 @@ def _fit_daily_care_prompt_context(
             bounded_records.append(bounded)
             any_source_text_truncated = any_source_text_truncated or was_truncated
         while bounded_records:
+            any_source_text_truncated = any(
+                isinstance(record, dict) and record.get("source_excerpt_truncated") is True
+                for record in bounded_records
+            )
             omitted = max(0, total_matching_records - len(bounded_records))
             selection_truncated = omitted > 0 or any_source_text_truncated or has_more
             prompt_payload = {
