@@ -165,11 +165,9 @@ def qwen_chat(
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         _log_inference_result(model, started, timeout or 0.0, "configuration_unavailable", detail.get("code", "ollama_configuration_invalid"))
         raise
-    # Keep the model context bounded, but large enough for the authorized
-    # source-grounded care context. A 1,024-token window silently truncates
-    # multi-record prompts (often to their instructions), causing grounded
-    # Companion answers to fail even when retrieval succeeded. Deployments
-    # with tighter memory limits can explicitly lower OLLAMA_NUM_CTX.
+    # Keep the model context within the Railway memory envelope. The
+    # preflight below rejects oversized requests before Ollama can truncate
+    # either operating instructions or authorized care evidence.
     try:
         num_ctx = max(1024, min(int(os.getenv("OLLAMA_NUM_CTX", "4096")), 8192))
     except (TypeError, ValueError):
