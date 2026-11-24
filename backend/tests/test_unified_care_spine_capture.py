@@ -23,7 +23,7 @@ from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareRecordRelationship, CareStateRevision
-from app.models.collaboration import EvidenceUpload
+from app.models.collaboration import ConversationMessage, ConversationSession, EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob, QwenJobEvent, QwenModelOutput, QwenSafetyEvaluation
 import app.api.daily_care_intelligence as daily_care_intelligence
 import app.api.collaboration as collaboration
@@ -953,6 +953,18 @@ def test_postgres_companion_history_retrieval_never_answers_from_corrected_or_pe
         assert "Caregiver is unsure whether Mum slept through the night." in prompt
     finally:
         with SessionLocal() as db:
+            session_ids = [
+                row.id for row in db.query(ConversationSession.id).filter(
+                    ConversationSession.person_id == person_id
+                ).all()
+            ]
+            if session_ids:
+                db.query(ConversationMessage).filter(
+                    ConversationMessage.session_id.in_(session_ids)
+                ).delete(synchronize_session=False)
+                db.query(ConversationSession).filter(
+                    ConversationSession.id.in_(session_ids)
+                ).delete(synchronize_session=False)
             db.query(AnonymousSession).filter(
                 AnonymousSession.person_id == person_id
             ).delete(synchronize_session=False)
