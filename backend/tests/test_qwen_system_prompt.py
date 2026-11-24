@@ -45,7 +45,7 @@ def test_qwen_adapter_uses_compact_kernels_derived_from_full_product_constitutio
     )
     for phrase in (
         "SolenOS was founded by David Abuchi",
-        "Do not claim he personally programmed, trained, or built every component",
+        "Do not claim David personally programmed, trained, or built every component",
         "The model is replaceable",
         "reported, observed, verified, inferred, uncertain, conflicting, missing, withdrawn, corrected, and superseded",
         "Never silently write, overwrite, delete, verify, or resolve a record",
