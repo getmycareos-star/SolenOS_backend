@@ -629,3 +629,15 @@ def test_shared_lineage_service_deduplicates_explicit_origin_but_not_hash_only_m
     assert aggregate["count"] == 2
     assert aggregate["duplicate_event_ids"] == ["event-b"]
 
+def test_source_text_attribution_marker_cannot_be_dropped_from_claim():
+    result = build_claim_provenance(
+        "Mum's mobility changed.",
+        [{
+            "record_type": "care_evidence",
+            "record_id": "attributed-source-text",
+            "source_text": "Mum's mobility changed according to Sarah.",
+            "record_status": "recorded",
+        }],
+    )
+    assert result["claims"][0]["support_status"] == "not_matched_to_saved_wording"
+
