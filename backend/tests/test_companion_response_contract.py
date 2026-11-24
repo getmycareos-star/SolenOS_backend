@@ -4298,3 +4298,51 @@ def test_detailed_evidence_lineage_is_only_sent_when_the_caregiver_asks_about_pr
     assert include("Can you explain the source lineage?") is True
     assert include("Are these reports from an independent source?") is True
     assert include("Was this information corroborated?") is True
+
+def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_match(monkeypatch):
+    client = setup_client(monkeypatch)
+
+    def unsupported_qwen(base, model, messages, options=None):
+        return "Mum's mobility has worsened."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", unsupported_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        source_text = "Caregiver reported that Mum walked less steadily yesterday."
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            id="material-claim-source",
+            person_id=person_id,
+            type="note",
+            source_text=source_text,
+            uploaded_by_caregiver_id=caregiver_id,
+            source_type="caregiver_report",
+            evidence_kind="caregiver_report",
+            epistemic_status="caregiver_reported",
+        ))
+        db.add(CareEvent(
+            id="material-claim-event",
+            person_id=person_id,
+            event_type="observation",
+            status="recorded",
+            occurred_at=datetime(2026, 11, 23, 12, 0, tzinfo=timezone.utc),
+            title="Mobility update",
+            description=source_text,
+            evidence_ids=["material-claim-source"],
+            created_by_caregiver_id=caregiver_id,
+            time_provenance="caregiver_reported",
+        ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What does the record say about Mum's mobility?"},
+        )
+        assert response.status_code == 503, response.text
+        assert "could not produce a sufficiently grounded response" in response.text.casefold()
+    finally:
+        teardown()
+
