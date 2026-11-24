@@ -14,11 +14,11 @@ from app.core.database import Base, get_db, SessionLocal as DefaultSessionLocal
 from app.main import app
 from app.models.anonymous_session import AnonymousSession
 from app.models.appointment_workspace import AppointmentWorkspaceRecord
-from app.models.care import Caregiver, CareEvent, Evidence
+from app.models.care import Caregiver, CareEvent, Correction, Evidence
 from app.models.collaboration import EvidenceUpload
 from app.models.time_location import Appointment
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareStateRevision
+from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceReviewRecord, EvidenceClaimAssessment, EvidenceCompletenessPolicy, EvidenceCompletenessAssessment, CareAssertion, CareRecordRelationship, CareStateRevision
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.open_loop import OpenLoopRecord
 
@@ -3587,4 +3587,73 @@ def test_appointment_preparation_legacy_events_inherit_lcr_correction_currentnes
         partial_context,
     )
     assert unresolved[0]["information_status"] == "event_currentness_unknown"
+
+def test_appointment_brief_includes_old_event_when_its_correction_is_recent(client):
+    test_client, owner, _ = client
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    now = datetime.now(timezone.utc)
+    event_id = "appointment-recent-correction-old-event"
+    correction_id = "appointment-recent-correction"
+    with TestSessionLocal() as db:
+        db.add(Appointment(
+            person_id=owner["person"]["id"],
+            created_by_caregiver_id=owner["caregiver"]["id"],
+            title="Recent completed visit",
+            scheduled_at=now - timedelta(days=30),
+            completed_at=now - timedelta(days=7),
+            status="completed",
+        ))
+        db.flush()
+        db.add(CareEvent(
+            id=event_id,
+            person_id=owner["person"]["id"],
+            event_type="observation",
+            status="recorded",
+            occurred_at=now - timedelta(days=60),
+            recorded_at=now - timedelta(days=60),
+            updated_at=now - timedelta(days=60),
+            title="Earlier balance report",
+            description="Caregiver reported Mum felt unsteady near the kitchen.",
+            evidence_ids=[],
+            created_by_caregiver_id=owner["caregiver"]["id"],
+            time_provenance="caregiver_reported",
+        ))
+        db.flush()
+        db.add(Correction(
+            id=correction_id,
+            person_id=owner["person"]["id"],
+            target_type="care_event",
+            target_id=event_id,
+            original_text="Mum felt unsteady near the kitchen.",
+            corrected_text="The caregiver was unsure whether Mum felt unsteady.",
+            reason="The earlier description was not certain.",
+            caregiver_id=owner["caregiver"]["id"],
+            processing_status="completed",
+            processing_attempts=1,
+        ))
+        db.flush()
+        db.add(CareRecordRelationship(
+            id="appointment-recent-correction-link",
+            person_id=owner["person"]["id"],
+            source_type="correction",
+            source_id=correction_id,
+            relationship_type="corrects",
+            target_type="care_event",
+            target_id=event_id,
+            provenance="Caregiver correction; original report retained.",
+            created_by_caregiver_id=owner["caregiver"]["id"],
+        ))
+        db.commit()
+
+    response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    events = {item["source_id"]: item for item in response.json()["events"]}
+    assert event_id in events
+    assert events[event_id]["information_status"] == "historical_event"
+    assert events[event_id]["corrections"][0]["corrected_text"] == (
+        "The caregiver was unsure whether Mum felt unsteady."
+    )
 
