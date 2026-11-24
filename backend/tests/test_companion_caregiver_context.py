@@ -411,3 +411,19 @@ def test_companion_context_marks_returning_stage_without_injecting_conversation_
 def test_companion_context_keeps_conversation_stage_unknown_when_history_was_not_checked():
     context = build_companion_caregiver_context(_caregiver(), _grant())
     assert context["conversation_stage"] == "unknown"
+
+
+
+def test_generic_family_relationship_default_is_not_misrepresented_as_recorded_relationship():
+    caregiver = _caregiver(relationship="Family")
+    context = build_companion_caregiver_context(caregiver, _grant())
+    assert context["relationship"] is None
+
+    identity = build_companion_prompt_identity_context(context, "Margaret Williams")
+    assert identity["caregiver_relationship"] is None
+
+
+def test_specific_recorded_caregiver_relationship_is_preserved():
+    caregiver = _caregiver(relationship="Daughter")
+    context = build_companion_caregiver_context(caregiver, _grant())
+    assert context["relationship"] == "Daughter"
