@@ -863,6 +863,29 @@ def test_completed_document_extraction_cannot_override_pending_original_evidence
     assert unmatched_material_claims(provenance)
 
 
+def test_document_claim_with_withdrawn_original_evidence_is_historical_only():
+    provenance = build_claim_provenance(
+        "The document reports that Mum felt dizzy.",
+        [{
+            "record_type": "document_extraction",
+            "record_id": "extraction-with-deleted-source",
+            "source_text": "The document reports that Mum felt dizzy.",
+            "record_status": "completed",
+            "related_evidence": [{
+                "record_id": "evidence-deleted",
+                "record_status": "reported",
+                "source_lifecycle_status": "deleted_by_caregiver",
+            }],
+            "person_id": "person-1",
+        }],
+        expected_person_id="person-1",
+    )
+    reference = provenance["claims"][0]["source_references"][0]
+    assert reference["historical_only"] is True
+    assert provenance["claims"][0]["support_status"] == "matched_historical_only"
+    assert unmatched_material_claims(provenance)
+
+
 def test_caregiver_deleted_evidence_cannot_support_a_current_claim():
     provenance = build_claim_provenance(
         "Caregiver reported that Mum felt dizzy.",
