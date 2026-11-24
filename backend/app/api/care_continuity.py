@@ -4916,6 +4916,7 @@ def reconstruct_recorded_state_as_of(
             "rationale": row.rationale,
             "criteria": list(row.criteria or []),
             "policy_version": row.policy_version,
+            "source_attribution_snapshot": row.source_attribution_snapshot,
             "reviewed_by_caregiver_id": (
                 str(row.reviewed_by_caregiver_id)
                 if row.reviewed_by_caregiver_id and str(row.reviewed_by_caregiver_id) in authorized_review_reviewer_ids else None
@@ -4974,6 +4975,30 @@ def reconstruct_recorded_state_as_of(
                     Evidence.id.in_(assessment_evidence_ids),
                 ).all()
             }
+        superseded_assessment_ids = {
+            str(row.supersedes_assessment_id)
+            for row in assessment_rows if row.supersedes_assessment_id
+        }
+        authorized_superseded_assessment_ids = set()
+        if superseded_assessment_ids:
+            authorized_superseded_assessment_ids = {
+                str(value) for (value,) in db.query(EvidenceClaimAssessment.id).filter(
+                    EvidenceClaimAssessment.person_id == person_id,
+                    EvidenceClaimAssessment.id.in_(superseded_assessment_ids),
+                ).all()
+            }
+        superseded_claim_ids = {
+            str(row.superseded_by_claim_id)
+            for row in assessment_rows if row.superseded_by_claim_id
+        }
+        authorized_superseded_claim_ids = set()
+        if superseded_claim_ids:
+            authorized_superseded_claim_ids = {
+                str(value) for (value,) in db.query(CareAssertion.id).filter(
+                    CareAssertion.person_id == person_id,
+                    CareAssertion.id.in_(superseded_claim_ids),
+                ).all()
+            }
         claim_assessment_history_status = "available" if assessment_rows else "empty"
         for row in assessment_rows:
             linked_evidence = []
@@ -5004,6 +5029,14 @@ def reconstruct_recorded_state_as_of(
                 "status": row.status,
                 "rationale": row.rationale,
                 "policy_version": row.policy_version,
+                "supersedes_assessment_id": (
+                    str(row.supersedes_assessment_id)
+                    if row.supersedes_assessment_id and str(row.supersedes_assessment_id) in authorized_superseded_assessment_ids else None
+                ),
+                "superseded_by_claim_id": (
+                    str(row.superseded_by_claim_id)
+                    if row.superseded_by_claim_id and str(row.superseded_by_claim_id) in authorized_superseded_claim_ids else None
+                ),
                 "evidence_links": linked_evidence,
                 "reviewed_by_caregiver_id": (
                     str(row.reviewed_by_caregiver_id)
@@ -5053,6 +5086,13 @@ def reconstruct_recorded_state_as_of(
         )
         append_only_history_truncated = append_only_history_truncated or len(freshness_rows) > limit
         freshness_rows = freshness_rows[:limit]
+        freshness_policy_ids = {str(row.policy_id) for row in freshness_rows}
+        freshness_policy_by_id = {
+            str(policy.id): policy for policy in db.query(EvidenceFreshnessPolicy).filter(
+                EvidenceFreshnessPolicy.person_id == person_id,
+                EvidenceFreshnessPolicy.id.in_(freshness_policy_ids),
+            ).all()
+        } if freshness_policy_ids else {}
         freshness_reviewer_ids = {
             str(row.assessed_by_caregiver_id) for row in freshness_rows if row.assessed_by_caregiver_id
         }
@@ -5070,6 +5110,10 @@ def reconstruct_recorded_state_as_of(
             "evidence_id": str(row.evidence_id),
             "policy_id": str(row.policy_id),
             "policy_version": row.policy_version,
+            "policy_domain": freshness_policy_by_id[row.policy_id].domain_key if str(row.policy_id) in freshness_policy_by_id else None,
+            "policy_max_age_days": freshness_policy_by_id[row.policy_id].max_age_days if str(row.policy_id) in freshness_policy_by_id else None,
+            "policy_historical_after_days": freshness_policy_by_id[row.policy_id].historical_after_days if str(row.policy_id) in freshness_policy_by_id else None,
+            "policy_rationale": freshness_policy_by_id[row.policy_id].rationale if str(row.policy_id) in freshness_policy_by_id else None,
             "freshness_status": row.freshness_status,
             "source_time": row.source_time.isoformat() if row.source_time else None,
             "source_time_kind": row.source_time_kind,
@@ -5119,6 +5163,13 @@ def reconstruct_recorded_state_as_of(
         )
         append_only_history_truncated = append_only_history_truncated or len(completeness_rows) > limit
         completeness_rows = completeness_rows[:limit]
+        completeness_policy_ids = {str(row.policy_id) for row in completeness_rows}
+        completeness_policy_by_id = {
+            str(policy.id): policy for policy in db.query(EvidenceCompletenessPolicy).filter(
+                EvidenceCompletenessPolicy.person_id == person_id,
+                EvidenceCompletenessPolicy.id.in_(completeness_policy_ids),
+            ).all()
+        } if completeness_policy_ids else {}
         completeness_reviewer_ids = {
             str(row.assessed_by_caregiver_id) for row in completeness_rows if row.assessed_by_caregiver_id
         }
@@ -5195,6 +5246,9 @@ def reconstruct_recorded_state_as_of(
             "assessment_id": str(row.id),
             "policy_id": str(row.policy_id),
             "policy_version": row.policy_version,
+            "policy_domain": completeness_policy_by_id[row.policy_id].domain_key if str(row.policy_id) in completeness_policy_by_id else None,
+            "policy_purpose": completeness_policy_by_id[row.policy_id].purpose_key if str(row.policy_id) in completeness_policy_by_id else None,
+            "policy_rationale": completeness_policy_by_id[row.policy_id].rationale if str(row.policy_id) in completeness_policy_by_id else None,
             "subject_type": row.subject_type,
             "subject_id": subject_id,
             "subject_scope_validation": "same_person_verified",
