@@ -10533,6 +10533,36 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 failed_rules.append("unsupported_record_reference")
             if _caregiver_response_needs_revision(user_text, reply):
                 failed_rules.append("caregiver_interaction_contract")
+            deterministic_source_answer = bool(
+                emergency
+                or identity_direct_answer_used
+                or care_history_direct_answer_used
+                or caregiver_question_direct_answer_used
+                or medication_dose_recall_fallback_used
+                or care_history_extractive_fallback_used
+                or low_capacity_support_fallback_used
+                or document_extractive_fallback_used
+                or unsupported_trend
+                or conflict_response
+                or missing_measurement_reply
+                or medication_change_reply
+            )
+            _record_companion_output_validation(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                request_id=companion_request_id,
+                reply=reply,
+                rejection_reasons=failed_rules or ["response_validation_failed"],
+                ai_generated=not deterministic_source_answer,
+                source_event_ids=source_event_ids,
+                source_evidence_ids=source_evidence_ids,
+                source_document_analysis_ids=source_document_analysis_ids,
+                source_appointment_ids=source_appointment_ids,
+                source_assertion_ids=source_assertion_ids,
+                source_lcr_context_ids=source_lcr_context_ids,
+                source_freshness_assessment_ids=source_freshness_assessment_ids,
+            )
             logger.warning(
                 "Companion response rejected after bounded repairs: rules=%s",
                 ",".join(dict.fromkeys(failed_rules)) or "unknown",
@@ -10705,6 +10735,23 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             for identifier in dict.fromkeys(identifiers)
         )
     source_record_refs.extend(source_lcr_record_refs)
+
+    _record_companion_output_validation(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        request_id=companion_request_id,
+        reply=reply,
+        rejection_reasons=[],
+        ai_generated=ai_generated,
+        source_event_ids=source_event_ids,
+        source_evidence_ids=source_evidence_ids,
+        source_document_analysis_ids=source_document_analysis_ids,
+        source_appointment_ids=source_appointment_ids,
+        source_assertion_ids=source_assertion_ids,
+        source_lcr_context_ids=source_lcr_context_ids,
+        source_freshness_assessment_ids=source_freshness_assessment_ids,
+    )
 
     # Build claim-by-claim references from the exact records Qwen was allowed to
     # use. A sentence is linked only when its wording appears in that source;
