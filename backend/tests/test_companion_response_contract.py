@@ -4221,3 +4221,27 @@ def test_direct_care_history_recall_marks_linked_evidence_read_failure_partial()
     assert result["status"] == "partial"
     assert result["has_more"] is True
     assert "Linked source evidence could not be retrieved" in result["interpretation_limit"]
+
+
+def test_direct_care_history_event_read_failure_is_not_reported_as_empty_history():
+    class Database:
+        def begin_nested(self):
+            return nullcontext()
+
+        def query(self, model):
+            raise SQLAlchemyError("simulated care-event read failure")
+
+    result = collaboration._care_history_recall_context_lines(
+        Database(),
+        "authorized-person",
+        "What did I record about the medication dose?",
+    )
+
+    assert result["event_lines"] == []
+    assert result["evidence_lines"] == []
+    assert result["status"] == "partial"
+    assert result["has_more"] is True
+    assert result["correction_lineage_complete"] is False
+    assert result["evidence_lookup_complete"] is False
+    assert result["retrieval_complete"] is False
+    assert "Care-event history could not be retrieved" in result["interpretation_limit"]
