@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care_continuity import CareAssertion
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Caregiver
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation, QwenJobEvent
 from app.models.collaboration import ConversationMessage
 
@@ -50,6 +50,17 @@ def create_session(client, name):
     return response.json()
 
 
+def configure_test_timezone(session, timezone_name="America/New_York"):
+    db = TestingSessionLocal()
+    try:
+        caregiver = db.query(Caregiver).filter_by(id=session["caregiver"]["id"]).one()
+        caregiver.timezone = timezone_name
+        caregiver.timezone_configured = True
+        db.commit()
+    finally:
+        db.close()
+
+
 def send(client, session, message):
     return client.post("/api/v1/conversation/message",
         headers={"Authorization": f"Bearer {session['access_token']}"},
@@ -82,6 +93,7 @@ def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypa
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_chat)
     try:
         first = create_session(client, "Caregiver one")
+        configure_test_timezone(first)
         headers = {"Authorization": "Bearer " + first["access_token"]}
         payload = {"person_id": first["person"]["id"], "text": source, "client_turn_id": "companion-conversation-only-0001"}
         response = client.post("/api/v1/conversation/message", headers=headers, json=payload)
@@ -311,6 +323,7 @@ def test_companion_care_report_requires_explicit_creation_and_separate_acceptanc
     )
     try:
         first = create_session(client, "Caregiver one")
+        configure_test_timezone(first)
         headers = {"Authorization": f"Bearer {first['access_token']}"}
         response = send(client, first, source)
         assert response.status_code == 200, response.text
