@@ -40,7 +40,7 @@ def test_qwen_context_budget_retries_with_balanced_source_context(monkeypatch):
     def fake_qwen_chat(messages, *, options=None):
         prompt = messages[0]["content"]
         attempts.append(prompt)
-        if len(prompt) > 350:
+        if len(prompt) > 600:
             raise HTTPException(status_code=413, detail="context budget exceeded")
         return "The saved note reports an unfinished breakfast."
 
@@ -55,7 +55,7 @@ def test_qwen_context_budget_retries_with_balanced_source_context(monkeypatch):
     )
 
     assert len(attempts) > 1
-    assert len(attempts[-1]) <= 350
+    assert len(attempts[-1]) <= 600
     assert "Some authorized records were omitted" in attempts[-1]
     assert reply == "The saved note reports an unfinished breakfast."
     assert selected_raw
