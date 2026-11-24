@@ -824,6 +824,8 @@ def record_response(loop_id: str, payload: EvidenceAction, request: Request, db:
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "response_recorded", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     if loop.loop_type not in {"awaiting_response", "professional_input", "follow_up"}:
         raise HTTPException(status_code=409, detail="This loop type does not accept a response event")
     _validate_source_evidence_references(db, person_id, payload.evidence, required=loop.loop_type == "professional_input")
@@ -888,6 +890,8 @@ def record_action(loop_id: str, payload: EvidenceAction, request: Request, db: S
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "action_recorded", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     _validate_source_evidence_references(db, person_id, payload.evidence)
     before = _snapshot(loop)
     loop.action_evidence = [*(loop.action_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
@@ -922,6 +926,8 @@ def reconcile_contradiction(loop_id: str, payload: EvidenceAction, request: Requ
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "contradiction_reconciled", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     if loop.loop_type != "contradiction":
         raise HTTPException(status_code=409, detail="Only contradiction loops can be reconciled")
     if not payload.evidence:
@@ -952,6 +958,8 @@ def record_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_reported", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     _validate_source_evidence_references(db, person_id, payload.evidence)
     before = _snapshot(loop)
     loop.outcome_evidence = [*(loop.outcome_evidence or []), {"text": payload.text, "evidence": payload.evidence, "recorded_at": datetime.now(timezone.utc).isoformat()}]
@@ -970,6 +978,8 @@ def verify_outcome(loop_id: str, payload: EvidenceAction, request: Request, db: 
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_attested", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     if not payload.evidence or not (loop.verification_rule or payload.verification_rule):
         raise HTTPException(status_code=409, detail="Outcome verification requires source evidence and an explicit verification rule")
     _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
@@ -1007,6 +1017,8 @@ def corroborate_outcome(loop_id: str, payload: EvidenceAction, request: Request,
     replay = _replay_event(db, person_id, caregiver_id, loop_id, "outcome_corroborated", payload.idempotency_key, payload)
     if replay is not None:
         return replay
+    if payload.expected_version is not None:
+        _require_expected_version(loop, payload.expected_version)
     if not payload.verification_rule and not loop.verification_rule:
         raise HTTPException(status_code=409, detail="Outcome corroboration requires an explicit verification rule")
     evidence_ids = _validate_source_evidence_references(db, person_id, payload.evidence, required=True)
