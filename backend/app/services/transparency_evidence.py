@@ -295,7 +295,7 @@ def build_transparency_evidence(
                 "has_more_events": has_more_audit,
             },
         })
-        coverage["audit_activity"] = "partial" if has_more_audit else "complete_recent_window"
+        coverage["audit_activity"] = "partial" if has_more_audit else ("complete_recent_window" if can_manage_members else "limited_actor_scope")
     elif can_view_lcr:
         items.append({
             "kind": "audit_activity",
@@ -323,7 +323,8 @@ def build_transparency_evidence(
         export_rows = []
         export_count = 0
         exports_have_more = False
-        if _table_available(db, "privacy_export_artifacts"):
+        exports_available = _table_available(db, "privacy_export_artifacts")
+        if exports_available:
             export_query = db.query(PrivacyExportArtifact).filter(
                 PrivacyExportArtifact.person_id == person_id,
                 PrivacyExportArtifact.caregiver_id == caregiver_id,
@@ -360,11 +361,12 @@ def build_transparency_evidence(
                     "downloaded_at": _iso(row.downloaded_at),
                     "status": "expired" if _is_expired(row.expires_at, now) else "artifact_present",
                 } for row in export_rows[:MAX_RECENT_ITEMS]],
-                "export_count": int(export_count),
-                "has_more_exports": exports_have_more,
+                "export_count": int(export_count) if exports_available else None,
+                "has_more_exports": exports_have_more if exports_available else None,
+                "export_inventory_status": "available" if exports_available else "unavailable",
             },
         })
-        coverage["privacy_requests"] = "partial" if has_more_requests else "complete_recent_window"
+        coverage["privacy_requests"] = "partial" if (has_more_requests or not exports_available or exports_have_more) else "complete_recent_window"
     else:
         items.append({
             "kind": "privacy_data_control_operations",
