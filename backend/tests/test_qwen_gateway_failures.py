@@ -298,6 +298,7 @@ def test_qwen_gateway_rejects_empty_model_output(monkeypatch):
 
 def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
+    monkeypatch.setattr(qwen_gateway, "_complete_inference_metric", lambda *args, **kwargs: True)
     captured = {}
     monkeypatch.setattr(
         qwen_gateway,
@@ -319,6 +320,7 @@ def test_qwen35_gateway_disables_thinking_and_returns_user_visible_content(monke
 
 def test_qwen35_gateway_rejects_thinking_only_response(monkeypatch):
     monkeypatch.setattr(qwen_gateway, "_persist_inference_metric", lambda _metric: True)
+    monkeypatch.setattr(qwen_gateway, "_complete_inference_metric", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         qwen_gateway,
         "get_ollama_config",
