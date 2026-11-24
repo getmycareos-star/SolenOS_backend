@@ -4677,3 +4677,86 @@ def test_companion_receives_only_authenticated_caregivers_own_responsibilities_a
         assert "Other caregiver transport follow-up" not in json.dumps(context["assigned_open_loops"])
     finally:
         teardown()
+
+
+def test_companion_month_count_requires_explicit_caregiver_timezone():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        person = Person(id="timezone-count-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="timezone-count-caregiver", name="Family caregiver",
+            relationship="family", person_id=person.id,
+            timezone="UTC", timezone_configured=False,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        result = collaboration._requested_event_aggregates(
+            db, person.id, caregiver.id,
+            "How many unsteady incidents happened this month?",
+        )
+        assert result[0]["status"] == "timezone_not_configured"
+        assert result[0]["count"] is None
+    finally:
+        db.close()
+        teardown()
+
+
+def test_notification_timezone_database_default_does_not_create_companion_timezone_conflict():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        from app.models.notifications import CareNotificationPreference
+
+        person = Person(id="timezone-default-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="timezone-default-caregiver", name="Family caregiver",
+            relationship="family", person_id=person.id,
+            timezone="America/Los_Angeles", timezone_configured=True,
+        )
+        # The notification row's UTC value is only a database default. With no
+        # explicit update timestamp it is not evidence of a caregiver choice.
+        preference = CareNotificationPreference(
+            person_id=person.id, caregiver_id=caregiver.id,
+            timezone_name="UTC", updated_at=None,
+        )
+        db.add_all([person, caregiver, preference])
+        db.commit()
+        result = collaboration._requested_event_aggregates(
+            db, person.id, caregiver.id,
+            "How many unsteady incidents happened this month?",
+        )
+        assert result[0]["status"] != "timezone_conflict"
+    finally:
+        db.close()
+        teardown()
+
+
+def test_explicit_notification_timezone_mismatch_blocks_companion_month_window():
+    Base.metadata.create_all(bind=engine)
+    db = TestingSessionLocal()
+    try:
+        from app.models.notifications import CareNotificationPreference
+
+        person = Person(id="timezone-conflict-person", name="Care recipient")
+        caregiver = Caregiver(
+            id="timezone-conflict-caregiver", name="Family caregiver",
+            relationship="family", person_id=person.id,
+            timezone="America/Los_Angeles", timezone_configured=True,
+        )
+        preference = CareNotificationPreference(
+            person_id=person.id, caregiver_id=caregiver.id,
+            timezone_name="America/New_York",
+            updated_at=datetime(2026, 11, 20, tzinfo=timezone.utc),
+        )
+        db.add_all([person, caregiver, preference])
+        db.commit()
+        result = collaboration._requested_event_aggregates(
+            db, person.id, caregiver.id,
+            "How many unsteady incidents happened this month?",
+        )
+        assert result[0]["status"] == "timezone_conflict"
+        assert result[0]["count"] is None
+    finally:
+        db.close()
+        teardown()
