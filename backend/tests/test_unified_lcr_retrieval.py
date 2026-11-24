@@ -1669,8 +1669,9 @@ def test_temporal_retrieval_uses_calendar_months_not_fixed_30_day_approximation(
     assert leap_window["start"] == "2024-02-29T00:00:00+00:00"
 
 def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match():
-    engine, connection = _sqlite_retrieval_db()
+    engine, connection, schema = _postgres_conversation_db()
     try:
+        _load_source_schema.cache_clear()
         now = datetime.now(UTC)
         with connection.begin():
             connection.execute(Person.__table__.insert(), {
@@ -1718,8 +1719,9 @@ def test_query_retrieval_scans_beyond_250_candidates_and_keeps_old_exact_match()
             item["id"] for item in events["items"]
         }
     finally:
-        connection.close()
-        engine.dispose()
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
+
 
 def test_one_failed_care_source_does_not_hide_successful_source_reads():
     from sqlalchemy.exc import SQLAlchemyError
@@ -2417,10 +2419,13 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
                 created_at=uploaded_at,
             )
             db.add(extraction)
+            person_id = person.id
+            caregiver_id = caregiver.id
+            extraction_id = extraction.id
             db.commit()
 
             historical = build_lcr_context(
-                db, person.id, caregiver_id=caregiver.id,
+                db, person_id, caregiver_id=caregiver_id,
                 temporal_window={
                     "start": "2025-03-04T00:00:00+00:00",
                     "end": "2025-03-04T23:59:59.999999+00:00",
@@ -2431,7 +2436,7 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
             )
 
         documents = historical["sources"]["document_extractions"]
-        assert [row["id"] for row in documents["items"]] == [extraction.id]
+        assert [row["id"] for row in documents["items"]] == [extraction_id]
         assert documents["candidate_scan_complete"] is True
         assert documents["status"] == "available"
     finally:
