@@ -126,6 +126,7 @@ def test_each_personality_trait_has_a_complete_machine_readable_acceptance_contr
         "prohibited_behaviors",
         "violation_conditions",
         "verification_cases",
+        "runtime_rule",
     }
     for trait, contract in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS.items():
         assert required_fields.issubset(contract), trait
@@ -155,7 +156,7 @@ def test_trait_acceptance_contracts_cover_distinct_context_and_failure_modes():
 def test_runtime_personality_kernel_is_derived_from_the_canonical_trait_contracts():
     full = " ".join(SOLENOS_PERSONALITY_CONSTITUTION.split())
     assert SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION.startswith(
-        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\\nVersion: 2.3"
+        "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER\nVersion: 2.3"
     )
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         rule = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]["runtime_rule"]
