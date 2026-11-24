@@ -946,7 +946,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
         EvidenceCompletenessAssessment,
         EvidenceCompletenessPolicy,
     )
-    from app.api import collaboration
+    import app.api.collaboration as collaboration
 
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
