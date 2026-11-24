@@ -150,6 +150,7 @@ def list_delta_runs(person_id: str, request: Request, limit: int = 25, offset: i
             evidence_rows = db.query(Evidence).filter(
                 Evidence.person_id == scoped_person_id,
                 Evidence.id.in_(source_ids),
+                Evidence.evidence_status.is_(None) | (Evidence.evidence_status != "deleted_by_caregiver"),
             ).all()
             if len(evidence_rows) != len(set(source_ids)):
                 changed_source_count += len(set(source_ids) - {str(item.id) for item in evidence_rows})
