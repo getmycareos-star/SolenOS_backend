@@ -7060,6 +7060,7 @@ def _caregiver_interaction_guidance(user_text: str) -> str:
     low_capacity = is_low_capacity_caregiver_message(text)
     pause_request = re.search(
         r"\b(?:please stop|stop for now|enough for now|i need to stop|i want to stop|"
+        r"i(?:'ve| have) had enough and need to stop|"
         r"i need a pause|i want a pause|i need to pause|i want to pause|let's pause|not now|"
         r"i don't want to talk(?: about this)?|i do not want to talk(?: about this)?|"
         r"leave it for now|that's enough)\b",
