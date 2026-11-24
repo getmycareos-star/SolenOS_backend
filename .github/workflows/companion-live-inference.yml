@@ -9,6 +9,8 @@ on:
     paths:
       - ".github/workflows/companion-live-inference.yml"
       - "backend/app/services/qwen*"
+      - "backend/app/services/solenos_identity.py"
+      - "backend/tests/test_qwen_calm_personality.py"
       - "backend/app/services/delta_engine.py"
       - "backend/app/services/situation.py"
       - "backend/app/schemas/situation.py"
