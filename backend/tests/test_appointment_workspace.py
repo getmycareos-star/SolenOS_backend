@@ -3729,6 +3729,19 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
                 created_at=before,
             ),
             EvidenceReviewRecord(
+                id="asof-review-foreign-reviewer",
+                person_id=person_id,
+                evidence_id=evidence.id,
+                review_type="reliability",
+                outcome="unverified",
+                rationale="Reviewer belongs to another care record.",
+                criteria=[],
+                policy_version="review-v1",
+                source_attribution_snapshot="{}",
+                reviewed_by_caregiver_id=other["caregiver"]["id"],
+                created_at=before,
+            ),
+            EvidenceReviewRecord(
                 id="asof-review-after",
                 person_id=person_id,
                 evidence_id=evidence.id,
@@ -3804,7 +3817,11 @@ def test_as_of_projection_includes_person_scoped_append_only_review_history(clie
     assert response.status_code == 200, response.text
     history = response.json()["append_only_history"]
     assert history["evidence_reviews_status"] == "available"
-    assert [item["review_id"] for item in history["evidence_reviews"]] == ["asof-review-before"]
+    assert [item["review_id"] for item in history["evidence_reviews"]] == [
+        "asof-review-before", "asof-review-foreign-reviewer"
+    ]
+    assert history["evidence_reviews"][1]["reviewed_by_caregiver_id"] is None
+    assert history["evidence_reviews"][1]["reviewer_scope_validation"] == "reviewer_not_verified"
     assert history["claim_assessments_status"] == "available"
     assert [item["assessment_id"] for item in history["claim_assessments"]] == [
         "asof-claim-assessment-before"
