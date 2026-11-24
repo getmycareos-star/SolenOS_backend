@@ -413,10 +413,15 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
 
     app.dependency_overrides[get_db] = override_db
     monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    import json
+    from app.services.qwen_gateway import _enforce_prompt_context_budget
+    from app.services.qwen_specialized_prompts import apply_specialized_intelligence
+    from app.services.qwen_system_prompt import apply_solenos_system_contract
+
     captured = []
 
     def fake_chat(base, model, messages, options=None):
-        captured.append(messages)
+        captured.append({"messages": messages, "options": options or {}})
         return "The saved care record contains one caregiver-reported sleep observation."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
@@ -465,10 +470,18 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
         )
         assert response.status_code == 200, response.text
         assert captured, "the bounded assistant request must reach the model adapter"
-        user_message = next(item for item in captured[0] if item["role"] == "user")["content"]
+        prompt = captured[0]["messages"]
+        user_message = next(item for item in prompt if item["role"] == "user")["content"]
         coverage_line = next(
             line for line in user_message.splitlines()
             if line.startswith("Retrieval coverage: ")
+        )
+        # Reproduce the exact preflight transformations used by qwen_chat.
+        prepared_prompt = apply_solenos_system_contract(apply_specialized_intelligence(prompt))
+        _enforce_prompt_context_budget(
+            prepared_prompt,
+            num_ctx=int(os.getenv("OLLAMA_NUM_CTX", "4096")),
+            num_predict=int(os.getenv("OLLAMA_NUM_PREDICT", "96")),
         )
         model_coverage = json.loads(coverage_line.partition(": ")[2])
         assert "legacy_optional" in model_coverage["failed_sources"]
