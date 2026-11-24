@@ -304,6 +304,7 @@ def test_explicit_temporal_window_fetches_all_matching_history_pages():
     assert collaboration._should_fetch_full_lcr_context_pages(
         {
             "temporal_window": None,
+            "history_coverage": "query_scanned_ranked_subset",
             "sources": {
                 "events": {"has_more": True},
                 "companion_conversation": {"has_more": False},
@@ -697,13 +698,12 @@ def test_companion_generates_from_authorized_lcr_context_without_writing_care_ev
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(messages, *, timeout=None, options=None):
         captured["messages"] = messages
         captured["options"] = options
         return "Poor sleep was reported last night; one report cannot establish a trend."
 
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
     try:
         token, person_id, caregiver_id = create_session(client)
         # Exercise the same scoped name-save endpoint used by CareRecipientNameGate.
@@ -1304,12 +1304,11 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
     client = setup_client(monkeypatch)
     captured = {}
 
-    def fake_qwen(base, model, messages, options=None):
+    def fake_qwen(messages, *, timeout=None, options=None):
         captured["messages"] = messages
         return "The record has one observation, so there is not enough information to establish a pattern."
 
-    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.railway.internal", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen)
     try:
         token, person_id, _ = create_session(client)
         response = client.post(
