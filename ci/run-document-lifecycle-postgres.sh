@@ -17,5 +17,9 @@ python -m pytest \
   backend/tests/test_companion_care_update_postgres.py \
   -q -s
 
+# The transparency provider must be exercised against the migrated PostgreSQL schema,
+# not only the SQLite unit-test fallback.
+python -m pytest backend/tests/test_transparency_evidence.py -q -s
+
 cd /workspace/backend
 python scripts/postgres_anonymous_e2e.py
