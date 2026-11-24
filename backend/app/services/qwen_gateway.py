@@ -234,6 +234,8 @@ def _begin_inference_metric(model: str, audit_metadata: dict) -> str | None:
     metric = AIInferenceMetric(
         id=metric_id,
         person_id=audit_metadata.get("person_id"),
+        job_id=audit_metadata.get("job_id"),
+        output_id=audit_metadata.get("output_id"),
         outcome="started",
         metrics_json={**audit_metadata, "model": model, "invocation_state": "started"},
     )
@@ -926,6 +928,8 @@ def _log_inference_result(
         metric = AIInferenceMetric(
             id=str(uuid.uuid4()),
             person_id=(audit_metadata or {}).get("person_id"),
+            job_id=(audit_metadata or {}).get("job_id"),
+            output_id=(audit_metadata or {}).get("output_id"),
             latency_ms=elapsed_ms,
             input_tokens=prompt_tokens if isinstance(prompt_tokens, int) else None,
             output_tokens=output_tokens if isinstance(output_tokens, int) else None,
