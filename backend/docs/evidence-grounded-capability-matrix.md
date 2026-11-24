@@ -77,3 +77,12 @@ At the latest observed frontend production workflow, the production build and va
 - Regression coverage was added for historical cutoffs, cross-person review/assessment isolation, reviewer-scope redaction, and evidence-link filtering.
 - Exact-current-main backend and PostgreSQL execution evidence remains pending. The endpoint continues to report partial revision-history coverage and is not a complete historical Living Care Record reconstruction.
 
+### Additional Phase 2/3 increment — append-only freshness and completeness history
+
+- The bounded as-of projection now also includes person-scoped freshness and completeness assessments, their policy versions, assessment times, rationale, and semantic-sufficiency status.
+- Freshness assessments are joined to same-person evidence and freshness policies.
+- Completeness assessments are joined to same-person completeness policies; evidence links and supported subject IDs are revalidated against same-person persisted rows. Unknown subject types and foreign subjects are withheld.
+- Reviewer IDs are checked against caregivers belonging to the requested care record.
+- Missing/incomplete schemas remain explicitly unavailable; the overall reconstruction status remains partial.
+- Regression coverage was extended for historical cutoffs, foreign evidence links, foreign subjects, and freshness/completeness assessment retrieval.
+- Exact-current-main backend and PostgreSQL test results remain unobserved; these changes are implemented but not yet verified.
