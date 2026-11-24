@@ -267,6 +267,7 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             person_id=person_id,
             caregiver_id=caregiver_id,
             request_id=f"companion-request-pass-{suffix}",
+            workflow_id="companion",
             reply=passed_reply,
             rejection_reasons=[],
             ai_generated=True,
@@ -278,7 +279,6 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             source_lcr_context_ids=[],
             source_freshness_assessment_ids=[],
         )
-        db.commit()
         passed = db.query(AISafetyCheck).filter_by(
             person_id=person_id,
             check_name="companion_response_grounding",
@@ -296,6 +296,7 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             person_id=person_id,
             caregiver_id=caregiver_id,
             request_id=f"companion-request-rejected-{suffix}",
+            workflow_id="companion",
             reply=rejected_reply,
             rejection_reasons=["unsupported_medication_claim", "unsupported_appointment_status"],
             ai_generated=True,
