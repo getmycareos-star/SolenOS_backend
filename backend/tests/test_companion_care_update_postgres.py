@@ -494,8 +494,10 @@ def test_postgres_companion_prompt_uses_compact_coverage_without_hiding_unsearch
             num_predict=int(captured[0]["options"].get("num_predict", os.getenv("OLLAMA_NUM_PREDICT", "96"))),
         )
         model_coverage = json.loads(coverage_line.partition(": ")[2])
-        assert "legacy_optional" in model_coverage["failed_sources"]
-        assert model_coverage["sources"]["legacy_optional"]["status"] == "unsearchable"
+        assert model_coverage["non_available_sources"]["legacy_optional"]["status"] == "unsearchable"
+        assert "cannot be searched for the requested care topic" in model_coverage["non_available_sources"]["legacy_optional"]["interpretation_limit"]
+        assert model_coverage["available_source_count"] >= 0
+        assert "sources" not in model_coverage
         assert "missing_optional_sources" not in model_coverage
         assert "candidate_count" not in coverage_line
         assert len(coverage_line) < 2000, "the model should receive compact coverage, not the full source inventory"
