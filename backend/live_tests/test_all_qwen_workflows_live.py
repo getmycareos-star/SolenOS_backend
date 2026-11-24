@@ -165,10 +165,9 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
                 timeout=180.0,
                 options={"temperature": 0, "num_predict": 128, "num_ctx": 4096},
             )
-            if len(captured_requests) != 1:
-                raise AssertionError(
-                    f"expected_one_real_ollama_request_got_{len(captured_requests)}"
-                )
+            if not captured_requests:
+                raise AssertionError("gateway_did_not_send_a_real_ollama_request")
+            # A bounded startup retry may send the same request more than once.
             actual_payload = captured_requests[-1]
             actual_messages = actual_payload.get("messages")
             if not isinstance(actual_messages, list):
