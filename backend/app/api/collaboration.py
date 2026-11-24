@@ -5781,6 +5781,12 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         1024,
         64 if empty_context_emergency_readiness else response_length_policy.token_budget,
     )
+    # A focused post-save interpretation is deliberately short; reserving fewer
+    # output tokens leaves room for its source-attributed care context.
+    if focused_event_assist:
+        response_token_budget = min(response_token_budget, 256)
+    else:
+        response_token_budget = min(response_token_budget, 384)
     response_length_instruction = (
         f"Target {response_length_policy.target_words} words; hard maximum {response_length_policy.max_words} words."
         if response_length_policy.max_words is not None
@@ -5791,7 +5797,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "'Emergency contacts and an emergency plan are not recorded in the supplied care-record context; confirm them with the caregiver.'"
         if empty_context_emergency_readiness else ""
     )
-    prompt = (
+    prompt_prefix = (
         f"SOLENOS_WORKFLOW_ID: {payload.workflow}. "
         "You are Qwen, a supporting language assistant inside SolenOS. SolenOS's Living Care Record and the caregiver "
         "remain authoritative; your output is a suggestion, not a fact, decision, diagnosis or instruction. "
@@ -5804,18 +5810,17 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "transliterations, internal product jargon, model names or repetitive filler. Do not greet with a canned phrase. "
         "Never claim you saved, changed, verified or reviewed a record. Never write to the Living Care Record. "
         "Return only the helpful response text.\n\nAuthorized context (may be empty):\n"
-        + ("\n".join(context_lines) if context_lines else "No matching recorded context was found.")
     )
-    # The authorized record context is now materialized as plain strings.
-    # End the read transaction before waiting on local model inference; otherwise
-    # each slow Qwen call can pin a PostgreSQL connection for the full inference
-    # duration and starve caregiver requests when several jobs overlap.
+    # Release the read transaction before model inference; prompt fitting below
+    # performs preflight-only retries and does not hold database connections.
     db.rollback()
-    reply = await asyncio.to_thread(
-        qwen_chat,
-        [{"role": "system", "content": prompt}, {"role": "user", "content": payload.text.strip()}],
+    reply, context_lines, prompt_context_lines, prompt_context_truncated = await _qwen_chat_with_bounded_context(
+        prompt_prefix,
+        payload.text.strip(),
+        context_lines,
         options={"temperature": 0, "num_predict": response_token_budget},
     )
+    shared_context_truncated = shared_context_truncated or prompt_context_truncated
     internal_source_ids = {
         str(identifier)
         for source_ids in (
@@ -5854,7 +5859,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         return sanitized.strip()
 
     reply = strip_internal_identifiers(reply)
-    source_context = payload.text + "\n" + "\n".join(context_lines)
+    source_context = payload.text + "\n" + "\n".join(prompt_context_lines)
 
     def response_rejection_reasons(candidate: str) -> list[str]:
         reasons = []
@@ -6075,6 +6080,65 @@ def _fit_model_context_lines_across_sources(
     selected_raw = [item[1] for item in selected]
     selected_rendered = [item[2] for item in selected]
     return selected_raw, selected_rendered, used_chars, len(selected) < len(lines)
+
+
+async def _qwen_chat_with_bounded_context(
+    prompt_prefix: str,
+    user_text: str,
+    context_lines: list[str],
+    *,
+    options: dict,
+) -> tuple[str, list[str], list[str], bool]:
+    """Fit authorized care context before inference without dropping source families unfairly.
+
+    Oversized attempts fail only at the gateway's deterministic preflight, before
+    model inference. Retry with progressively smaller, source-balanced context;
+    return both selected source records (for provenance) and the exact rendered
+    context sent to Qwen (for response grounding).
+    """
+    initial_chars = len("\n".join(context_lines))
+    candidate_budgets = (
+        initial_chars, 10000, 8000, 6000, 4500, 3500,
+        2500, 1800, 1400, 1000, 600, 300, 0,
+    )
+    budgets = []
+    for candidate in candidate_budgets:
+        bounded = min(initial_chars, max(0, int(candidate)))
+        if bounded not in budgets:
+            budgets.append(bounded)
+
+    last_budget_error: HTTPException | None = None
+    for budget in budgets:
+        selected_raw, selected_rendered, _, truncated = (
+            _fit_model_context_lines_across_sources(context_lines, max_chars=budget)
+        )
+        prompt = prompt_prefix + (
+            "\n".join(selected_rendered)
+            if selected_rendered
+            else "No matching recorded context was found."
+        )
+        try:
+            reply = await asyncio.to_thread(
+                qwen_chat,
+                [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                options=options,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 413:
+                raise
+            last_budget_error = exc
+            continue
+        return reply, selected_raw, selected_rendered, truncated
+
+    if last_budget_error is not None:
+        raise last_budget_error
+    raise HTTPException(
+        status_code=503,
+        detail="No safe model context could be prepared for this care-record request.",
+    )
 
 
 def _care_recipient_identity_guidance(display_name: str | None) -> str:
