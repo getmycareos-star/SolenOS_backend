@@ -1,6 +1,6 @@
 # SolenOS Companion — Product Identity and Behavioral Constitution
 
-**Product identity version:** 2.2  
+**Product identity version:** 2.3  
 **Personality constitution version:** 2.3  
 **Status:** Canonical, model-independent product specification  
 **Organization / product:** SolenOS  
