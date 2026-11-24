@@ -4451,11 +4451,26 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
         assert readback.json()["preferred_name"] == "Mary"
         assert readback.json()["timezone"] == "America/New_York"
 
+        from app.models.caregiver_access import CaregiverAccessGrant
+        with TestingSessionLocal() as db:
+            db.query(CaregiverAccessGrant).filter_by(
+                person_id=other_person_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+            assert db.query(CaregiverAccessGrant).filter_by(person_id=other_person_id).count() == 0
+
         other_preferences = client.get("/api/v1/caregiver/preferences", headers=other_headers)
         assert other_preferences.status_code == 200, other_preferences.text
         assert other_preferences.json()["preferred_name"] is None
         assert other_preferences.json()["timezone"] is None
         assert other_person_id != person_id
+        other_update = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=other_headers,
+            json={"preferred_name": "John"},
+        )
+        assert other_update.status_code == 200, other_update.text
+        assert other_update.json()["preferred_name"] == "John"
 
         with TestingSessionLocal() as db:
             db.add(CareEvent(
