@@ -7041,6 +7041,54 @@ def _caregiver_explicitly_requests_factual_answer(user_text: str) -> bool:
     ))
 
 
+def _contains_unsupported_reassurance(reply: str) -> bool:
+    """Detect categorical comfort claims while allowing explicit uncertainty.
+
+    This is a conservative language guard, not a clinical risk classifier.
+    It prevents the Companion from promising outcomes or minimizing concern
+    when the application has not established those claims.
+    """
+    if not isinstance(reply, str) or not reply.strip():
+        return False
+
+    patterns = (
+        r"\b(?:everything (?:will|is going to) be okay|it will all be okay)\b",
+        r"\b(?:there(?:'s| is) nothing to worry about|nothing to worry about|"
+        r"no need to worry|there is no reason to worry|don't worry)\b",
+        r"\b(?:it(?:'s| is) probably nothing|probably nothing serious|"
+        r"it doesn't sound serious|it does not sound serious)\b",
+        r"\b(?:i(?:'m| am) sure (?:he|she|they|it)(?:'s| is) (?:fine|okay)|"
+        r"(?:he|she|they|it) will definitely be fine|"
+        r"(?:he|she|they|it) should be fine|"
+        r"(?:he|she|they|it) is probably okay|"
+        r"(?:he|she|they|it) seems? (?:fine|okay|stable))\b",
+        r"\b(?:everything appears stable|appears stable|looks stable|"
+        r"likely fine|probably okay|should be fine)\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, reply, flags=re.IGNORECASE):
+            # Do not reject a sentence that explicitly refuses to make the
+            # assurance (for example, "I can't promise everything will be okay").
+            sentence_start = max(
+                reply.rfind(".", 0, match.start()),
+                reply.rfind("!", 0, match.start()),
+                reply.rfind("?", 0, match.start()),
+                reply.rfind("\\n", 0, match.start()),
+            ) + 1
+            prefix = reply[sentence_start:match.start()].casefold().strip()
+            explicit_limit = re.search(
+                r"\b(?:not|no|never|cannot|can't|won't|wouldn't|don't|doesn't|"
+                r"isn't|aren't|unable to|not enough evidence to|not possible to|"
+                r"can't promise|cannot promise|can't confirm|cannot confirm)\b"
+                r"(?:[\w']+\s+){0,5}$",
+                prefix,
+            )
+            if explicit_limit:
+                continue
+            return True
+    return False
+
+
 def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     """Fail closed when the model ignores explicit caregiver interaction constraints."""
     guidance = _caregiver_interaction_guidance(user_text)
@@ -7058,14 +7106,7 @@ def _caregiver_response_needs_revision(user_text: str, reply: str) -> bool:
     # safety/outcome assurances in every Companion response, not only when a
     # caregiver explicitly labels their emotion. Critical-safety requests use
     # the deterministic emergency fast path and must never be softened.
-    if re.search(
-        r"\b(?:everything (?:will|is going to) be okay|it will all be okay|"
-        r"there(?:'s| is) nothing to worry about|nothing to worry about|"
-        r"it(?:'s| is) probably nothing|there is no reason to worry|"
-        r"i(?:'m| am) sure (?:he|she|they|it)(?:'s| is) (?:fine|okay)|"
-        r"(?:he|she|they|it) will definitely be fine)\b",
-        lowered,
-    ):
+    if _contains_unsupported_reassurance(text):
         return True
     if not guidance:
         return False
