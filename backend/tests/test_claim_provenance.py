@@ -561,34 +561,26 @@ def test_lcr_event_evidence_prefix_resolves_to_persisted_event_type():
     }]
 
 
+
 def test_shared_lineage_service_deduplicates_explicit_origin_but_not_hash_only_matches():
     from types import SimpleNamespace
     from app.services.evidence_lineage import build_evidence_lineage
 
     rows = [
         SimpleNamespace(
-            id="origin-a",
-            parent_evidence_id=None,
+            id="origin-a", parent_evidence_id=None,
             original_source_reference="https://records.example/source/visit-17",
-            source_text_sha256="same-hash",
-            transfer_source=None,
-            transfer_reference=None,
+            source_text_sha256="same-hash", transfer_source=None, transfer_reference=None,
         ),
         SimpleNamespace(
-            id="origin-b",
-            parent_evidence_id="origin-a",
+            id="origin-b", parent_evidence_id="origin-a",
             original_source_reference="https://records.example/source/visit-17",
-            source_text_sha256="same-hash",
-            transfer_source=None,
-            transfer_reference=None,
+            source_text_sha256="same-hash", transfer_source=None, transfer_reference=None,
         ),
         SimpleNamespace(
-            id="independent-identical-text",
-            parent_evidence_id=None,
+            id="independent-identical-text", parent_evidence_id=None,
             original_source_reference="https://records.example/source/independent-visit",
-            source_text_sha256="same-hash",
-            transfer_source=None,
-            transfer_reference=None,
+            source_text_sha256="same-hash", transfer_source=None, transfer_reference=None,
         ),
     ]
     lineage_by_id, _ = build_evidence_lineage(rows, [], [
@@ -609,30 +601,21 @@ def test_shared_lineage_service_deduplicates_explicit_origin_but_not_hash_only_m
     aggregate = build_distinct_event_aggregate(
         [
             {
-                "id": "event-a",
-                "event_type": "care_observation",
-                "status": "recorded",
+                "id": "event-a", "event_type": "care_observation", "status": "recorded",
                 "occurred_at": datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc),
-                "title": "Mobility",
-                "description": "Caregiver reported one episode of unsteadiness.",
+                "title": "Mobility", "description": "Caregiver reported one episode of unsteadiness.",
                 "evidence_ids": ["origin-a"],
             },
             {
-                "id": "event-b",
-                "event_type": "care_observation",
-                "status": "recorded",
+                "id": "event-b", "event_type": "care_observation", "status": "recorded",
                 "occurred_at": datetime(2026, 11, 4, 9, 0, tzinfo=timezone.utc),
-                "title": "Mobility",
-                "description": "Caregiver reported one episode of unsteadiness.",
+                "title": "Mobility", "description": "Caregiver reported one episode of unsteadiness.",
                 "evidence_ids": ["origin-b"],
             },
             {
-                "id": "event-c",
-                "event_type": "care_observation",
-                "status": "recorded",
+                "id": "event-c", "event_type": "care_observation", "status": "recorded",
                 "occurred_at": datetime(2026, 11, 5, 9, 0, tzinfo=timezone.utc),
-                "title": "Mobility",
-                "description": "Caregiver reported one episode of unsteadiness.",
+                "title": "Mobility", "description": "Caregiver reported one episode of unsteadiness.",
                 "evidence_ids": ["independent-identical-text"],
             },
         ],
@@ -645,3 +628,4 @@ def test_shared_lineage_service_deduplicates_explicit_origin_but_not_hash_only_m
     assert aggregate["status"] == "validated"
     assert aggregate["count"] == 2
     assert aggregate["duplicate_event_ids"] == ["event-b"]
+
