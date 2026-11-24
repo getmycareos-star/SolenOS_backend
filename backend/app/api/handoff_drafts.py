@@ -1568,57 +1568,85 @@ def _evidence_observation_snapshot(db: Session, person_id: str, evidence_ids: li
     }
 
 
-def _care_event_correction_fingerprint_snapshot(db: Session, person_id: str, event_id: str) -> dict:
-    """Return the append-only correction and relationship state for one event.
-
-    A handoff source must become stale when its correction changes, even when
-    the original CareEvent row remains unchanged.
-    """
+def _care_event_correction_fingerprint_snapshots(
+    db: Session, person_id: str, event_ids: list[str],
+) -> dict[str, dict]:
+    """Batch-read correction lineage so bounded handoff snapshots avoid N+1 queries."""
+    ids = list(dict.fromkeys(str(value) for value in event_ids if value))
+    if not ids:
+        return {}
     try:
         inspector = inspect(db.get_bind())
         if not inspector.has_table("corrections") or not inspector.has_table("care_record_relationships"):
-            return {"status": "unavailable", "corrections": [], "relationships": []}
+            return {
+                event_id: {"status": "unavailable", "corrections": [], "relationships": []}
+                for event_id in ids
+            }
         corrections = db.query(Correction).filter(
             Correction.person_id == person_id,
             Correction.target_type == "care_event",
-            Correction.target_id == event_id,
+            Correction.target_id.in_(ids),
         ).order_by(Correction.created_at.asc(), Correction.id.asc()).all()
-        correction_ids = [str(item.id) for item in corrections]
+        corrections_by_event: dict[str, list] = {}
+        correction_ids = []
+        for item in corrections:
+            event_id = str(item.target_id)
+            corrections_by_event.setdefault(event_id, []).append(item)
+            correction_ids.append(str(item.id))
         relationships = db.query(CareRecordRelationship).filter(
             CareRecordRelationship.person_id == person_id,
             CareRecordRelationship.source_type == "correction",
             CareRecordRelationship.source_id.in_(correction_ids or {"__no_matching_correction__"}),
             CareRecordRelationship.relationship_type == "corrects",
             CareRecordRelationship.target_type == "care_event",
-            CareRecordRelationship.target_id == event_id,
+            CareRecordRelationship.target_id.in_(ids),
         ).order_by(CareRecordRelationship.created_at.asc(), CareRecordRelationship.id.asc()).all() if correction_ids else []
-        return {
-            "status": "checked",
-            "corrections": [{
-                "id": str(item.id),
-                "original_text": item.original_text,
-                "corrected_text": item.corrected_text,
-                "reason": item.reason,
-                "processing_status": item.processing_status,
-                "processing_attempts": item.processing_attempts,
-                "processed_at": _iso(item.processed_at),
-                "next_retry_at": _iso(item.next_retry_at),
-                "created_at": _iso(item.created_at),
-            } for item in corrections],
-            "relationships": [{
-                "id": str(item.id),
-                "source_id": str(item.source_id),
-                "relationship_type": item.relationship_type,
-                "relationship_version": item.relationship_version,
-                "target_type": item.target_type,
-                "target_id": str(item.target_id),
-                "provenance": item.provenance,
-                "created_at": _iso(item.created_at),
-            } for item in relationships],
-        }
+        relationships_by_event: dict[str, list] = {}
+        for item in relationships:
+            relationships_by_event.setdefault(str(item.target_id), []).append(item)
+        result = {}
+        for event_id in ids:
+            event_corrections = corrections_by_event.get(event_id, [])
+            event_relationships = relationships_by_event.get(event_id, [])
+            result[event_id] = {
+                "status": "checked",
+                "corrections": [{
+                    "id": str(item.id),
+                    "original_text": item.original_text,
+                    "corrected_text": item.corrected_text,
+                    "reason": item.reason,
+                    "processing_status": item.processing_status,
+                    "processing_attempts": item.processing_attempts,
+                    "processed_at": _iso(item.processed_at),
+                    "next_retry_at": _iso(item.next_retry_at),
+                    "created_at": _iso(item.created_at),
+                } for item in event_corrections],
+                "relationships": [{
+                    "id": str(item.id),
+                    "source_id": str(item.source_id),
+                    "relationship_type": item.relationship_type,
+                    "relationship_version": item.relationship_version,
+                    "target_type": item.target_type,
+                    "target_id": str(item.target_id),
+                    "provenance": item.provenance,
+                    "created_at": _iso(item.created_at),
+                } for item in event_relationships],
+            }
+        return result
     except SQLAlchemyError:
         logger.exception("Handoff correction-lineage fingerprint retrieval failed")
-        return {"status": "failed", "corrections": [], "relationships": []}
+        return {
+            event_id: {"status": "failed", "corrections": [], "relationships": []}
+            for event_id in ids
+        }
+
+
+def _care_event_correction_fingerprint_snapshot(db: Session, person_id: str, event_id: str) -> dict:
+    """Compatibility wrapper for one-event callers and focused tests."""
+    return _care_event_correction_fingerprint_snapshots(db, person_id, [event_id]).get(
+        str(event_id),
+        {"status": "unavailable", "corrections": [], "relationships": []},
+    )
 
 
 def _daily_care_fingerprint_payload(
