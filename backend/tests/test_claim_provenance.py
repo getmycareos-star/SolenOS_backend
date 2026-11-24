@@ -721,7 +721,7 @@ def test_claim_with_an_added_event_date_is_not_supported_by_undated_source_wordi
     assert unmatched_material_claims(provenance)
 
 
-def test_conflicting_sources_are_both_preserved_instead_of_silently_resolved():
+def test_negated_conflicting_source_is_not_used_to_support_positive_claim():
     provenance = build_claim_provenance(
         "Mum walked steadily after lunch.",
         [
@@ -743,8 +743,9 @@ def test_conflicting_sources_are_both_preserved_instead_of_silently_resolved():
     claim = provenance["claims"][0]
     assert claim["support_status"] == "matched_saved_wording"
     assert [ref["record_id"] for ref in claim["source_references"]] == ["report-a"]
-    # A matching passage cannot erase an explicit conflicting source. The
-    # caller must preserve conflict metadata from the retrieved LCR context.
+    # This matcher is not the conflict resolver; it must not cite the negated
+    # passage as support for the positive statement. Conflict context is carried
+    # separately by the authoritative LCR projection.
     assert claim["source_references"][0]["person_scope_status"] == "matched"
 
 
