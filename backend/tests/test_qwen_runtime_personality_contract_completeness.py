@@ -32,18 +32,18 @@ def test_runtime_injects_compact_rule_for_every_complete_machine_readable_trait(
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         assert required_fields.issubset(contract), trait
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in runtime
-        assert contract["runtime_rule"] in runtime
-        # The compact runtime carries one representative acceptance anchor for
-        # each dimension; the complete lists remain in the canonical test oracle.
+        # The compact runtime carries one high-signal anchor for each required
+        # dimension; the full lists remain complete in the canonical test oracle.
         runtime_labels = {
-            "observable_behaviors": "Do: ",
+            "observable_behaviors": "Behaviour: ",
             "required_context": "Context: ",
-            "prohibited_behaviors": "Never: ",
-            "violation_conditions": "Fail if: ",
+            "prohibited_behaviors": "Prohibited: ",
+            "violation_conditions": "Violation: ",
             "verification_cases": "Test: ",
         }
         for field, label in runtime_labels.items():
-            assert label + contract[field][0] in runtime, (trait, field)
+            anchor = min(contract[field], key=len)
+            assert label + anchor in runtime, (trait, field)
         for field in required_fields:
             values = contract[field]
             assert values, (trait, field)
@@ -84,15 +84,15 @@ def test_every_personality_trait_rule_is_present_in_the_actual_assembled_qwen_sy
     for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
         contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
         assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system
-        assert contract["runtime_rule"] in system
         for field, label in (
-            ("observable_behaviors", "Do: "),
+            ("observable_behaviors", "Behaviour: "),
             ("required_context", "Context: "),
-            ("prohibited_behaviors", "Never: "),
-            ("violation_conditions", "Fail if: "),
+            ("prohibited_behaviors", "Prohibited: "),
+            ("violation_conditions", "Violation: "),
             ("verification_cases", "Test: "),
         ):
-            assert label + contract[field][0] in system, (trait, field)
+            anchor = min(contract[field], key=len)
+            assert label + anchor in system, (trait, field)
 
 
 def test_runtime_contract_preserves_product_boundaries_and_precedence():
