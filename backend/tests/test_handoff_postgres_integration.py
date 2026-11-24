@@ -289,7 +289,7 @@ def test_postgres_handoff_sources_persist_approve_share_acknowledge_and_revoke(m
                     "stale_warning": document["stale_warning"],
                 },
                 {
-                    "section": "Unresolved transfer-support question",
+                    "section": "Current concerns and unresolved questions",
                     "source_ref": f"{open_question['source_table']}:{open_question['source_id']}",
                     "summary": "The transfer support level remains unresolved and needs caregiver confirmation.",
                     "supporting_quote": open_question["text"][: min(120, len(open_question["text"]))],
