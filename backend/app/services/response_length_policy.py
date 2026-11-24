@@ -44,6 +44,8 @@ _LOW_CAPACITY_SIGNAL = re.compile(
     r"\b(?:i(?:'m| am) (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
     r"i(?:'m| am) (?:really |very |so )?(?:angry|frustrated|sad|scared|frightened|afraid|lonely|upset) "
     r"(?:and|but) (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
+    r"i(?:'ve| have) been crying|i(?:'m| am) crying|i keep crying|i can't stop crying|i cannot stop crying|"
+    r"i feel like crying|"
     r"i feel (?:really |very |so )?(?:angry|frustrated|sad|scared|frightened|afraid|lonely|upset) "
     r"(?:and|but) (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
     r"i feel (?:really |very |so )?(?:overwhelmed|exhausted|tired|worn out|drained|burnt out|burned out)|"
