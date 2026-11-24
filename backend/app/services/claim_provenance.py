@@ -370,12 +370,12 @@ def _claim_preserves_source_qualifiers(statement: str, source: dict[str, Any], m
     """Do not strip attribution, negation, or uncertainty from a source passage."""
     source_text = str(source.get("source_text") or "")
     status = " ".join(str(source.get(key) or "") for key in (
-        "record_status", "epistemic_status", "source_attribution",
+        "record_status", "epistemic_status", "source_lifecycle_status", "source_attribution",
     )).casefold()
     related = source.get("related_evidence") or []
     related_statuses = " ".join(
         " ".join(str(item.get(key) or "") for key in (
-            "record_status", "epistemic_status", "source_attribution",
+            "record_status", "epistemic_status", "source_lifecycle_status", "source_attribution",
         ))
         for item in related if isinstance(item, dict)
     ).casefold()
