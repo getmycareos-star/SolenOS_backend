@@ -14,17 +14,21 @@ on:
       - "backend/app/api/care_delta.py"
       - "backend/live_tests/test_delta_engine_live.py"
       - ".github/workflows/delta-engine-live-acceptance.yml"
-  workflow_dispatch:
+  workflow_run:
+    workflows: ["Backend tests — main validation"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
   group: delta-engine-live-qwen-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   delta-engine-live-qwen:
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
@@ -53,8 +57,10 @@ jobs:
       SECRET_KEY: "ci-only-delta-live-test-secret-key"
       APP_ENV: test
     steps:
-      - name: Check out repository
+      - name: Check out the exact backend-tested revision
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
