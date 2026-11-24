@@ -3450,7 +3450,7 @@ def _contains_unsupported_quotation(reply: str, source_text: str) -> bool:
     )
     for pattern in patterns:
         for match in re.finditer(pattern, reply or ""):
-            quote = re.sub(r"\\s+", " ", match.group(1)).strip()
+            quote = re.sub(r"\s+", " ", match.group(1)).strip()
             if len(re.findall(r"[^\W_]+", quote, flags=re.UNICODE)) < 4:
                 continue
             normalized = quote.casefold()
