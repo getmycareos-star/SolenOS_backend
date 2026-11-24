@@ -1,7 +1,9 @@
-"""Real-Qwen acceptance for the actual Delta Engine reconciliation endpoint.
+"""Real-Qwen acceptance for the Delta Engine model-enrichment service path.
 
-This test never mocks qwen_chat. It verifies inference, strict output parsing,
-source-event provenance, and durable CareDeltaRun persistence on PostgreSQL.
+The public reconcile API intentionally uses deterministic change intelligence
+unless model enrichment is explicitly requested. This test exercises the real
+Qwen-enabled service path, strict output parsing, provenance, and PostgreSQL
+persistence without mocking qwen_chat.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from app.core.database import get_db
 from app.main import app
 from app.models.care import CareEvent
 from app.models.care_continuity import CareAssertion
+from app.services.delta_engine import reconcile_event
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 POSTGRES_DATABASE = DATABASE_URL.startswith(
@@ -79,23 +82,21 @@ def test_real_qwen_delta_reconciliation_persists_grounded_result_within_budget()
                 db.commit()
 
             started = time.perf_counter()
-            response = client.post(
-                "/api/v1/care-delta/reconcile",
-                headers=headers,
-                json={
-                    "person_id": person_id,
-                    "event_date": occurred_at.isoformat(),
-                    "source": "live_qwen_delta_acceptance",
-                    "content": source_text,
-                    "source_event_id": event_id,
-                    "evidence_ids": [],
-                    "persist": True,
-                },
-            )
+            with TestingSessionLocal() as db:
+                result = reconcile_event(
+                    db,
+                    person_id=person_id,
+                    event_date=occurred_at,
+                    source="live_qwen_delta_acceptance",
+                    content=source_text,
+                    source_event_id=event_id,
+                    evidence_ids=[],
+                    persist=True,
+                    created_by_caregiver_id=caregiver_id,
+                    model_enrichment=True,
+                )
+                db.commit()
             elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
-            assert response.status_code == 200, response.text
-            result = response.json()
-
             assert result.get("event_summary", "").strip(), result
             assert result.get("caregiver_summary", "").strip(), result
             assert result.get("clinician_summary", "").strip(), result
