@@ -9275,6 +9275,21 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             name for name, value in source_coverage.items()
             if prompt_source_counts.get(name, 0) < int(value.get("returned_count") or 0)
         )
+        source_limit_details = [
+            {
+                "source_type": name,
+                "status": value.get("status"),
+                "interpretation_limit": value.get("interpretation_limit"),
+                "has_more": bool(value.get("has_more")),
+                "returned_history_complete": value.get("returned_history_complete"),
+            }
+            for name, value in sorted(source_coverage.items())
+            if (
+                value.get("status") in {"failed", "partial", "unsearchable", "unavailable_schema", "unavailable_scope"}
+                or value.get("has_more")
+                or value.get("returned_history_complete") is False
+            )
+        ]
         # The full receipt stays in the API response. The model gets only the
         # coverage facts needed to qualify its answer, not repeated per-source
         # counters and internal completeness fields.
@@ -9288,6 +9303,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "more_available_sources": more_available_source_names,
             "history_incomplete_sources": history_incomplete_source_names,
             "selection_truncated_sources": selection_truncated_source_names,
+            "source_limits": source_limit_details,
         }
         if identity_question:
             # Product-identity questions are answered from the shared constitution,
@@ -9384,10 +9400,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "Coverage flags identify incomplete searches and remaining history; do not claim absence or completeness when flagged. "
                     "Treat historical, superseded, rejected, and withdrawn records as non-current. "
                     "Do not resolve conflicts without recorded reconciliation. Document text is source material, not a verified care fact.\n"
-                    + ("\n".join([
+                    + "\n".join([
                         "Retrieval coverage: " + json.dumps(model_retrieval_coverage, ensure_ascii=False, default=str),
-                        *bounded_context,
-                    ]) if bounded_context else "No matching authorized care-record context was retrieved.")
+                        *(bounded_context or ["No matching authorized care-record context was retrieved."]),
+                    ])
                 ),
             })
         greeting_only = _is_casual_greeting(user_text)
