@@ -1,8 +1,30 @@
 """Canonical SolenOS inference contract assembled from model-independent constitutions."""
 
-from app.services.solenos_identity import SOLENOS_RUNTIME_IDENTITY_CONSTITUTION
-from app.services.solenos_personality import SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION
-from app.services.solenos_information_stewardship import SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP
+from app.services.solenos_identity import (
+    SOLENOS_IDENTITY_CONSTITUTION_VERSION,
+    SOLENOS_RUNTIME_IDENTITY_CONSTITUTION,
+)
+from app.services.solenos_personality import (
+    SOLENOS_PERSONALITY_CONSTITUTION_VERSION,
+    SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION,
+)
+from app.services.solenos_information_stewardship import (
+    SOLENOS_INFORMATION_STEWARDSHIP_VERSION,
+    SOLENOS_RUNTIME_INFORMATION_STEWARDSHIP,
+)
+
+# One aggregate contract release pins the separately maintained, model-independent
+# constitutions together. A component version change requires an intentional
+# aggregate release update and regression coverage.
+SOLENOS_OPERATING_CONTRACT_VERSION = "1.1"
+SOLENOS_OPERATING_CONTRACT_MANIFEST = (
+    f"SOLENOS OPERATING CONTRACT VERSION: {SOLENOS_OPERATING_CONTRACT_VERSION}\\n"
+    f"Identity constitution: {SOLENOS_IDENTITY_CONSTITUTION_VERSION}\\n"
+    f"Personality constitution: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}\\n"
+    f"Information stewardship constitution: {SOLENOS_INFORMATION_STEWARDSHIP_VERSION}\\n"
+    "These constitutions are one coordinated contract. Apply them together; "
+    "the model name never replaces the SolenOS Companion identity."
+)
 
 SOLENOS_QWEN_CORE_SYSTEM_PROMPT = r"""
 # SOLENOS — GLOBAL AI OPERATING CONTRACT
@@ -84,7 +106,7 @@ def apply_solenos_system_contract(messages: list[dict]) -> list[dict]:
         else:
             non_system.append(message)
 
-    combined = SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip()
+    combined = SOLENOS_OPERATING_CONTRACT_MANIFEST + "\\n\\n" + SOLENOS_QWEN_CORE_SYSTEM_PROMPT.strip()
     if workflow_system:
         combined += "\n\n# WORKFLOW-SPECIFIC SYSTEM INSTRUCTIONS\n" + "\n\n".join(workflow_system)
     # Reassert shared authority after all task/specialist text. The core prompt
