@@ -24,6 +24,8 @@ from app.api.collaboration import (
         "Do you remember everything?",
         "Can you make mistakes?",
         "Can I trust everything you say?",
+        "Which model powers you?",
+        "What model is powering you?",
     ],
 )
 def test_explicit_product_identity_questions_are_classified_without_care_history(question):
@@ -71,6 +73,32 @@ def test_care_questions_are_not_misclassified_as_product_identity(question):
 def test_identity_questions_use_canonical_deterministic_answers(question, expected):
     assert _companion_identity_direct_answer(question) == expected
 
+
+
+def test_model_identity_uses_only_trusted_runtime_configuration(monkeypatch):
+    import app.api.collaboration as collaboration
+
+    monkeypatch.setattr(
+        collaboration,
+        "get_ollama_config",
+        lambda: ("http://ollama.internal", "qwen3.5:4b", 180.0),
+    )
+    assert collaboration._companion_identity_direct_answer("Which model powers you?") == (
+        "This SolenOS environment is configured to use qwen3.5:4b through Ollama."
+    )
+
+
+def test_model_identity_admits_unavailable_runtime_configuration(monkeypatch):
+    from fastapi import HTTPException
+    import app.api.collaboration as collaboration
+
+    def unavailable():
+        raise HTTPException(status_code=503, detail="runtime unavailable")
+
+    monkeypatch.setattr(collaboration, "get_ollama_config", unavailable)
+    assert collaboration._companion_identity_direct_answer("Which model powers you?") == (
+        "I don't have reliable information about the underlying model configured for this SolenOS session."
+    )
 
 def test_non_identity_care_question_has_no_product_identity_answer():
     assert _companion_identity_direct_answer("What changed in Mum's sleep this week?") is None
