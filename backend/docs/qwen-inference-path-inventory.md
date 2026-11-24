@@ -17,6 +17,11 @@ Reviewed against backend `main` on 2026-11-24. This is a source-level inventory,
 | `backend/app/api/daily_care_intelligence.py` | Daily Care answer generation and schema-repair retry | Async handler offloads synchronous gateway call with `asyncio.to_thread` |
 | `backend/app/api/handoff_drafts.py` | Grounded handoff generation and bounded repair retry | Synchronous request path |
 | `backend/app/services/delta_engine.py` | Delta JSON generation and retry | Synchronous service path |
+### Delta Engine activation boundary
+
+The `/care-delta/reconcile` API currently calls `reconcile_event` without `model_enrichment=True`; its production default is the deterministic change-intelligence path and does not invoke Qwen. The optional Qwen Delta enrichment path is entered only by an internal caller that explicitly enables `model_enrichment=True`. When enabled, it uses the same `qwen_gateway.qwen_chat` transport and the `delta_engine` specialist workflow contract.
+
+The live Delta acceptance workflow now invokes that opt-in service path directly, verifies the configured local Ollama model and persisted `CareDeltaRun`, and asserts that source-linked assertions are not marked accepted or verified without caregiver review. The deterministic API path remains separately covered by API tests. This distinction prevents the inference inventory from overstating which production requests currently invoke Qwen.
 | `backend/app/services/qwen_background_worker.py` | Workflow classification; asynchronous background job processing | Background worker uses `asyncio.to_thread`; worker loop is started by application lifespan when enabled |
 
 ## Disabled / excluded source paths
