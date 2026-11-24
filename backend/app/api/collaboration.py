@@ -399,24 +399,6 @@ def _requested_event_aggregates(db: Session, person_id: str, caregiver_id: str, 
                 "No date window or total is inferred from the server timezone."
             ),
         }]
-    notification_preference = db.query(CareNotificationPreference).filter_by(
-        person_id=person_id, caregiver_id=caregiver_id,
-    ).first()
-    if (
-        notification_preference is not None
-        and notification_preference.updated_at is not None
-        and str(notification_preference.timezone_name or "UTC") != str(timezone_name)
-    ):
-        return [{
-            "status": "timezone_conflict",
-            "topic": "unsteadiness",
-            "count": None,
-            "source_references": [],
-            "interpretation_limit": (
-                "The caregiver timezone and explicitly updated notification timezone conflict. "
-                "No local calendar window or total is inferred until the preferences are reconciled."
-            ),
-        }]
     try:
         local_now = datetime.now(ZoneInfo(timezone_name))
     except (ZoneInfoNotFoundError, ValueError, TypeError):
@@ -8415,18 +8397,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     ).first()
     if not person or not caregiver or access_grant is None:
         raise HTTPException(status_code=403, detail="Care record session is invalid")
-    notification_preference = db.query(CareNotificationPreference).filter_by(
-        person_id=person_id, caregiver_id=caregiver_id,
-    ).first()
-    # A notification timezone is a separate delivery preference. Its database
-    # default is not evidence that the caregiver explicitly selected UTC, and
-    # it must not override the Companion's caregiver-owned IANA timezone.
-    timezone_conflict = bool(
-        caregiver.timezone_configured
-        and notification_preference is not None
-        and notification_preference.updated_at is not None
-        and str(notification_preference.timezone_name or "UTC") != str(caregiver.timezone or "UTC")
-    )
+    # Companion time resolution uses only the caregiver-owned, explicitly
+    # configured IANA timezone. Notification delivery settings are independent.
     caregiver_profile = db.query(CaregiverProfile).filter_by(
         person_id=person_id, session_caregiver_id=caregiver_id,
     ).first()
@@ -8485,7 +8457,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     caregiver_context = build_companion_caregiver_context(
         caregiver,
         access_grant,
-        timezone_conflict=timezone_conflict,
         caregiver_profile=caregiver_profile,
         active_roles=active_roles,
         active_roles_truncated=active_roles_truncated,
