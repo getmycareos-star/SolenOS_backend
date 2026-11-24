@@ -273,49 +273,25 @@ SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE = (
 
 
 def _build_runtime_personality_constitution() -> str:
-    """Render a compact runtime kernel from the canonical ten-trait constitution.
+    """Build a compact runtime kernel from the full, testable trait contract.
 
-    The full constitution and its machine-readable behavioural, context,
-    prohibition, failure, and verification dimensions remain authoritative in
-    this module. Every inference receives the ten concise runtime rules and
-    precedence; the full acceptance dimensions stay in source and tests rather
-    than displacing the care evidence that a workflow must reason over.
+    Detailed context requirements, violation responses, and acceptance cases remain
+    in the machine-readable source and tests. Every inference receives each trait's
+    observable and prohibited behaviours without carrying the full test catalogue.
     """
     lines = [
         "# SOLENOS COMPANION — THOUGHTFUL CARE PARTNER",
         f"Version: {SOLENOS_PERSONALITY_CONSTITUTION_VERSION}",
         "All ten traits apply in every workflow.",
-    ]
-    for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
-        contract = SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS[trait]
-        anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
-        for field, anchor in anchors.items():
-            contract_value = contract[field]
-            if isinstance(contract_value, str):
-                contract_text = contract_value
-            elif isinstance(contract_value, (tuple, list, set, frozenset)):
-                contract_text = " | ".join(str(item) for item in contract_value)
-            else:
-                raise RuntimeError(
-                    f"Invalid SolenOS personality contract shape: {trait}.{field}"
-                )
-            if anchor not in contract_text:
-                raise RuntimeError(f"Stale SolenOS personality runtime anchor: {trait}.{field}")
-        lines.extend((
-            f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}",
-            "Behaviour: " + anchors["observable_behaviors"] + ".",
-            "Context: " + anchors["required_context"] + ".",
-            "Prohibited: " + anchors["prohibited_behaviors"] + ".",
-            "Violation: " + anchors["violation_conditions"] + ".",
-            "Test: " + anchors["verification_cases"] + ".",
-        ))
-    lines.extend((
         "## PRECEDENCE",
-        SOLENOS_PERSONALITY_RUNTIME_PRECEDENCE,
-        "## COMMUNICATION",
-        "Use plain American English; answer the actual question first; be concise and practical. "
-        "Do not claim clinical assessment or independent verification.",
-    ))
+        "Safety, factual integrity, dignity, privacy, authorization, and LCR authority take priority.",
+        "Calm never softens urgent guidance. Reassure through accuracy, never promised outcomes.",
+        "Uncertainty must not become confidence to reassure.",
+    ]
+    for trait in SOLENOS_PERSONALITY_BEHAVIORAL_CONTRACTS:
+        lines.append(f"## {trait['heading']}")
+        lines.append("Behave: " + " ".join(trait["observable_behaviors"]))
+        lines.append("Avoid: " + " ".join(trait["prohibited_behaviors"]))
     return "\n".join(lines)
 
 SOLENOS_RUNTIME_PERSONALITY_CONSTITUTION = _build_runtime_personality_constitution()
