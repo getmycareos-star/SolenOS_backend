@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from app.core.database import Base, get_db
 from app.main import app
 import app.main as main_module
-from app.models.care import CareEvent, Evidence
+from app.models.care import Caregiver, CareEvent, Evidence
 
 
 _test_db_file = tempfile.NamedTemporaryFile(prefix="solenos-care-continuity-", suffix=".sqlite", delete=False)
