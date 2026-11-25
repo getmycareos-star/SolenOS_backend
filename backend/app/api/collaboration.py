@@ -10711,7 +10711,47 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
-        if invalid_reply and social_only and not caregiver_guidance:
+        if invalid_reply and acknowledgement_only and not caregiver_guidance:
+            # Keep a courtesy turn proportionate even when the model initially
+            # responds with an unnecessary question or a longer care answer.
+            for revision_attempt in range(2):
+                retry_messages = [
+                    *model_messages,
+                    {"role": "assistant", "content": str(reply or "")},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Revise your previous response to this brief acknowledgement or farewell. "
+                            "Reply in one natural sentence of no more than 15 words. "
+                            "Do not ask a question, reopen a care topic, offer a checklist, or claim an action occurred. "
+                            "Return only the revised sentence."
+                        ),
+                    },
+                ]
+                try:
+                    reply = await asyncio.to_thread(
+                        _ollama_chat,
+                        base,
+                        model,
+                        retry_messages,
+                        {"temperature": 0.1, "num_predict": response_token_budget},
+                        audit_context=companion_audit_context,
+                    )
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="Companion inference is unavailable. No reply was saved; please retry when the service is available.",
+                    ) from exc
+                invalid_reply = (
+                    not isinstance(reply, str)
+                    or not reply.strip()
+                    or _companion_message_needs_revision(reply, response_length_policy.max_words)
+                    or count_response_words(reply) > (response_length_policy.max_words or 15)
+                    or "?" in reply
+                )
+                if not invalid_reply:
+                    break
+        if invalid_reply and greeting_only and not caregiver_guidance:
             # A greeting-only repair must never overwrite a failed caregiver-specific
             # repair with a generic greeting instruction. If the caregiver response
             # contract still fails, the request below fails closed without saving it.
