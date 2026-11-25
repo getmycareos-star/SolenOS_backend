@@ -1304,6 +1304,10 @@ def build_lcr_context(
                 ownership_conditions.append(profile_owner)
             elif session_owner is not None:
                 ownership_conditions.append(session_owner)
+                if "caregiver_id" in table.c and caregiver_profile_id is None:
+                    # Without a profile mapping, a non-null profile owner cannot
+                    # safely be attributed from the session ID alone.
+                    ownership_conditions.append(table.c.caregiver_id.is_(None))
             # Caregiver context has no share control; require at least one
             # positive owner match and reject contradictory attribution.
             statement = statement.where(
