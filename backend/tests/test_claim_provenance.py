@@ -938,3 +938,54 @@ def test_historical_caregiver_approved_assertion_context_is_resolvable():
     assert len(records) == 1
     assert records[0]["record_type"] == "care_assertion"
     assert records[0]["record_id"] == "assertion-historical-1"
+@pytest.mark.parametrize(
+    ("statement", "source_text", "occurred_at", "recorded_at", "expected"),
+    [
+        (
+            "Caregiver reported that Mum felt dizzy on 2026-11-20.",
+            "Caregiver reported that Mum felt dizzy on 2026-11-20.",
+            "2026-11-20T09:00:00+00:00",
+            "2026-11-23T16:30:00+00:00",
+            "matched_saved_wording",
+        ),
+        (
+            "Caregiver reported that Mum felt dizzy on 2026-11-21.",
+            "Caregiver reported that Mum felt dizzy on 2026-11-21.",
+            "2026-11-20T09:00:00+00:00",
+            "2026-11-23T16:30:00+00:00",
+            "not_matched_to_saved_wording",
+        ),
+        (
+            "Caregiver reported that Mum felt dizzy, recorded on 2026-11-22.",
+            "Caregiver reported that Mum felt dizzy, recorded on 2026-11-22.",
+            "2026-11-20T09:00:00+00:00",
+            "2026-11-23T16:30:00+00:00",
+            "not_matched_to_saved_wording",
+        ),
+        (
+            "Caregiver reported that Mum felt dizzy on 2026-11-20.",
+            "Caregiver reported that Mum felt dizzy on 2026-11-20.",
+            None,
+            "2026-11-23T16:30:00+00:00",
+            "not_matched_to_saved_wording",
+        ),
+    ],
+)
+def test_exact_wording_cannot_override_persisted_event_or_recording_date(
+    statement, source_text, occurred_at, recorded_at, expected
+):
+    result = build_claim_provenance(
+        statement,
+        [{
+            "record_type": "care_event",
+            "record_id": "dated-event",
+            "person_id": "person-1",
+            "source_text": source_text,
+            "occurred_at": occurred_at,
+            "recorded_at": recorded_at,
+        }],
+        expected_person_id="person-1",
+    )
+    assert result["claims"][0]["support_status"] == expected
+    if expected == "not_matched_to_saved_wording":
+        assert unmatched_material_claims(result)
