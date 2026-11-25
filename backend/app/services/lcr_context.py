@@ -1281,15 +1281,31 @@ def build_lcr_context(
             )
             statement = statement.where(or_(shared_row, own_private_row))
         if source_name == "caregiver_contexts":
+            profile_owner = (
+                table.c.caregiver_id == str(caregiver_profile_id)
+                if "caregiver_id" in table.c and caregiver_profile_id is not None
+                else None
+            )
+            session_owner = (
+                table.c.reported_by_caregiver_id == str(caregiver_id)
+                if "reported_by_caregiver_id" in table.c and caregiver_id
+                else None
+            )
             ownership_conditions = []
-            if "caregiver_id" in table.c and caregiver_profile_id is not None:
-                ownership_conditions.append(table.c.caregiver_id == str(caregiver_profile_id))
-            if "reported_by_caregiver_id" in table.c and caregiver_id:
-                ownership_conditions.append(
-                    table.c.reported_by_caregiver_id == str(caregiver_id)
-                )
-            # Caregiver context has no share control; require positive owner
-            # attribution and fail closed if the mapping is unavailable.
+            if profile_owner is not None and session_owner is not None:
+                # Either trusted owner reference may be absent on older rows,
+                # but neither may point at a different caregiver.
+                ownership_conditions.extend([
+                    or_(profile_owner, table.c.caregiver_id.is_(None)),
+                    or_(session_owner, table.c.reported_by_caregiver_id.is_(None)),
+                    or_(profile_owner, session_owner),
+                ])
+            elif profile_owner is not None:
+                ownership_conditions.append(profile_owner)
+            elif session_owner is not None:
+                ownership_conditions.append(session_owner)
+            # Caregiver context has no share control; require at least one
+            # positive owner match and reject contradictory attribution.
             statement = statement.where(
                 and_(*ownership_conditions) if ownership_conditions else false()
             )
