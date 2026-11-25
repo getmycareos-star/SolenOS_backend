@@ -9976,8 +9976,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     "SolenOS identity and behavioral constitution. Do not use or infer "
                     "patient-specific care information."
                     if identity_question else
-                    " This is a brief social turn. Respond naturally and proportionately. "
-                    "Do not mention care-record content, start a care assessment, or claim an action occurred."
+                    (
+                        " This is a brief acknowledgement or farewell. Reply in one short sentence. "
+                        "Do not ask a follow-up question, mention care-record content, start a care assessment, or claim an action occurred."
+                        if acknowledgement_only else
+                        " This is a greeting only. Respond warmly and naturally without mentioning care-record content, starting a care assessment, or claiming an action occurred."
+                    )
                 ),
             }]
             model_messages.append({
