@@ -145,7 +145,12 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         "caregiver_id": session["caregiver"]["id"],
         "capture_idempotency_key": "structured-capture-key-001",
         "notes": "she's loosing weight",
-        "medications": [],
+        "medications": [{
+            "medication_name": "Metformin",
+            "status": "given",
+            "dose": "500 mg",
+            "administered_at": "2026-11-11T08:00:00.000Z",
+        }],
         "scales": [{
             "axis": "mood",
             "note": "she's sad",
@@ -164,7 +169,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert saved.status_code == 200, saved.text
     body = saved.json()
-    assert body["structured_detail_count"] == 4
+    assert body["structured_detail_count"] == 5
     assert body["execution_status"]["structured_details"] == "verified"
 
     db = TestSessionLocal()
@@ -182,7 +187,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             extraction_method="structured_daily_capture",
         ).all()
         assert {item.attribute for item in details} == {
-            "caregiver_note", "mood", "blood_pressure_systolic", "reported_weight_change",
+            "caregiver_note", "mood", "blood_pressure_systolic", "reported_weight_change", "medication",
         }
         assert all(item.epistemic_status == "reported" for item in details)
         assert all(item.recorded_at is not None for item in details)
@@ -205,6 +210,11 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         assert "timeframe" in weight_change.ambiguity_note
         assert "previous weight measurement" in weight_change.ambiguity_note
         assert next(item for item in details if item.attribute == "mood").observed_at is not None
+        medication = next(item for item in details if item.attribute == "medication")
+        assert medication.value_text == "Metformin"
+        assert medication.observed_at.isoformat().startswith("2026-11-11T08:00:00")
+        assert medication.occurred_at.isoformat().startswith("2026-11-11T08:00:00")
+        assert medication.recorded_at.isoformat() != medication.occurred_at.isoformat()
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").observed_at is not None
         assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
         assert next(item for item in details if item.attribute == "mood").value_text == "5"
@@ -254,7 +264,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     replay = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert replay.status_code == 200, replay.text
     assert replay.json()["idempotent_replay"] is True
-    assert replay.json()["structured_detail_count"] == 4
+    assert replay.json()["structured_detail_count"] == 5
 
     db = TestSessionLocal()
     try:
