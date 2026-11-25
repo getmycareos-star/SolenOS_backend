@@ -3272,6 +3272,8 @@ def _humanize_model_context_line(line: str) -> str:
             ("duration_context", "observation duration"),
             ("claim_type", "caregiver perspective type"),
             ("claim_content", "caregiver perspective"),
+            ("context", "caregiver perspective context"),
+            ("context_metadata", "caregiver context metadata"),
             ("availability_notes", "caregiver availability context"),
             ("proximity_category", "caregiver proximity"),
             ("observation_window_start", "observation window start"),
