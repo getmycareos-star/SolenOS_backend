@@ -1130,6 +1130,10 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     # without mutating or deleting the caregiver's original report.
     if "care_record_relationships" in available_tables:
         present.append("care_record_relationships")
+    # Resolve the authenticated session caregiver to the caregiver_profiles.id
+    # used by private observations, perspectives, and context records.
+    if "caregiver_profiles" in available_tables:
+        present.append("caregiver_profiles")
     if present:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)), resolve_fks=False)
     return available_tables, metadata
