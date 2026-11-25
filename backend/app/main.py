@@ -539,6 +539,10 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/conversation")
             or path.startswith("/api/v1/reminders")
             or path.startswith("/api/v1/care-delta")
+            # Temporal endpoints resolve child-record ownership inside their
+            # route handlers. Bind middleware to the bearer session here; the
+            # route then verifies the loaded fact/contradiction belongs to it.
+            or path.startswith("/api/v1/temporal/")
             or path.startswith("/api/v1/care-continuity")
             or path.startswith("/api/v1/handoffs")
             or path.startswith("/api/v1/handoff-drafts")
