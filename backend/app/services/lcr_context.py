@@ -334,26 +334,28 @@ SOURCE_SPECS: dict[str, dict[str, Any]] = {
     "caregiver_observations": {
         "table": "caregiver_observations",
         "required": False,
-        "fields": ["id", "person_id", "observation_category", "description", "observed_value", "observed_at",
-                   "recorded_at", "epistemic_status", "observation_type", "evidence_ids",
-                   "source_type", "source_id", "reported_by_caregiver_id", "created_at"],
-        "order": ["observed_at", "recorded_at", "created_at"],
+        "fields": ["id", "person_id", "caregiver_id", "observation_content", "observation_type",
+                   "event_time", "event_time_precision", "report_time", "observation_context",
+                   "location_context", "duration_context", "evidence_ref", "information_visibility",
+                   "is_promoted_to_shared", "promoted_at", "promoted_by_caregiver_id", "created_at"],
+        "order": ["event_time", "report_time", "created_at"],
     },
     "caregiver_contexts": {
         "table": "caregiver_contexts",
         "required": False,
-        "fields": ["id", "context_type", "context_payload", "epistemic_status", "source_type",
-                   "source_id", "recorded_at", "effective_from", "effective_to", "notes",
-                   "reported_by_caregiver_id", "created_at"],
-        "order": ["recorded_at", "created_at"],
+        "fields": ["id", "person_id", "caregiver_id", "reported_by_caregiver_id",
+                   "proximity_category", "observation_window_start", "observation_window_end",
+                   "availability_notes", "context_metadata", "effective_start", "effective_end",
+                   "created_at"],
+        "order": ["created_at"],
     },
     "caregiver_perspectives": {
         "table": "caregiver_perspectives",
         "required": False,
-        "fields": ["id", "topic", "perspective_text", "epistemic_status", "evidence_ids",
-                   "source_type", "source_id", "recorded_at", "effective_from", "effective_to",
-                   "supersedes_id", "reported_by_caregiver_id", "created_at"],
-        "order": ["recorded_at", "created_at"],
+        "fields": ["id", "person_id", "caregiver_id", "claim_type", "claim_content", "context",
+                   "timestamp", "evidence_ref", "information_visibility", "is_promoted_to_shared",
+                   "promoted_at", "promoted_by_caregiver_id", "created_at"],
+        "order": ["timestamp", "created_at"],
     },
     "corrections": {
         "table": "corrections",
@@ -422,9 +424,9 @@ SEARCH_FIELDS = {
     "open_question_review_events": ["decision", "rationale"],
     "conflicts": ["conflict_type", "description", "resolution", "status"],
     "provenance": ["source_type", "author_label", "method", "reason"],
-    "caregiver_observations": ["observation_category", "description", "source_type"],
-    "caregiver_contexts": ["context_type", "notes", "epistemic_status"],
-    "caregiver_perspectives": ["topic", "perspective_text", "epistemic_status"],
+    "caregiver_observations": ["observation_content", "observation_type", "observation_context", "location_context", "duration_context"],
+    "caregiver_contexts": ["availability_notes", "proximity_category", "observation_window_start", "observation_window_end"],
+    "caregiver_perspectives": ["claim_type", "claim_content", "context"],
     "corrections": ["target_type", "original_text", "corrected_text", "reason"],
     "open_loop_records": ["loop_type", "title", "description", "status", "request_text", "recipient_label"],
     "appointments": [
@@ -1160,6 +1162,24 @@ def build_lcr_context(
     bind = db.get_bind()
     available_tables, metadata = _load_source_schema(bind)
 
+    # Caregiver-private observations and perspectives are visible to their
+    # author only. Shared rows require explicit promotion plus SHARED visibility.
+    # The source tables store caregiver_profiles.id, not the bearer session's
+    # caregivers.id, so resolve that mapping from trusted backend records.
+    caregiver_profile_id = None
+    profile_table = metadata.tables.get("caregiver_profiles")
+    if (
+        caregiver_id
+        and profile_table is not None
+        and {"id", "person_id", "session_caregiver_id"}.issubset(profile_table.c.keys())
+    ):
+        caregiver_profile_id = db.execute(
+            select(profile_table.c.id).where(
+                profile_table.c.person_id == str(person_id),
+                profile_table.c.session_caregiver_id == str(caregiver_id),
+            ).limit(1)
+        ).scalar_one_or_none()
+
     sources: dict[str, dict[str, Any]] = {}
     missing_required: list[str] = []
     missing_optional: list[str] = []
@@ -1205,6 +1225,46 @@ def build_lcr_context(
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if source_name in {"caregiver_observations", "caregiver_perspectives"}:
+            visibility_column = table.c.get("information_visibility")
+            promoted_column = table.c.get("is_promoted_to_shared")
+            owner_column = table.c.get("caregiver_id")
+            shared_conditions = []
+            if visibility_column is not None:
+                shared_conditions.append(
+                    func.lower(cast(visibility_column, String)) == "shared"
+                )
+            if promoted_column is not None:
+                shared_conditions.append(promoted_column.is_(True))
+            # If both controls exist, both must prove explicit sharing.
+            shared_row = (
+                and_(*shared_conditions)
+                if shared_conditions
+                else false()
+            )
+            own_private_row = false()
+            if owner_column is not None and caregiver_profile_id is not None:
+                if visibility_column is not None:
+                    own_private_row = and_(
+                        owner_column == str(caregiver_profile_id),
+                        func.lower(cast(visibility_column, String)) == "private",
+                    )
+                else:
+                    own_private_row = owner_column == str(caregiver_profile_id)
+            statement = statement.where(or_(shared_row, own_private_row))
+        if source_name == "caregiver_contexts":
+            ownership_conditions = []
+            if "caregiver_id" in table.c and caregiver_profile_id is not None:
+                ownership_conditions.append(table.c.caregiver_id == str(caregiver_profile_id))
+            if "reported_by_caregiver_id" in table.c and caregiver_id:
+                ownership_conditions.append(
+                    table.c.reported_by_caregiver_id == str(caregiver_id)
+                )
+            # Caregiver context has no share control; require positive owner
+            # attribution and fail closed if the mapping is unavailable.
+            statement = statement.where(
+                and_(*ownership_conditions) if ownership_conditions else false()
+            )
         if source_name == "events" and event_ids is not None:
             # A source-event interpretation must be anchored to the exact
             # person-scoped event, not an arbitrary recent event window.
