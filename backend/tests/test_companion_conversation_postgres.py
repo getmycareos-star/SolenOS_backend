@@ -365,7 +365,7 @@ def test_companion_prompt_receives_authenticated_caregiver_recipient_and_timezon
     assert context["identity_context_status"] == "authenticated"
     assert context["caregiver_display_name"] == "Mary"
     assert context["care_recipient_name"] == recipient_name
-    assert context["caregiver_relationship"] == "Family"
+    assert context["caregiver_relationship"] is None  # Generic "Family" is not a recorded specific relationship.
     assert context["caregiver_role"] == "primary"
     assert context["access_scope"] == "full_record"
     assert "view_lcr" in context["permitted_capabilities"]
@@ -596,19 +596,17 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
         )
         db.add(other_caregiver)
         db.flush()
-        current_profile = CaregiverProfile(
+        current_profile = db.query(CaregiverProfile).filter_by(
             person_id=person_id,
             session_caregiver_id=caregiver_id,
-            name="Current caregiver",
-            relationship="daughter",
-        )
+        ).one()
         other_profile = CaregiverProfile(
             person_id=person_id,
             session_caregiver_id=other_caregiver_id,
             name="Other caregiver",
             relationship="daughter",
         )
-        db.add_all([current_profile, other_profile])
+        db.add(other_profile)
         db.flush()
 
         db.add_all([
