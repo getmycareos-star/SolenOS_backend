@@ -4519,7 +4519,7 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
 
         def fake_qwen(base, model, messages, options=None, audit_context=None):
             captured["messages"] = messages
-            return "Good morning, Mary. I'm here with your care record."
+            return "Good morning, Mary. I'm SolenOS Companion. How can I help?"
 
         monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
         response = client.post(
@@ -4528,7 +4528,7 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
             json={"person_id": person_id, "text": "Good morning"},
         )
         assert response.status_code == 200, response.text
-        assert response.json()["reply"] == "Good morning, Mary. I'm here with your care record."
+        assert response.json()["reply"] == "Good morning, Mary. I'm SolenOS Companion. How can I help?"
         prompt = captured["messages"][0]["content"]
         assert '"display_name":"Mary"' in prompt
         assert '"timezone_name":"America/New_York"' in prompt
