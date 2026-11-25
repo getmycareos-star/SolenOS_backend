@@ -3414,7 +3414,8 @@ def _context_query_with_history(current_text: str, prior_messages: list) -> str:
     referential = re.search(
         r"\b(?:it|that|those|them|there|then|afterward|afterwards|"
         r"what about|what happened|why did that|the same|that appointment|"
-        r"this appointment|what was that|and then|you keep asking|"
+        r"this appointment|what was that|what did you say|what did we discuss|"
+        r"what were we talking about|what was i asking|remind me what i said|and then|you keep asking|"
         r"i already told you|i've already told you|i have already told you|"
         r"why do i have to repeat|i said this already)\b",
         current.casefold(),
