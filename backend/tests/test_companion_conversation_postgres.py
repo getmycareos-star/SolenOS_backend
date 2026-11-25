@@ -567,3 +567,139 @@ def test_companion_acknowledgements_and_farewells_exclude_patient_context_and_lc
     assert response.json()["written_to_lcr"] is False
     assert captured["audit_context"]["source_event_ids"] == []
     assert captured["audit_context"]["source_evidence_ids"] == []
+
+
+
+def test_lcr_context_excludes_other_caregivers_private_observations_perspectives_and_context():
+    from app.core.caregiver_enums import ClaimType, InformationVisibility
+    from app.models.caregiver_intelligence import (
+        CaregiverContext,
+        CaregiverObservation,
+        CaregiverPerspective,
+        CaregiverProfile,
+    )
+    from app.services.lcr_context import build_lcr_context
+
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Private caregiver context recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    other_caregiver_id = f"private-context-other-{suffix}"
+
+    with Session() as db:
+        other_caregiver = Caregiver(
+            id=other_caregiver_id,
+            name="Other caregiver",
+            relationship="daughter",
+            person_id=person_id,
+        )
+        db.add(other_caregiver)
+        db.flush()
+        current_profile = CaregiverProfile(
+            person_id=person_id,
+            session_caregiver_id=caregiver_id,
+            name="Current caregiver",
+            relationship="daughter",
+        )
+        other_profile = CaregiverProfile(
+            person_id=person_id,
+            session_caregiver_id=other_caregiver_id,
+            name="Other caregiver",
+            relationship="daughter",
+        )
+        db.add_all([current_profile, other_profile])
+        db.flush()
+
+        db.add_all([
+            CaregiverObservation(
+                id=f"obs-own-private-{suffix}",
+                person_id=person_id,
+                caregiver_id=current_profile.id,
+                observation_content="CURRENT CAREGIVER PRIVATE OBSERVATION",
+                information_visibility=InformationVisibility.PRIVATE,
+                is_promoted_to_shared=False,
+            ),
+            CaregiverObservation(
+                id=f"obs-other-private-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                observation_content="OTHER CAREGIVER PRIVATE OBSERVATION",
+                information_visibility=InformationVisibility.PRIVATE,
+                is_promoted_to_shared=False,
+            ),
+            CaregiverObservation(
+                id=f"obs-other-shared-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                observation_content="OTHER CAREGIVER EXPLICITLY SHARED OBSERVATION",
+                information_visibility=InformationVisibility.SHARED,
+                is_promoted_to_shared=True,
+                promoted_by_caregiver_id=other_profile.id,
+            ),
+            CaregiverPerspective(
+                id=f"perspective-own-private-{suffix}",
+                person_id=person_id,
+                caregiver_id=current_profile.id,
+                claim_type=ClaimType.OBSERVATION,
+                claim_content="CURRENT CAREGIVER PRIVATE PERSPECTIVE",
+                information_visibility=InformationVisibility.PRIVATE,
+                is_promoted_to_shared=False,
+            ),
+            CaregiverPerspective(
+                id=f"perspective-other-private-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                claim_type=ClaimType.OBSERVATION,
+                claim_content="OTHER CAREGIVER PRIVATE PERSPECTIVE",
+                information_visibility=InformationVisibility.PRIVATE,
+                is_promoted_to_shared=False,
+            ),
+            CaregiverPerspective(
+                id=f"perspective-other-shared-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                claim_type=ClaimType.OBSERVATION,
+                claim_content="OTHER CAREGIVER EXPLICITLY SHARED PERSPECTIVE",
+                information_visibility=InformationVisibility.SHARED,
+                is_promoted_to_shared=True,
+                promoted_by_caregiver_id=other_profile.id,
+            ),
+            CaregiverContext(
+                id=f"context-own-{suffix}",
+                person_id=person_id,
+                caregiver_id=current_profile.id,
+                reported_by_caregiver_id=caregiver_id,
+                availability_notes="CURRENT CAREGIVER PRIVATE CONTEXT",
+            ),
+            CaregiverContext(
+                id=f"context-other-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                reported_by_caregiver_id=other_caregiver_id,
+                availability_notes="OTHER CAREGIVER PRIVATE CONTEXT",
+            ),
+        ])
+        db.commit()
+
+        context = build_lcr_context(
+            db,
+            person_id,
+            caregiver_id=caregiver_id,
+            limit_per_source=50,
+        )
+        observations = context["sources"]["caregiver_observations"]["items"]
+        perspectives = context["sources"]["caregiver_perspectives"]["items"]
+        caregiver_contexts = context["sources"]["caregiver_contexts"]["items"]
+
+        observation_text = " ".join(str(item) for item in observations)
+        perspective_text = " ".join(str(item) for item in perspectives)
+        caregiver_context_text = " ".join(str(item) for item in caregiver_contexts)
+        assert "CURRENT CAREGIVER PRIVATE OBSERVATION" in observation_text
+        assert "OTHER CAREGIVER EXPLICITLY SHARED OBSERVATION" in observation_text
+        assert "OTHER CAREGIVER PRIVATE OBSERVATION" not in observation_text
+        assert "CURRENT CAREGIVER PRIVATE PERSPECTIVE" in perspective_text
+        assert "OTHER CAREGIVER EXPLICITLY SHARED PERSPECTIVE" in perspective_text
+        assert "OTHER CAREGIVER PRIVATE PERSPECTIVE" not in perspective_text
+        assert "CURRENT CAREGIVER PRIVATE CONTEXT" in caregiver_context_text
+        assert "OTHER CAREGIVER PRIVATE CONTEXT" not in caregiver_context_text
