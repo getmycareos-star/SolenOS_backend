@@ -9990,7 +9990,9 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "content": (
                     f"Caregiver question: {user_text}"
                     if identity_question
-                    else f"Caregiver greeting or acknowledgement: {user_text}"
+                    else f"Caregiver greeting: {user_text}"
+                    if greeting_only
+                    else f"Caregiver acknowledgement or farewell: {user_text}"
                 ),
             })
         else:
