@@ -472,6 +472,17 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert direct.status_code == 201, direct.text
     assert direct.json()["observation_type"] == "DIRECT"
 
+    current_care = client.get(
+        "/api/v1/care-continuity/current-care",
+        headers=headers,
+    )
+    assert current_care.status_code == 200, current_care.text
+    assert any(
+        item.get("id") == observation.json()["id"]
+        and item.get("source_collection") == "caregiver_observations"
+        for item in current_care.json()["items"]
+    ), "the caregiver's own session-attributed private observation must appear in the LCR"
+
     context = client.post(
         "/api/v1/care-continuity/caregiver-contexts",
         headers=headers,

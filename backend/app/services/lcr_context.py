@@ -1246,15 +1246,39 @@ def build_lcr_context(
                 if shared_conditions
                 else false()
             )
-            own_private_row = false()
-            if owner_column is not None and caregiver_profile_id is not None:
-                if visibility_column is not None:
-                    own_private_row = and_(
-                        owner_column == str(caregiver_profile_id),
-                        func.lower(cast(visibility_column, String)) == "private",
-                    )
-                else:
-                    own_private_row = owner_column == str(caregiver_profile_id)
+            reported_by_column = table.c.get("reported_by_caregiver_id")
+            profile_match = (
+                owner_column == str(caregiver_profile_id)
+                if owner_column is not None and caregiver_profile_id is not None
+                else false()
+            )
+            reporter_match = (
+                reported_by_column == str(caregiver_id)
+                if reported_by_column is not None and caregiver_id
+                else false()
+            )
+            own_private_owner = false()
+            if owner_column is not None and reported_by_column is not None:
+                # Session-created observations/perspectives may have no legacy
+                # caregiver_profiles FK. Accept the authenticated reporter ID
+                # when that FK is null; if both IDs exist, require both to match.
+                own_private_owner = or_(
+                    and_(profile_match, reporter_match),
+                    and_(profile_match, reported_by_column.is_(None)),
+                    and_(owner_column.is_(None), reporter_match),
+                )
+            elif owner_column is not None:
+                own_private_owner = profile_match
+            elif reported_by_column is not None:
+                own_private_owner = reporter_match
+            own_private_row = (
+                and_(
+                    own_private_owner,
+                    func.lower(cast(visibility_column, String)) == "private",
+                )
+                if visibility_column is not None
+                else own_private_owner
+            )
             statement = statement.where(or_(shared_row, own_private_row))
         if source_name == "caregiver_contexts":
             ownership_conditions = []
