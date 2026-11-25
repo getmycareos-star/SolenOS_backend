@@ -4853,3 +4853,25 @@ def test_explicit_recall_of_earlier_dialogue_uses_prior_user_intent_not_assistan
     query = collaboration._context_query_with_history("What did you say earlier?", prior)
     assert "Mum was awake repeatedly between midnight and 3 AM." in query
     assert "sleep pattern" not in query.casefold()
+
+
+
+def test_humanized_companion_context_preserves_caregiver_observation_and_perspective_content():
+    observation = collaboration._humanize_model_context_line(
+        'Caregiver observation: {"source_type":"caregiver_observations","record":'
+        '{"id":"private-row-id","observation_content":"I noticed Mum sleeps better after lunch",'
+        '"observation_type":"direct","event_time":"2026-11-24T14:00:00Z",'
+        '"observation_context":"At home"}}'
+    )
+    perspective = collaboration._humanize_model_context_line(
+        'Caregiver perspective: {"source_type":"caregiver_perspectives","record":'
+        '{"id":"private-perspective-id","claim_type":"observation",'
+        '"claim_content":"Mum seems calmer when the room is quieter",'
+        '"context":"Evening routine"}}'
+    )
+    assert "I noticed Mum sleeps better after lunch" in observation
+    assert "observed event time" in observation
+    assert "Mum seems calmer when the room is quieter" in perspective
+    assert "Evening routine" in perspective
+    assert "private-row-id" not in observation
+    assert "private-perspective-id" not in perspective
