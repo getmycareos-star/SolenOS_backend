@@ -73,6 +73,9 @@ jobs:
       SOLENOS_TEST_POSTGRES_RESTART: "1"
       SECRET_KEY: "ci-only-secret-key-long-enough-for-test-runtime"
       APP_ENV: test
+      SOLENOS_QWEN_WORKER_ENABLED: "false"
+      SOLENOS_TEST_DISABLE_QWEN: "1"
+      SOLENOS_REQUIRE_LIVE_QWEN: "0"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
