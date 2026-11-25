@@ -6145,12 +6145,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             line for line in context_lines
             if not line.startswith(("Canonical LCR retrieval coverage: ", "Canonical LCR prompt coverage: "))
         ]
-    if focused_event_assist:
-        # This post-save interpretation is deliberately narrow. The gateway
-        # appends the shared operating and specialist contracts; repeating
-        # those rules here made first-visit requests exceed the 4K context
-        # window even after all optional record context had been removed.
-        prompt_prefix = _build_companion_prompt_prefix(
+    # Build the bounded workflow prefix for every Companion request. The
+    # workflow-specific guidance and canonical coverage are already scoped
+    # above; the shared safety and identity contracts are appended by the gateway.
+    prompt_prefix = _build_companion_prompt_prefix(
         payload.workflow,
         guidance,
         appointment_status_guidance,
@@ -9872,7 +9870,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_evidence_ids = list(dict.fromkeys([
             *selected_ids_by_type.get("care_evidence", []),
             *selected_verified_document_evidence_ids,
-            *_context_linked_evidence_ids(included_model_context_lines),
+            *_context_linked_evidence_ids([
+                *event_context,
+                *assertion_context,
+                *included_model_context_lines,
+            ]),
         ]))
         # Deterministic trend guards also inspect dated records outside the
         # model's ranked prompt subset. Keep those exact records in provenance

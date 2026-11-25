@@ -30,6 +30,23 @@ MAX_CONVERSATION_MESSAGE_CHARS = 1200
 MAX_QUERY_TERMS = 8
 _TEMPORAL_STOPWORDS = {"last", "past", "this", "week", "month", "year", "today", "yesterday", "days", "day", "since", "before", "after", "between", "and", "on"}
 
+_TEMPORAL_LOOKUP_LEAD = re.compile(
+    r"^(?:please\\s+)?(?:what|when|where|how|which|who|show|tell|explain|summari[sz]e|"
+    r"compare|list|find|retrieve|review|check|look\\s+back|did|has|have|was|were|"
+    r"is|are|can|could|would|do|does|should|i\\s+(?:want|need|would\\s+like)\\s+to\\s+know|"
+    r"i\\s+was\\s+wondering\\s+what|help\\s+me\\s+(?:understand|review|compare))\\b",
+    re.IGNORECASE,
+)
+
+
+def _is_temporal_lookup_request(query: str | None) -> bool:
+    """Distinguish history questions from caregiver statements that mention dates."""
+    text = " ".join(str(query or "").split())
+    if not text:
+        return False
+    return "?" in text or bool(_TEMPORAL_LOOKUP_LEAD.match(text))
+
+
 def _temporal_window(
     query: str | None,
     *,
@@ -421,18 +438,23 @@ def build_unified_lcr_context(
         raise ValueError("The authenticated caregiver timezone settings could not be resolved")
     caregiver_timezone = str(caregiver_settings[0] or "UTC")
     timezone_configured = bool(caregiver_settings[1])
-    if timezone_configured:
-        try:
-            ZoneInfo(caregiver_timezone)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
-            raise ValueError("Your saved time zone is not valid. Update it in Settings before asking about dates.") from exc
-        temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
+    if _is_temporal_lookup_request(query):
+        if timezone_configured:
+            try:
+                ZoneInfo(caregiver_timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError("Your saved time zone is not valid. Update it in Settings before asking about dates.") from exc
+            temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
+        else:
+            # Never use UTC as a substitute for the caregiver's unknown local
+            # calendar when answering a relative-date history question.
+            requested_window = _temporal_window(query, timezone_name="UTC")
+            if requested_window is not None:
+                raise ValueError("Set your time zone in Settings before asking about yesterday or another date range.")
+            temporal_window = None
     else:
-        # Probe only to detect date-dependent language. Never use UTC as a
-        # substitute for the caregiver's unknown local calendar.
-        requested_window = _temporal_window(query, timezone_name="UTC")
-        if requested_window is not None:
-            raise ValueError("Set your time zone in Settings before asking about yesterday or another date range.")
+        # A caregiver's dated statement is source material, not a request to
+        # resolve a calendar window. Preserve it without blocking capture.
         temporal_window = None
     context = build_lcr_context(
         db, str(person_id), caregiver_id=str(caregiver_id),

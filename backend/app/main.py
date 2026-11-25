@@ -791,6 +791,15 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
         # pair. Keep the exemption narrow; all other protected routes still need
         # an explicit or resource-derived care-record scope.
         session_identity_only = path.rstrip("/") == "/api/v1/caregiver/preferences"
+        if (
+            session_identity_only
+            and query_person_id
+            and str(query_person_id) != str(scoped_person_id)
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "Caregiver preferences are scoped to the authenticated caregiver"},
+            )
         if not target_person_id and not session_identity_only:
             return JSONResponse(
                 status_code=403,
