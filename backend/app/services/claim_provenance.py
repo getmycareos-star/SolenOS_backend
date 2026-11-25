@@ -16,6 +16,46 @@ def _normalise(value: str) -> str:
     value = re.sub(r"\s+", " ", value).strip()
     return value.strip(" \t\r\n.,;:!?\"'()[]{}")
 
+_ISO_DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
+
+
+def _timestamp_date(value: Any):
+    """Return an ISO calendar date from a persisted timestamp, or None."""
+    if isinstance(value, datetime):
+        return value.date()
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.strip().replace("Z", "+00:00")).date()
+    except ValueError:
+        return None
+
+
+def _claim_temporal_scope_matches(statement: str, source: dict[str, Any]) -> bool:
+    """Do not let exact wording override a conflicting explicit ISO date.
+
+    Event dates are checked against occurred_at; dates explicitly described as
+    recorded/uploaded/entered are checked against recorded_at. If the relevant
+    persisted timestamp is absent or malformed, the dated claim is unsupported.
+    Natural-language dates are deliberately not guessed here.
+    """
+    for match in _ISO_DATE_RE.finditer(statement or ""):
+        prefix = (statement or "")[max(0, match.start() - 32):match.start()].casefold()
+        timestamp_key = (
+            "recorded_at"
+            if re.search(r"\b(?:recorded|uploaded|entered|added)\s+(?:on|at)?\s*$", prefix)
+            else "occurred_at"
+        )
+        try:
+            from datetime import date
+            claimed_date = date.fromisoformat(match.group(1))
+        except ValueError:
+            return False
+        persisted_date = _timestamp_date(source.get(timestamp_key))
+        if persisted_date is None or persisted_date != claimed_date:
+            return False
+    return True
+
 
 def split_response_claims(reply: str) -> list[str]:
     """Split a response into displayable statements without inventing claims."""
@@ -509,11 +549,13 @@ def build_claim_provenance(
                     normalized_claim
                     and normalized_claim in normalized_source
                     and _claim_preserves_source_qualifiers(statement, source)
+                    and _claim_temporal_scope_matches(statement, source)
                 )
                 quoted_match = bool(
                     quoted_passage
                     and _normalise(quoted_passage) in normalized_source
                     and _claim_preserves_source_qualifiers(statement, source, matched_text=quoted_passage)
+                    and _claim_temporal_scope_matches(statement, source)
                 )
                 if exact_match or quoted_match:
                     record_status = str(source.get("record_status") or "").casefold()
@@ -693,4 +735,3 @@ def unmatched_material_claims(provenance: dict[str, Any]) -> list[dict[str, Any]
         }:
             unmatched.append(claim)
     return unmatched
-
