@@ -99,6 +99,23 @@ def test_daily_care_structured_measurement_and_medicine_validation_postgres():
             assert missing_unit.status_code == 422
             assert "unit" in missing_unit.text.lower()
 
+            missing_schedule = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_kind": "medicine",
+                    "medications": [{
+                        "medication_name": "Metformin",
+                        "status": "scheduled",
+                        "scheduled_for": None,
+                    }],
+                },
+            )
+            assert missing_schedule.status_code == 422
+            assert "planned date and time" in missing_schedule.text.lower()
+
             valid_pressure = client.post(
                 "/api/v1/daily/log",
                 headers=headers,
