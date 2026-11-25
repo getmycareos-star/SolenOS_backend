@@ -9180,6 +9180,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 limit_per_source=200 if care_journey_request else 50,
                 query=trend_retrieval_query,
                 include_all_history=care_journey_request,
+                conversation_limit=0 if social_only else MAX_CONVERSATION_CONTEXT_ITEMS,
+                only_sources=set() if social_only else None,
             )
             # An explicit date window is a complete scan of that requested
             # period, not a request for only the first ranked page. Fetch
@@ -9192,7 +9194,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     limit_per_source=200 if care_journey_request else 50,
                     max_pages=_lcr_history_page_limit(care_journey_request),
                 )
-            shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
+            if not social_only:
+                shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
             for source_name, source in shared_lcr_context["sources"].items():
                 if source_name == "companion_conversation":
