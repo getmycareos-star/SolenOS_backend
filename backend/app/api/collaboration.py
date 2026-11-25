@@ -6160,12 +6160,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         1024,
         64 if empty_context_emergency_readiness else response_length_policy.token_budget,
     )
-    # A focused post-save interpretation is deliberately short; reserving fewer
-    # output tokens leaves room for its source-attributed care context.
-    if focused_event_assist:
-        response_token_budget = min(response_token_budget, 256)
-    else:
-        response_token_budget = min(response_token_budget, 384)
+    # Focused post-save answers remain concise by word policy, but Qwen3.5
+    # needs enough generation headroom to finish its internal reasoning and
+    # return a complete answer. The gateway still enforces the context ceiling.
+    response_token_budget = min(response_token_budget, 384)
     response_length_instruction = (
         f"Target {response_length_policy.target_words} words; hard maximum {response_length_policy.max_words} words."
         if response_length_policy.max_words is not None

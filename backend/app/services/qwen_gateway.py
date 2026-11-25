@@ -110,9 +110,11 @@ def _estimate_prompt_tokens(messages: list[dict]) -> int:
         for message in messages
         if isinstance(message, dict)
     )
-    # 3.5 bytes/token is deliberately conservative for mostly English care text.
+    # Calibrated against real Qwen3.5 prompt token counts. Four UTF-8 bytes
+    # per token remains conservative for English care text and structured
+    # records without rejecting prompts that fit the model's actual window.
     # Message framing adds a small fixed allowance per message.
-    return math.ceil(content_bytes / 3.5) + (8 * len(messages))
+    return math.ceil(content_bytes / 4.0) + (8 * len(messages))
 
 
 def _enforce_prompt_context_budget(
