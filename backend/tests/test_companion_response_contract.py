@@ -1370,7 +1370,7 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         assert response.status_code == 200, response.text
         prompt = captured["messages"][0]["content"]
         assert "First answer the caregiver’s actual question" in prompt
-        assert "never treat chat history as proof" in prompt
+        assert "never treat chat history as proof" in prompt.casefold()
         assert response.json()["written_to_lcr"] is False
     finally:
         teardown()
@@ -4411,7 +4411,10 @@ def test_companion_fails_closed_when_material_care_paraphrase_has_no_source_matc
         )
         assert response.status_code == 200, response.text
         body = response.json()
-        assert body["reply"].startswith("I can't confirm that from the care record")
+        assert "saved notes mention mobility" in body["reply"].casefold()
+        assert "walked less steadily yesterday" in body["reply"].casefold()
+        assert "mobility has worsened" not in body["reply"].casefold()
+        assert "full care picture" in body["reply"].casefold()
         assert body["ai_generated"] is False
         assert body["model"] is None
         assert body["response_origin"] == "backend_grounding_fallback"
@@ -4521,6 +4524,7 @@ def test_authenticated_caregiver_preferences_are_persisted_scoped_and_used_by_co
             captured["messages"] = messages
             return "Good morning, Mary. I'm SolenOS Companion. How can I help?"
 
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
         monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
         response = client.post(
             "/api/v1/conversation/message",
@@ -4687,6 +4691,7 @@ def test_companion_receives_only_authenticated_caregivers_own_responsibilities_a
             captured["messages"] = messages
             return "I can help you review those items."
 
+        monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
         monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
         response = client.post(
             "/api/v1/conversation/message",
