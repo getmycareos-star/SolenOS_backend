@@ -1001,6 +1001,7 @@ def test_exact_wording_cannot_override_persisted_event_or_recording_date(
         ("partially_supported", "matched_non_current_only"),
         ("withdrawn", "matched_historical_only"),
         ("superseded", "matched_historical_only"),
+        ("failed", "matched_non_current_only"),
         ("unexpected_status", "matched_non_current_only"),
     ],
 )

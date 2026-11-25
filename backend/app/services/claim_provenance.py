@@ -586,7 +586,7 @@ def build_claim_provenance(
                         or (
                             assessment_status
                             and assessment_status not in {
-                                "supported", "unverified", "not_assessed", "unavailable", "failed",
+                                "supported", "unverified", "not_assessed", "unavailable",
                                 "superseded", "withdrawn", "partially_supported", "contradicted",
                                 "conflicting", "uncertain", "missing_evidence", "stale",
                             }
