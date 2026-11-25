@@ -3492,6 +3492,40 @@ def _context_record_ids(lines: list[str], id_key: str) -> list[str]:
     return list(dict.fromkeys(identifiers))
 
 
+def _context_linked_evidence_ids(lines: list[str]) -> list[str]:
+    """Return evidence IDs explicitly linked by context records selected for Companion."""
+    evidence_ids: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        brace = (line or "").find("{")
+        if brace < 0:
+            continue
+        try:
+            payload = json.loads(line[brace:])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
+        for container in (payload, record):
+            raw_ids = container.get("evidence_ids")
+            if isinstance(raw_ids, str):
+                try:
+                    raw_ids = json.loads(raw_ids)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    raw_ids = []
+            candidates = list(raw_ids) if isinstance(raw_ids, (list, tuple, set)) else []
+            linked_id = container.get("source_evidence_id")
+            if linked_id:
+                candidates.append(linked_id)
+            for candidate in candidates:
+                value = str(candidate or "").strip()
+                if value and value not in seen:
+                    seen.add(value)
+                    evidence_ids.append(value)
+    return evidence_ids
+
+
 def _context_record_refs(lines: list[str]) -> list[dict[str, str]]:
     """Extract typed source references from only the context lines selected for inference."""
     references = []
@@ -9815,9 +9849,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             *selected_ids_by_type.get("document_extraction", []),
             *selected_verified_document_ids,
         ]))
+        # Keep evidence links carried by selected events/assertions even when
+        # the separate evidence row did not fit the bounded prompt. The selected
+        # source record itself exposes this link, so it belongs in provenance.
         source_evidence_ids = list(dict.fromkeys([
             *selected_ids_by_type.get("care_evidence", []),
             *selected_verified_document_evidence_ids,
+            *_context_linked_evidence_ids(included_model_context_lines),
         ]))
         # Deterministic trend guards also inspect dated records outside the
         # model's ranked prompt subset. Keep those exact records in provenance
