@@ -31,10 +31,10 @@ MAX_QUERY_TERMS = 8
 _TEMPORAL_STOPWORDS = {"last", "past", "this", "week", "month", "year", "today", "yesterday", "days", "day", "since", "before", "after", "between", "and", "on"}
 
 _TEMPORAL_LOOKUP_LEAD = re.compile(
-    r"^(?:please\\s+)?(?:what|when|where|how|which|who|show|tell|explain|summari[sz]e|"
-    r"compare|list|find|retrieve|review|check|look\\s+back|did|has|have|was|were|"
-    r"is|are|can|could|would|do|does|should|i\\s+(?:want|need|would\\s+like)\\s+to\\s+know|"
-    r"i\\s+was\\s+wondering\\s+what|help\\s+me\\s+(?:understand|review|compare))\\b",
+    r"^(?:please\s+)?(?:what|when|where|how|which|who|show|tell|explain|summari[sz]e|"
+    r"compare|list|find|retrieve|review|check|look\s+back|did|has|have|was|were|"
+    r"is|are|can|could|would|do|does|should|i\s+(?:want|need|would\s+like)\s+to\s+know|"
+    r"i\s+was\s+wondering\s+what|help\s+me\s+(?:understand|review|compare))\b",
     re.IGNORECASE,
 )
 
