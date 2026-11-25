@@ -629,6 +629,7 @@ def persist_structured_daily_capture_observations(
         "bp_diastolic": "blood_pressure_diastolic",
         "heart_rate": "heart_rate",
         "temperature": "temperature",
+        "oxygen_sat": "oxygen_saturation",
         "oxygen_saturation": "oxygen_saturation",
         "weight": "weight",
     }
