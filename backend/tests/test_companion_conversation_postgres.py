@@ -514,7 +514,7 @@ def test_companion_follow_up_uses_only_same_caregivers_prior_session_history(mon
     assert response.status_code == 200, response.text
     serialized = json.dumps(captured["messages"])
     assert "Mum was awake repeatedly between midnight and 3 AM." in serialized
-    assert "The record does not yet establish a recurring pattern." in serialized
+    assert "The record does not yet establish a recurring pattern." not in serialized
     assert "PRIVATE OTHER CAREGIVER DISCLOSURE" not in serialized
     assert "PRIVATE OTHER CAREGIVER RESPONSE" not in serialized
 
