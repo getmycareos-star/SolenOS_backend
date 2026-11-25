@@ -741,6 +741,11 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
         str(value) for item in assertions.values()
         for value in (item.created_by_caregiver_id, item.updated_by_caregiver_id) if value
     )
+    caregiver_ids.update(
+        str(item.reviewed_by_caregiver_id)
+        for item in latest_claim_assessments.values()
+        if item.reviewed_by_caregiver_id
+    )
     caregiver_names = {
         str(item.id): item.name
         for item in db.query(Caregiver).filter(
@@ -964,6 +969,8 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "claim_assessment_status": (
                     str(latest_claim_assessments[record_id].status).casefold()
                     if record_id in latest_claim_assessments
+                    and str(latest_claim_assessments[record_id].reviewed_by_caregiver_id or "") in caregiver_names
+                    else "invalid_reviewer" if record_id in latest_claim_assessments
                     else "not_assessed" if claim_assessment_schema_status in {"available", "empty"}
                     else "unavailable" if claim_assessment_schema_status == "unavailable"
                     else "failed" if claim_assessment_schema_status == "failed"

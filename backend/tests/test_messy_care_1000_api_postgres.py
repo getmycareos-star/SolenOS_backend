@@ -1095,6 +1095,22 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 created_by_caregiver_id=caregiver_id,
                 recorded_at=before + timedelta(minutes=30),
             )
+            foreign_reviewer_claim = CareAssertion(
+                id=f"asof-foreign-reviewer-claim-{suffix}",
+                person_id=person_id,
+                subject_type="care_recipient",
+                subject_id=person_id,
+                field="mobility",
+                assertion_kind="current_state",
+                asserted_value="Caregiver reported that Mum walked independently.",
+                source_label="Caregiver report",
+                source_text="Caregiver reported that Mum walked independently.",
+                evidence_ids=[evidence.id],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=before,
+            )
             conflict_claim = CareAssertion(
                 id=f"asof-conflict-claim-{suffix}",
                 person_id=person_id,
@@ -1154,7 +1170,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             db.add_all([
                 evidence, foreign_evidence, freshness_policy, foreign_freshness_policy,
                 completeness_policy, foreign_completeness_policy, claim, claim_v2,
-                conflict_claim, foreign_claim, owner_event, foreign_event,
+                conflict_claim, foreign_reviewer_claim, foreign_claim, owner_event, foreign_event,
             ])
             db.flush()
             db.add_all([
@@ -1249,6 +1265,18 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     policy_version="claim-assessment-v1",
                     evidence_links=[{"evidence_id": evidence.id, "relationship": "conflicts"}],
                     reviewed_by_caregiver_id=caregiver_id,
+                    created_at=before + timedelta(minutes=10),
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-foreign-reviewer-claim-assessment-{suffix}",
+                    person_id=person_id,
+                    claim_id=foreign_reviewer_claim.id,
+                    claim_version=1,
+                    status="supported",
+                    rationale="This assessment was deliberately written by a caregiver from another care record.",
+                    policy_version="claim-assessment-v1",
+                    evidence_links=[{"evidence_id": evidence.id, "relationship": "supports"}],
+                    reviewed_by_caregiver_id=other_caregiver_id,
                     created_at=before + timedelta(minutes=10),
                 ),
                 EvidenceClaimAssessment(
@@ -1494,6 +1522,29 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             )
             assert len(conflict_sources) == 1
             assert conflict_sources[0]["claim_assessment_status"] == "conflicting"
+            foreign_reviewer_context = "Caregiver-attributed LCR assertion: " + __import__("json").dumps({
+                "source_type": "assertions",
+                "assertion_id": foreign_reviewer_claim.id,
+                "record": {
+                    "id": foreign_reviewer_claim.id,
+                    "person_id": person_id,
+                    "source_text": foreign_reviewer_claim.source_text,
+                    "assertion_status": foreign_reviewer_claim.assertion_status,
+                    "epistemic_state": foreign_reviewer_claim.epistemic_state,
+                },
+            })
+            foreign_reviewer_sources = collaboration._enrich_qwen_claim_source_records(
+                db, person_id, collaboration.context_lines_to_source_records([foreign_reviewer_context])
+            )
+            assert len(foreign_reviewer_sources) == 1
+            assert foreign_reviewer_sources[0]["claim_assessment_status"] == "invalid_reviewer"
+            foreign_reviewer_provenance = build_claim_provenance(
+                "Caregiver reported that Mum walked independently.",
+                foreign_reviewer_sources,
+                expected_person_id=person_id,
+            )
+            assert foreign_reviewer_provenance["claims"][0]["support_status"] == "matched_non_current_only"
+            assert unmatched_material_claims(foreign_reviewer_provenance)
             unassessed_context = "Caregiver-attributed LCR assertion: " + __import__("json").dumps({
                 "source_type": "assertions",
                 "assertion_id": claim_v2.id,
