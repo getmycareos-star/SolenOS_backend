@@ -9975,11 +9975,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     " This is a product-identity question. Answer only from the shared "
                     "SolenOS identity and behavioral constitution. Do not use or infer "
                     "patient-specific care information."
+                    if identity_question else
+                    " This is a brief social turn. Respond naturally and proportionately. "
+                    "Do not mention care-record content, start a care assessment, or claim an action occurred."
                 ),
             }]
             model_messages.append({
                 "role": "user",
-                "content": f"Caregiver question: {user_text}",
+                "content": (
+                    f"Caregiver question: {user_text}"
+                    if identity_question
+                    else f"Caregiver greeting or acknowledgement: {user_text}"
+                ),
             })
         elif greeting_only:
             # A greeting must not carry care-recipient names, records, or prior
