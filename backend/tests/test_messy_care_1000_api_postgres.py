@@ -1561,6 +1561,13 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             )
             assert len(unassessed_sources) == 1
             assert unassessed_sources[0]["claim_assessment_status"] == "not_assessed"
+            unassessed_provenance = build_claim_provenance(
+                "Caregiver reported that Mum walked independently.",
+                unassessed_sources,
+                expected_person_id=person_id,
+            )
+            assert unassessed_provenance["claims"][0]["support_status"] == "matched_non_current_only"
+            assert unmatched_material_claims(unassessed_provenance)
             conflict_provenance = build_claim_provenance(
                 "Caregiver reported that Mum felt unsteady near the kitchen.",
                 conflict_sources,
