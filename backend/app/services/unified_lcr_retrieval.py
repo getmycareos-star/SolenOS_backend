@@ -290,6 +290,14 @@ def _conversation_context(
     temporal_window: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Read relevant prior turns; keep all dialogue explicitly non-evidentiary."""
+    if int(limit or 0) <= 0:
+        return {
+            "status": "not_requested",
+            "items": [],
+            "returned_count": 0,
+            "has_more": False,
+            "limit": 0,
+        }
     statement = (
         db.query(ConversationMessage, ConversationSession)
         .join(ConversationSession, ConversationSession.id == ConversationMessage.session_id)
