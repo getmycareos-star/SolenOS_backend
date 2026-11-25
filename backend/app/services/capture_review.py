@@ -498,14 +498,16 @@ def structured_daily_capture_validation_error(detail: dict[str, Any]) -> str | N
         if vital_type in {"oxygen_sat", "oxygen_saturation"} and float(value) > 100:
             return "Check the oxygen-level reading. It cannot be higher than 100%."
         measured_at = item.get("measured_at")
-        if _capture_timestamp(measured_at) is None:
+        if measured_at not in (None, "") and _capture_timestamp(measured_at) is None:
+            return "Check when the measurement was taken and try again."
+        if capture_kind == "measurement" and _capture_timestamp(measured_at) is None:
             return "Choose when the measurement was taken before saving."
         if vital_type in {"bp_systolic", "blood_pressure_systolic"}:
             systolic_values.append(float(value))
         elif vital_type in {"bp_diastolic", "blood_pressure_diastolic"}:
             diastolic_values.append(float(value))
 
-    if bool(systolic_values) != bool(diastolic_values):
+    if capture_kind == "measurement" and bool(systolic_values) != bool(diastolic_values):
         return "Enter both the top and bottom blood pressure numbers."
     if systolic_values and diastolic_values and systolic_values[-1] <= diastolic_values[-1]:
         return "Check the blood pressure reading. The top number should be higher than the bottom number."
