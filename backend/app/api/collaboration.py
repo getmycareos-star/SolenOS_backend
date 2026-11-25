@@ -964,7 +964,7 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "claim_assessment_status": (
                     str(latest_claim_assessments[record_id].status).casefold()
                     if record_id in latest_claim_assessments
-                    else "not_assessed" if claim_assessment_schema_status == "empty"
+                    else "not_assessed" if claim_assessment_schema_status in {"available", "empty"}
                     else "unavailable" if claim_assessment_schema_status == "unavailable"
                     else "failed" if claim_assessment_schema_status == "failed"
                     else "not_applicable"

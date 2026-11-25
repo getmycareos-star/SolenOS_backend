@@ -1494,6 +1494,22 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             )
             assert len(conflict_sources) == 1
             assert conflict_sources[0]["claim_assessment_status"] == "conflicting"
+            unassessed_context = "Caregiver-attributed LCR assertion: " + __import__("json").dumps({
+                "source_type": "assertions",
+                "assertion_id": claim_v2.id,
+                "record": {
+                    "id": claim_v2.id,
+                    "person_id": person_id,
+                    "source_text": claim_v2.source_text,
+                    "assertion_status": claim_v2.assertion_status,
+                    "epistemic_state": claim_v2.epistemic_state,
+                },
+            })
+            unassessed_sources = collaboration._enrich_qwen_claim_source_records(
+                db, person_id, collaboration.context_lines_to_source_records([unassessed_context])
+            )
+            assert len(unassessed_sources) == 1
+            assert unassessed_sources[0]["claim_assessment_status"] == "not_assessed"
             conflict_provenance = build_claim_provenance(
                 "Caregiver reported that Mum felt unsteady near the kitchen.",
                 conflict_sources,
