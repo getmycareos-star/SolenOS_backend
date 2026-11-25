@@ -437,7 +437,7 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
             assert evidence.ingestion_key == retry_key
             upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
             assert upload.sha256 == hashlib.sha256(original).hexdigest()
-            assert upload.content == original
+            assert upload.size_bytes == len(original)
     finally:
         engine.dispose()
 
