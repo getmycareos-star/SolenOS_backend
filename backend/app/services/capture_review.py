@@ -459,6 +459,8 @@ def structured_daily_capture_validation_error(detail: dict[str, Any]) -> str | N
             value = item.get(field)
             if value not in (None, "") and _capture_timestamp(value) is None:
                 return "Check the medicine time and try again."
+        if status.strip().lower() == "scheduled" and _capture_timestamp(item.get("scheduled_for")) is None:
+            return "Add the planned date and time for this scheduled dose."
 
     systolic_values: list[float] = []
     diastolic_values: list[float] = []
