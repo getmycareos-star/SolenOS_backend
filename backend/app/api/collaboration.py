@@ -9899,10 +9899,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "selection_truncated_sources": selection_truncated_source_names,
             "source_limits": source_limit_details,
         }
-        if identity_question:
-            # Product-identity questions are answered from the shared constitution,
-            # not from patient history. Do not send care records or prior dialogue
-            # to the model for questions about SolenOS itself.
+        if identity_question or social_only:
+            # Product-identity questions and courtesy-only turns do not need patient
+            # history. Clear every care-source collection before prompt construction,
+            # provenance, and response serialization so no care detail is exposed.
             source_event_ids = []
             source_evidence_ids = []
             source_document_analysis_ids = []
@@ -9941,8 +9941,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             context_truncated = False
             low_capacity_support_fallback_used = False
             lcr_context_coverage = {
-                "status": "not_included_for_identity_question",
-                "reason": "Product identity questions do not require patient-specific care context.",
+                "status": ("not_included_for_social_turn" if social_only else "not_included_for_identity_question"),
+                "reason": ("Courtesy-only turns do not require patient-specific care context." if social_only else "Product identity questions do not require patient-specific care context."),
                 "identity_question_context_skipped": True,
                 "prompt_context_complete": True,
                 "prompt_context_chars": 0,
@@ -9952,8 +9952,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "failed_sources": [],
             }
             retrieval_receipt = {
-                "retrieval_completeness": "not_included_for_identity_question",
-                "answer_restriction": "product_identity_only",
+                "retrieval_completeness": ("not_included_for_social_turn" if social_only else "not_included_for_identity_question"),
+                "answer_restriction": ("social_response_only" if social_only else "product_identity_only"),
                 "identity_question_context_skipped": True,
                 "context_truncated": False,
                 "prompt_context_chars": 0,
@@ -9962,8 +9962,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             }
             lcr_context_coverage["retrieval_receipt"] = retrieval_receipt
             model_retrieval_coverage = {
-                "retrieval_completeness": "not_included_for_identity_question",
-                "answer_restriction": "product_identity_only",
+                "retrieval_completeness": ("not_included_for_social_turn" if social_only else "not_included_for_identity_question"),
+                "answer_restriction": ("social_response_only" if social_only else "product_identity_only"),
                 "context_truncated": False,
                 "missing_required_sources": [],
                 "failed_sources": [],
