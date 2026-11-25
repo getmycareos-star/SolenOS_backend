@@ -9992,25 +9992,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     else f"Caregiver greeting or acknowledgement: {user_text}"
                 ),
             })
-        elif greeting_only:
-            # A greeting must not carry care-recipient names, records, or prior
-            # dialogue into a response that may be visible on a shared screen.
-            model_messages.append({
-                "role": "user",
-                "content": f"Caregiver greeting: {user_text}",
-            })
-        elif acknowledgement_only:
-            # Thanks and farewells are social turns, not requests to reopen a care
-            # workflow. Do not send retrieved patient context or prior dialogue.
-            model_messages[0]["content"] += (
-                " This is a brief acknowledgement or farewell. Respond proportionately in one short sentence. "
-                "Do not launch a care assessment, introduce a care concern, ask a follow-up question, "
-                "or claim that a record or action changed."
-            )
-            model_messages.append({
-                "role": "user",
-                "content": f"Caregiver acknowledgement or farewell: {user_text}",
-            })
         else:
             # Keep retrieval completeness and source-specific limits in the
             # system role as well as the caregiver data message. The model must
