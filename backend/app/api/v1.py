@@ -17,6 +17,7 @@ from app.services.capture_review import (
     persist_capture_analysis,
     persist_source_grounded_daily_observations,
     persist_structured_daily_capture_observations,
+    structured_daily_capture_validation_error,
 )
 from app.services.uncertainty import persist_source_clarification_questions
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
@@ -700,6 +701,10 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     # Keep the submitted structured fields intact in the event record. The
     # existing schema has no separate medication/vitals/scales tables yet.
     detail = {key: value for key, value in payload.items() if key not in {"person_id", "caregiver_id", "created_by_caregiver_id"}}
+    if event_type in {"structured_daily_capture", "daily_care_entry"}:
+        validation_error = structured_daily_capture_validation_error(detail)
+        if validation_error:
+            raise HTTPException(status_code=422, detail=validation_error)
     quick_check_in = detail.get("quick_check_in")
     capture_request_fingerprint = None
     if event_type in {"structured_daily_capture", "daily_care_entry"} and capture_idempotency_key:
