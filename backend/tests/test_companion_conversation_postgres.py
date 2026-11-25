@@ -515,3 +515,52 @@ def test_companion_follow_up_uses_only_same_caregivers_prior_session_history(mon
     assert "The record does not yet establish a recurring pattern." in serialized
     assert "PRIVATE OTHER CAREGIVER DISCLOSURE" not in serialized
     assert "PRIVATE OTHER CAREGIVER RESPONSE" not in serialized
+
+
+
+@pytest.mark.parametrize(
+    ("message_text", "model_reply"),
+    [("Thank you.", "You're welcome."), ("Goodbye.", "Goodbye for now.")],
+)
+def test_companion_acknowledgements_and_farewells_exclude_patient_context_and_lcr_sources(
+    monkeypatch, message_text, model_reply,
+):
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Social turn recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    captured = {}
+
+    with Session() as db:
+        db.add(CareEvent(
+            id=f"private-social-event-{suffix}",
+            person_id=person_id,
+            event_type="observation",
+            occurred_at=datetime.now(timezone.utc),
+            title="PRIVATE CARE EVENT TITLE",
+            description="PRIVATE CARE EVENT DETAILS MUST NOT REACH A COURTESY RESPONSE",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.commit()
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        captured["messages"] = messages
+        captured["audit_context"] = audit_context
+        return model_reply
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={"person_id": person_id, "text": message_text},
+    )
+    assert response.status_code == 200, response.text
+    serialized_prompt = json.dumps(captured["messages"])
+    assert "PRIVATE CARE EVENT TITLE" not in serialized_prompt
+    assert "PRIVATE CARE EVENT DETAILS" not in serialized_prompt
+    assert response.json()["source_event_ids"] == []
+    assert response.json()["source_evidence_ids"] == []
+    assert response.json()["written_to_lcr"] is False
+    assert captured["audit_context"]["source_event_ids"] == []
+    assert captured["audit_context"]["source_evidence_ids"] == []
