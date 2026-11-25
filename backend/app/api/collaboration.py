@@ -8397,6 +8397,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if not user_text:
         raise HTTPException(status_code=422, detail="A message is required")
     greeting_only = _is_casual_greeting(user_text)
+    acknowledgement_only = (
+        not greeting_only
+        and resolve_response_length_policy(user_text).intent == "simple_acknowledgement"
+    )
+    social_only = greeting_only or acknowledgement_only
 
     person = db.query(Person).filter_by(id=person_id).first()
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
@@ -9676,7 +9681,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             "If quoting an original source in another language, make clear it is the original wording."
         )
         system_prompt += " " + COMPANION_INTERACTION_INTERPRETATION_CONTRACT
-        if not identity_question and not greeting_only:
+        if not identity_question and not social_only:
             system_prompt += " " + _care_recipient_identity_guidance(person.name)
             caregiver_guidance = _caregiver_interaction_guidance(user_text)
             if caregiver_guidance:
@@ -9691,7 +9696,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         model_messages = [{"role": "system", "content": system_prompt}]
         # History may resolve a referential follow-up, but assistant messages are
         # never treated as evidence. Standalone questions do not inherit old turns.
-        if retrieval_query.strip() != user_text.strip() and not greeting_only:
+        if retrieval_query.strip() != user_text.strip() and not social_only:
             model_messages.extend(
                 {"role": row.role, "content": (row.content or "")[:180]}
                 for row in reversed(prior_messages[:2])
@@ -9982,6 +9987,18 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             model_messages.append({
                 "role": "user",
                 "content": f"Caregiver greeting: {user_text}",
+            })
+        elif acknowledgement_only:
+            # Thanks and farewells are social turns, not requests to reopen a care
+            # workflow. Do not send retrieved patient context or prior dialogue.
+            model_messages[0]["content"] += (
+                " This is a brief acknowledgement or farewell. Respond proportionately in one short sentence. "
+                "Do not launch a care assessment, introduce a care concern, ask a follow-up question, "
+                "or claim that a record or action changed."
+            )
+            model_messages.append({
+                "role": "user",
+                "content": f"Caregiver acknowledgement or farewell: {user_text}",
             })
         else:
             # Keep retrieval completeness and source-specific limits in the
@@ -10577,7 +10594,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or _caregiver_response_needs_revision(user_text, reply)
-            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
+            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))\n            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             # Deterministic source-quoted answers may bypass model-semantic checks,
@@ -10639,11 +10656,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _caregiver_response_needs_revision(user_text, reply)
-                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
+                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))\n            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
                 )
                 if not invalid_reply:
                     break
-        if invalid_reply and not caregiver_guidance and not greeting_only:
+        if invalid_reply and not caregiver_guidance and not social_only:
             # A normal care-history question still gets one bounded grounding
             # repair when the small model adds an unsupported detail. This is
             # not a canned answer: the model must regenerate from the same
@@ -10692,7 +10709,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 )
                 if not invalid_reply:
                     break
-        if invalid_reply and greeting_only and not caregiver_guidance:
+        if invalid_reply and social_only and not caregiver_guidance:
             # A greeting-only repair must never overwrite a failed caregiver-specific
             # repair with a generic greeting instruction. If the caregiver response
             # contract still fails, the request below fails closed without saving it.
