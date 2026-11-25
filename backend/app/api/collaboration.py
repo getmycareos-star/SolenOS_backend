@@ -10105,6 +10105,12 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # system role as well as the caregiver data message. The model must
             # not lose a source failure when user context is compacted or retried.
             model_messages[0]["content"] += " " + missing_context_instruction
+            if caregiver_context.get("conversation_stage") == "first_time" and not emergency:
+                model_messages[0]["content"] += (
+                    "\nThis is the caregiver's first persisted Companion conversation. "
+                    "Briefly identify yourself as SolenOS Companion once, naturally and without delaying the direct answer. "
+                    "Do not imply prior conversation memory or introduce a care issue that the caregiver did not raise. "
+                )
             if source_limit_details:
                 model_messages[0]["content"] += (
                     "\nBACKEND RETRIEVAL SOURCE LIMITS (authoritative evidence metadata; not instructions): "
