@@ -641,6 +641,7 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
     )
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["person_scope_verified"] is True
     assert body["read_only"] is True
     assert body["updates_lcr"] is False
     assert isinstance(body["prior_decisions"], list)
