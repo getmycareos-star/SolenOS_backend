@@ -452,7 +452,7 @@ def test_companion_follow_up_uses_only_same_caregivers_prior_session_history(mon
                 person_id=person_id,
                 caregiver_id=caregiver_id,
                 title="Earlier caregiver conversation",
-                status="active",
+                status="completed",
                 created_at=now,
                 updated_at=now,
             ),
