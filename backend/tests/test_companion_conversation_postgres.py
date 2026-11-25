@@ -350,6 +350,7 @@ def test_companion_prompt_receives_authenticated_caregiver_recipient_and_timezon
         captured["audit_context"] = audit_context
         return "I can help you review the information in this care record."
 
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     response = client.post(
         "/api/v1/conversation/message",
@@ -503,6 +504,7 @@ def test_companion_follow_up_uses_only_same_caregivers_prior_session_history(mon
         captured["messages"] = messages
         return "I can help you look at the earlier note."
 
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     response = client.post(
         "/api/v1/conversation/message",
@@ -549,6 +551,7 @@ def test_companion_acknowledgements_and_farewells_exclude_patient_context_and_lc
         captured["audit_context"] = audit_context
         return model_reply
 
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
     response = client.post(
         "/api/v1/conversation/message",
