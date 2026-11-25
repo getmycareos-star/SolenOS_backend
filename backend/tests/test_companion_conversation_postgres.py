@@ -670,14 +670,35 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
                 person_id=person_id,
                 caregiver_id=current_profile.id,
                 reported_by_caregiver_id=caregiver_id,
-                availability_notes="CURRENT CAREGIVER PRIVATE CONTEXT",
+                availability_notes="CURRENT CAREGIVER OWNER CONTEXT",
+            ),
+            CaregiverContext(
+                id=f"context-own-profile-only-{suffix}",
+                person_id=person_id,
+                caregiver_id=current_profile.id,
+                reported_by_caregiver_id=None,
+                availability_notes="CURRENT CAREGIVER PROFILE ATTRIBUTION",
+            ),
+            CaregiverContext(
+                id=f"context-own-session-only-{suffix}",
+                person_id=person_id,
+                caregiver_id=None,
+                reported_by_caregiver_id=caregiver_id,
+                availability_notes="CURRENT CAREGIVER SESSION ATTRIBUTION",
+            ),
+            CaregiverContext(
+                id=f"context-mismatched-owner-{suffix}",
+                person_id=person_id,
+                caregiver_id=current_profile.id,
+                reported_by_caregiver_id=other_caregiver_id,
+                availability_notes="CONFLICTING CAREGIVER ATTRIBUTION",
             ),
             CaregiverContext(
                 id=f"context-other-{suffix}",
                 person_id=person_id,
                 caregiver_id=other_profile.id,
                 reported_by_caregiver_id=other_caregiver_id,
-                availability_notes="OTHER CAREGIVER PRIVATE CONTEXT",
+                availability_notes="OTHER CAREGIVER OWNER CONTEXT",
             ),
         ])
         db.commit()
@@ -701,5 +722,8 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
         assert "CURRENT CAREGIVER PRIVATE PERSPECTIVE" in perspective_text
         assert "OTHER CAREGIVER EXPLICITLY SHARED PERSPECTIVE" in perspective_text
         assert "OTHER CAREGIVER PRIVATE PERSPECTIVE" not in perspective_text
-        assert "CURRENT CAREGIVER PRIVATE CONTEXT" in caregiver_context_text
-        assert "OTHER CAREGIVER PRIVATE CONTEXT" not in caregiver_context_text
+        assert "CURRENT CAREGIVER OWNER CONTEXT" in caregiver_context_text
+        assert "CURRENT CAREGIVER PROFILE ATTRIBUTION" in caregiver_context_text
+        assert "CURRENT CAREGIVER SESSION ATTRIBUTION" in caregiver_context_text
+        assert "CONFLICTING CAREGIVER ATTRIBUTION" not in caregiver_context_text
+        assert "OTHER CAREGIVER OWNER CONTEXT" not in caregiver_context_text
