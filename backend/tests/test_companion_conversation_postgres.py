@@ -422,3 +422,96 @@ def test_companion_retrieval_and_qwen_source_gate_exclude_caregiver_deleted_evid
                 db, person_id, caregiver_id, deleted_id, deleted_text,
             )
         assert deleted.value.status_code == 404
+
+
+
+def test_companion_follow_up_uses_only_same_caregivers_prior_session_history(monkeypatch):
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Conversation continuity recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    prior_session_id = f"prior-conversation-{suffix}"
+    other_caregiver_id = f"other-caregiver-{suffix}"
+    other_session_id = f"other-conversation-{suffix}"
+    captured = {}
+
+    with Session() as db:
+        now = datetime.now(timezone.utc)
+        db.add(Caregiver(
+            id=other_caregiver_id,
+            name="Other authorised caregiver",
+            relationship="Son",
+            person_id=person_id,
+        ))
+        db.flush()
+        db.add_all([
+            ConversationSession(
+                id=prior_session_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title="Earlier caregiver conversation",
+                status="active",
+                created_at=now,
+                updated_at=now,
+            ),
+            ConversationSession(
+                id=other_session_id,
+                person_id=person_id,
+                caregiver_id=other_caregiver_id,
+                title="Other caregiver conversation",
+                status="active",
+                created_at=now,
+                updated_at=now,
+            ),
+        ])
+        db.flush()
+        db.add_all([
+            ConversationMessage(
+                id=f"prior-user-{suffix}",
+                session_id=prior_session_id,
+                role="user",
+                content="Mum was awake repeatedly between midnight and 3 AM.",
+                created_at=now,
+            ),
+            ConversationMessage(
+                id=f"prior-assistant-{suffix}",
+                session_id=prior_session_id,
+                role="assistant",
+                content="The record does not yet establish a recurring pattern.",
+                created_at=now,
+            ),
+            ConversationMessage(
+                id=f"other-user-{suffix}",
+                session_id=other_session_id,
+                role="user",
+                content="PRIVATE OTHER CAREGIVER DISCLOSURE",
+                created_at=now,
+            ),
+            ConversationMessage(
+                id=f"other-assistant-{suffix}",
+                session_id=other_session_id,
+                role="assistant",
+                content="PRIVATE OTHER CAREGIVER RESPONSE",
+                created_at=now,
+            ),
+        ])
+        db.commit()
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        captured["messages"] = messages
+        return "I can help you look at the earlier note."
+
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={"person_id": person_id, "text": "What about that?"},
+    )
+    assert response.status_code == 200, response.text
+    serialized = json.dumps(captured["messages"])
+    assert "Mum was awake repeatedly between midnight and 3 AM." in serialized
+    assert "The record does not yet establish a recurring pattern." in serialized
+    assert "PRIVATE OTHER CAREGIVER DISCLOSURE" not in serialized
+    assert "PRIVATE OTHER CAREGIVER RESPONSE" not in serialized
