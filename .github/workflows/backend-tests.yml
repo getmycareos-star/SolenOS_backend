@@ -167,6 +167,10 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      - name: Run PostgreSQL Companion identity, continuity and privacy integration tests
+        working-directory: backend
+        run: pytest -q tests/test_companion_conversation_postgres.py
+
       - name: Verify security incident timeline is append-only on PostgreSQL
         run: |
           python - <<'PY'
