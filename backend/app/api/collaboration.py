@@ -8938,6 +8938,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .filter(
                 ConversationSession.person_id == person_id,
                 ConversationSession.caregiver_id == caregiver_id,
+                ConversationMessage.role == "user",
             )
             .order_by(
                 ConversationMessage.created_at.desc(),
@@ -9225,18 +9226,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             conversation_items = [
                 item for item in conversation_source.get("items", [])
                 if isinstance(item, dict)
-                and str(item.get("role") or "").casefold() in {"user", "assistant"}
+                and str(item.get("role") or "").casefold() == "user"
                 and isinstance(item.get("content"), str)
                 and item["content"].strip()
             ][-6:]
             conversation_context_lines = [
-                (
-                    "Prior caregiver message from another Companion session "
-                    "(conversation context only; not care evidence or an LCR record): "
-                    if str(item.get("role") or "").casefold() == "user"
-                    else "Prior SolenOS Companion reply from another session "
-                    "(conversation context only; not care evidence or an LCR record): "
-                )
+                "Prior caregiver message from another Companion session "
+                "(conversation context only; not care evidence or an LCR record): "
                 + item["content"].strip()[:600]
                 for item in conversation_items
             ]
