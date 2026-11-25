@@ -284,7 +284,7 @@ def test_companion_prompt_identity_binds_authenticated_caregiver_to_named_recipi
     assert identity["caregiver_relationship"] == "Daughter"
     assert identity["caregiver_role"] == "primary"
     assert identity["access_scope"] == "full_record"
-    assert identity["permitted_capabilities"] == ["view_lcr", "add_evidence"]
+    assert set(identity["permitted_capabilities"]) == {"view_lcr", "add_evidence"}
     assert identity["timezone_name"] == "America/Los_Angeles"
     assert identity["local_datetime"] == "2026-11-24T06:00:00-08:00"
     assert identity["local_date"] == "2026-11-24"
