@@ -8880,7 +8880,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             .filter(
                 ConversationSession.person_id == person_id,
                 ConversationSession.caregiver_id == caregiver_id,
-                ConversationSession.status == "active",
             )
             .order_by(
                 ConversationMessage.created_at.desc(),
