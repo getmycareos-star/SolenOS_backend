@@ -989,3 +989,43 @@ def test_exact_wording_cannot_override_persisted_event_or_recording_date(
     assert result["claims"][0]["support_status"] == expected
     if expected == "not_matched_to_saved_wording":
         assert unmatched_material_claims(result)
+
+@pytest.mark.parametrize(
+    ("assessment_status", "expected_status"),
+    [
+        ("supported", "matched_saved_wording"),
+        ("unverified", "matched_saved_wording"),
+        ("conflicting", "matched_non_current_only"),
+        ("contradicted", "matched_non_current_only"),
+        ("stale", "matched_non_current_only"),
+        ("partially_supported", "matched_non_current_only"),
+        ("withdrawn", "matched_historical_only"),
+        ("superseded", "matched_historical_only"),
+        ("unexpected_status", "matched_non_current_only"),
+    ],
+)
+def test_latest_human_claim_assessment_limits_assertion_source_support(
+    assessment_status, expected_status
+):
+    source_text = "Caregiver reported that Mum felt dizzy."
+    provenance = build_claim_provenance(
+        source_text,
+        [{
+            "record_type": "care_assertion",
+            "record_id": "reviewed-claim",
+            "person_id": "person-1",
+            "source_text": source_text,
+            "record_status": "reported",
+            "epistemic_status": "reported",
+            "claim_assessment_id": "assessment-1",
+            "claim_assessment_version": 3,
+            "claim_assessment_status": assessment_status,
+        }],
+        expected_person_id="person-1",
+    )
+    claim = provenance["claims"][0]
+    assert claim["support_status"] == expected_status
+    assert claim["source_references"][0]["claim_assessment_status"] == assessment_status
+    assert claim["source_references"][0]["claim_assessment_version"] == 3
+    if expected_status != "matched_saved_wording":
+        assert unmatched_material_claims(provenance)

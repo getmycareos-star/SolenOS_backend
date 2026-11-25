@@ -697,6 +697,33 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
             ).all() if assertion_ids else []
         )
     }
+    latest_claim_assessments: dict[str, EvidenceClaimAssessment] = {}
+    claim_assessment_schema_status = "not_applicable"
+    if assertion_ids:
+        try:
+            if inspect(db.get_bind()).has_table("evidence_claim_assessments"):
+                assessment_rows = (
+                    db.query(EvidenceClaimAssessment)
+                    .filter(
+                        EvidenceClaimAssessment.person_id == person_id,
+                        EvidenceClaimAssessment.claim_id.in_(sorted(set(assertion_ids))),
+                    )
+                    .order_by(
+                        EvidenceClaimAssessment.claim_id.asc(),
+                        EvidenceClaimAssessment.claim_version.desc(),
+                        EvidenceClaimAssessment.created_at.desc(),
+                    )
+                    .all()
+                )
+                for assessment in assessment_rows:
+                    latest_claim_assessments.setdefault(str(assessment.claim_id), assessment)
+                claim_assessment_schema_status = "available" if assessment_rows else "empty"
+            else:
+                claim_assessment_schema_status = "unavailable"
+        except Exception:
+            db.rollback()
+            latest_claim_assessments = {}
+            claim_assessment_schema_status = "failed"
     caregiver_ids = set()
     for item in events.values():
         if item.created_by_caregiver_id:
@@ -926,6 +953,22 @@ def _enrich_qwen_claim_source_records(db: Session, person_id: str, records: list
                 "entered_by": caregiver_names.get(str(item.created_by_caregiver_id or "")),
                 "record_status": item.assertion_status,
                 "epistemic_status": item.epistemic_state,
+                "claim_assessment_id": (
+                    str(latest_claim_assessments[record_id].id)
+                    if record_id in latest_claim_assessments else None
+                ),
+                "claim_assessment_version": (
+                    int(latest_claim_assessments[record_id].claim_version)
+                    if record_id in latest_claim_assessments else None
+                ),
+                "claim_assessment_status": (
+                    str(latest_claim_assessments[record_id].status).casefold()
+                    if record_id in latest_claim_assessments
+                    else "not_assessed" if claim_assessment_schema_status == "empty"
+                    else "unavailable" if claim_assessment_schema_status == "unavailable"
+                    else "failed" if claim_assessment_schema_status == "failed"
+                    else "not_applicable"
+                ),
                 "related_evidence_ids": [str(value) for value in (item.evidence_ids or [])],
                 "related_evidence": [
                     summary for evidence_id in (item.evidence_ids or [])

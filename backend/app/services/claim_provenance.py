@@ -566,9 +566,11 @@ def build_claim_provenance(
                         if isinstance(item, dict)
                         for key in ("record_status", "source_lifecycle_status", "epistemic_status")
                     ]
+                    assessment_status = str(source.get("claim_assessment_status") or "").casefold()
                     is_historical = (
                         record_status in historical_statuses
                         or lifecycle_status in historical_statuses
+                        or assessment_status in {"superseded", "withdrawn"}
                         or (
                             source.get("record_type") == "document_extraction"
                             and any(status in historical_statuses for status in related_source_statuses)
@@ -577,6 +579,18 @@ def build_claim_provenance(
                     is_non_current = (
                         record_status in non_current_statuses
                         or lifecycle_status in non_current_statuses
+                        or assessment_status in {
+                            "partially_supported", "contradicted", "conflicting",
+                            "uncertain", "missing_evidence", "stale",
+                        }
+                        or (
+                            assessment_status
+                            and assessment_status not in {
+                                "supported", "unverified", "not_assessed", "unavailable", "failed",
+                                "superseded", "withdrawn", "partially_supported", "contradicted",
+                                "conflicting", "uncertain", "missing_evidence", "stale",
+                            }
+                        )
                         or (
                             source.get("record_type") == "document_extraction"
                             and any(status in non_current_statuses for status in related_source_statuses)
@@ -602,6 +616,9 @@ def build_claim_provenance(
                         "record_status": source.get("record_status"),
                         "epistemic_status": source.get("epistemic_status"),
                         "source_lifecycle_status": source.get("source_lifecycle_status"),
+                        "claim_assessment_id": source.get("claim_assessment_id"),
+                        "claim_assessment_version": source.get("claim_assessment_version"),
+                        "claim_assessment_status": source.get("claim_assessment_status"),
                         # Preserve the lifecycle classification used for this exact
                         # match. Recomputing it from the un-enriched input pool below
                         # loses nested document-evidence lifecycle state.

@@ -1095,6 +1095,22 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                 created_by_caregiver_id=caregiver_id,
                 recorded_at=before + timedelta(minutes=30),
             )
+            conflict_claim = CareAssertion(
+                id=f"asof-conflict-claim-{suffix}",
+                person_id=person_id,
+                subject_type="care_recipient",
+                subject_id=person_id,
+                field="mobility",
+                assertion_kind="current_state",
+                asserted_value="Caregiver reported that Mum felt unsteady near the kitchen.",
+                source_label="Caregiver report",
+                source_text="Caregiver reported that Mum felt unsteady near the kitchen.",
+                evidence_ids=[evidence.id],
+                assertion_status="reported",
+                epistemic_state="reported",
+                created_by_caregiver_id=caregiver_id,
+                recorded_at=before,
+            )
             foreign_claim = CareAssertion(
                 id=f"asof-foreign-claim-{suffix}",
                 person_id=other_person_id,
@@ -1138,7 +1154,7 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             db.add_all([
                 evidence, foreign_evidence, freshness_policy, foreign_freshness_policy,
                 completeness_policy, foreign_completeness_policy, claim, claim_v2,
-                foreign_claim, owner_event, foreign_event,
+                conflict_claim, foreign_claim, owner_event, foreign_event,
             ])
             db.flush()
             db.add_all([
@@ -1222,6 +1238,18 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     supersedes_assessment_id=f"asof-claim-assessment-before-{suffix}",
                     superseded_by_claim_id=claim_v2.id,
                     created_at=before + timedelta(minutes=30),
+                ),
+                EvidenceClaimAssessment(
+                    id=f"asof-conflict-claim-assessment-{suffix}",
+                    person_id=person_id,
+                    claim_id=conflict_claim.id,
+                    claim_version=1,
+                    status="conflicting",
+                    rationale="Two persisted sources disagree about the mobility observation.",
+                    policy_version="claim-assessment-v1",
+                    evidence_links=[{"evidence_id": evidence.id, "relationship": "conflicts"}],
+                    reviewed_by_caregiver_id=caregiver_id,
+                    created_at=before + timedelta(minutes=10),
                 ),
                 EvidenceClaimAssessment(
                     id=f"asof-claim-assessment-after-{suffix}",
@@ -1450,6 +1478,30 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
                     "source_text": "Caregiver reported that Mum felt unsteady near the kitchen.",
                 }],
             )
+            conflict_context = "Caregiver-attributed LCR assertion: " + __import__("json").dumps({
+                "source_type": "assertions",
+                "assertion_id": conflict_claim.id,
+                "record": {
+                    "id": conflict_claim.id,
+                    "person_id": person_id,
+                    "source_text": conflict_claim.source_text,
+                    "assertion_status": conflict_claim.assertion_status,
+                    "epistemic_state": conflict_claim.epistemic_state,
+                },
+            })
+            conflict_sources = collaboration._enrich_qwen_claim_source_records(
+                db, person_id, collaboration.context_lines_to_source_records([conflict_context])
+            )
+            assert len(conflict_sources) == 1
+            assert conflict_sources[0]["claim_assessment_status"] == "conflicting"
+            conflict_provenance = build_claim_provenance(
+                "Caregiver reported that Mum felt unsteady near the kitchen.",
+                conflict_sources,
+                expected_person_id=person_id,
+            )
+            assert conflict_provenance["claims"][0]["support_status"] == "matched_non_current_only"
+            assert unmatched_material_claims(conflict_provenance)
+
             supported = build_claim_provenance(
                 "According to the caregiver: “Mum felt unsteady near the kitchen.”",
                 owner_sources,
