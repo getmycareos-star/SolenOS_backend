@@ -10594,7 +10594,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
             or _caregiver_response_needs_revision(user_text, reply)
-            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))\n            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
+            or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
+            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
         )
         if care_history_direct_answer_used or caregiver_question_direct_answer_used or medication_dose_recall_fallback_used:
             # Deterministic source-quoted answers may bypass model-semantic checks,
@@ -10656,7 +10657,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
                     or _caregiver_response_needs_revision(user_text, reply)
-                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))\n            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
+                    or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
+            or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
                 )
                 if not invalid_reply:
                     break
