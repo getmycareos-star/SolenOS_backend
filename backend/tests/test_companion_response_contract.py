@@ -4837,3 +4837,14 @@ def test_first_time_greeting_introduction_validator_accepts_canonical_product_na
     assert collaboration._first_time_greeting_missing_introduction(
         "Hello, I'm your care assistant. How can I help?"
     )
+
+
+
+def test_explicit_recall_of_earlier_dialogue_uses_prior_user_intent_not_assistant_claims():
+    prior = [
+        SimpleNamespace(role="user", content="Mum was awake repeatedly between midnight and 3 AM."),
+        SimpleNamespace(role="assistant", content="That may indicate a sleep pattern."),
+    ]
+    query = collaboration._context_query_with_history("What did you say earlier?", prior)
+    assert "Mum was awake repeatedly between midnight and 3 AM." in query
+    assert "sleep pattern" not in query.casefold()
