@@ -8867,10 +8867,25 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 
         # Prior conversation can resolve a follow-up reference, but it remains
         # conversational context only and is never care evidence.
+        # Continue only this authenticated caregiver's dialogue for this exact
+        # recipient. A shared recipient may have several caregivers; neither
+        # their sessions nor their messages are eligible for this context.
+        # The bounded history is conversational context, never LCR evidence.
         prior_messages = (
             db.query(ConversationMessage)
-            .filter_by(session_id=session.id)
-            .order_by(ConversationMessage.created_at.desc())
+            .join(
+                ConversationSession,
+                ConversationMessage.session_id == ConversationSession.id,
+            )
+            .filter(
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
+                ConversationSession.status == "active",
+            )
+            .order_by(
+                ConversationMessage.created_at.desc(),
+                ConversationMessage.id.desc(),
+            )
             .limit(8)
             .all()
         )
@@ -10694,10 +10709,15 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                         "role": "user",
                         "content": (
                             "Revise your previous response for the current greeting. "
-                            f"Return a natural greeting response with a target of {response_length_policy.target_words} words "
-                            f"and a hard maximum of {response_length_policy.max_words} words. "
-                            "Offer at most one low-pressure invitation; do not ask multiple questions, introduce an unrelated care issue, or describe internal capabilities. "
-                            "Respond directly to the user's actual greeting. Do not explain these instructions."
+                            + (
+                                "This is the caregiver's first Companion conversation. Introduce yourself as SolenOS Companion in the greeting. "
+                                if caregiver_context.get("conversation_stage") == "first_time"
+                                else "This is a returning caregiver. Do not claim to remember conversation content that was not supplied. "
+                            )
+                            + f"Return a natural greeting response with a target of {response_length_policy.target_words} words "
+                            + f"and a hard maximum of {response_length_policy.max_words} words. "
+                            + "Offer at most one low-pressure invitation; do not ask multiple questions, introduce an unrelated care issue, or describe internal capabilities. "
+                            + "Respond directly to the user's actual greeting. Do not explain these instructions."
                         ),
                     },
                 ]
