@@ -23,7 +23,7 @@ from app.models.care import CareEvent, Caregiver, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.care_continuity import CareAssertion
+from app.models.care_continuity import CareAssertion, EvidenceObservation
 from app.models.qwen_background_job import QwenBackgroundJob
 from app.schemas.capture_review import CaptureCandidateReview
 from app.services.lcr_context import build_lcr_context
@@ -43,6 +43,123 @@ def _request(person_id, caregiver_id):
         scoped_person_id=person_id,
         scoped_caregiver_id=caregiver_id,
     ))
+
+
+def test_daily_care_structured_measurement_and_medicine_validation_postgres():
+    """The authenticated API rejects ambiguous structured entries and preserves event time."""
+    engine = create_engine(_postgres_url(), pool_pre_ping=True)
+    suffix = uuid.uuid4().hex
+    try:
+        with TestClient(app) as client:
+            created = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": f"Daily Care validation {suffix}"},
+            )
+            assert created.status_code == 201, created.text
+            session = created.json()
+            headers = {"Authorization": f"Bearer {session['access_token']}"}
+            person_id = session["person"]["id"]
+            caregiver_id = session["caregiver"]["id"]
+            measured_at = "2026-11-11T09:30:00.000Z"
+
+            invalid_pressure = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_kind": "measurement",
+                    "occurred_at": measured_at,
+                    "vitals": [
+                        {"vital_type": "bp_systolic", "value": 70, "unit": "mmHg", "measured_at": measured_at},
+                        {"vital_type": "bp_diastolic", "value": 120, "unit": "mmHg", "measured_at": measured_at},
+                    ],
+                },
+            )
+            assert invalid_pressure.status_code == 422
+            assert "top number should be higher" in invalid_pressure.text
+
+            missing_unit = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_kind": "measurement",
+                    "occurred_at": measured_at,
+                    "vitals": [{
+                        "vital_type": "other",
+                        "measurement_name": "Step count",
+                        "value": 100,
+                        "unit": "",
+                        "measured_at": measured_at,
+                    }],
+                },
+            )
+            assert missing_unit.status_code == 422
+            assert "unit" in missing_unit.text.lower()
+
+            valid_pressure = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_kind": "measurement",
+                    "occurred_at": measured_at,
+                    "vitals": [
+                        {"vital_type": "bp_systolic", "value": 120, "unit": "mmHg", "measured_at": measured_at},
+                        {"vital_type": "bp_diastolic", "value": 80, "unit": "mmHg", "measured_at": measured_at},
+                    ],
+                },
+            )
+            assert valid_pressure.status_code == 200, valid_pressure.text
+            assert valid_pressure.json()["structured_detail_count"] == 2
+
+            medication_time = "2026-11-11T08:15:00.000Z"
+            refused = client.post(
+                "/api/v1/daily/log",
+                headers=headers,
+                json={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "capture_kind": "medicine",
+                    "occurred_at": medication_time,
+                    "medications": [{
+                        "medication_name": "Metformin",
+                        "status": "refused",
+                        "dose": "500 mg",
+                        "administered_at": None,
+                        "note": "Care recipient declined the dose.",
+                    }],
+                },
+            )
+            assert refused.status_code == 200, refused.text
+            assert refused.json()["structured_detail_count"] == 1
+
+        with Session(engine) as db:
+            pressure_event = db.query(CareEvent).filter_by(id=valid_pressure.json()["id"]).one()
+            pressure_evidence = db.query(Evidence).filter_by(id=pressure_event.evidence_ids[0]).one()
+            pressure_details = db.query(EvidenceObservation).filter_by(
+                evidence_id=pressure_evidence.id,
+                extraction_method="structured_daily_capture",
+            ).all()
+            assert {row.attribute for row in pressure_details} == {
+                "blood_pressure_systolic", "blood_pressure_diastolic",
+            }
+            medication_event = db.query(CareEvent).filter_by(id=refused.json()["id"]).one()
+            medication_evidence = db.query(Evidence).filter_by(id=medication_event.evidence_ids[0]).one()
+            medication_detail = db.query(EvidenceObservation).filter_by(
+                evidence_id=medication_evidence.id,
+                attribute="medication",
+                extraction_method="structured_daily_capture",
+            ).one()
+            assert medication_detail.value_text == "Metformin"
+            assert "Status: refused" in medication_detail.context
+            assert medication_detail.occurred_at.isoformat().startswith("2026-11-11T08:15:00")
+            assert medication_detail.recorded_at.isoformat() != medication_detail.occurred_at.isoformat()
+    finally:
+        engine.dispose()
 
 
 def test_daily_care_correction_acceptance_rejection_and_isolation_postgres(monkeypatch):
