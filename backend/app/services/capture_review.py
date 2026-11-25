@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime
 from typing import Any
@@ -417,6 +418,98 @@ def _capture_timestamp(value: Any):
         return parsed if parsed.tzinfo is not None and parsed.utcoffset() is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def structured_daily_capture_validation_error(detail: dict[str, Any]) -> str | None:
+    """Validate structured Daily Care shape without making clinical judgments."""
+    capture_kind = detail.get("capture_kind")
+    medications = detail.get("medications", [])
+    vitals = detail.get("vitals", [])
+
+    if not isinstance(medications, list) or len(medications) > 12:
+        return "Check the medicine details and try again."
+    if not isinstance(vitals, list) or len(vitals) > 12:
+        return "Check the measurement details and try again."
+    if capture_kind == "medicine" and not medications:
+        return "Add a medicine and choose what happened before saving."
+    if capture_kind == "measurement" and not vitals:
+        return "Add a measurement before saving."
+    if capture_kind in {"note", "something"} and not (
+        isinstance(detail.get("notes"), str) and detail["notes"].strip()
+    ):
+        return "Add a note before saving."
+
+    allowed_medication_statuses = {
+        "given", "administered", "refused", "missed", "not_given",
+        "uncertain", "scheduled", "other",
+    }
+    for item in medications:
+        if not isinstance(item, dict):
+            return "Check the medicine details and try again."
+        name = item.get("medication_name") or item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            return "Enter the medicine name before saving."
+        status = item.get("status")
+        if not isinstance(status, str) or status.strip().lower() not in allowed_medication_statuses:
+            return "Choose what happened with this medicine before saving."
+        dose = item.get("dose")
+        if dose not in (None, "") and not isinstance(dose, str):
+            return "Check the dose and its unit before saving."
+        for field in ("scheduled_for", "administered_at"):
+            value = item.get(field)
+            if value not in (None, "") and _capture_timestamp(value) is None:
+                return "Check the medicine time and try again."
+
+    systolic_values: list[float] = []
+    diastolic_values: list[float] = []
+    expected_units = {
+        "bp_systolic": {"mmhg"},
+        "bp_diastolic": {"mmhg"},
+        "blood_pressure_systolic": {"mmhg"},
+        "blood_pressure_diastolic": {"mmhg"},
+        "heart_rate": {"bpm"},
+        "oxygen_sat": {"%"},
+        "oxygen_saturation": {"%"},
+        "temperature": {"°f", "°c"},
+        "weight": {"lb", "kg"},
+        "blood_glucose": {"mg/dl", "mmol/l"},
+        "blood_pressure": {"mmhg"},
+    }
+    for item in vitals:
+        if not isinstance(item, dict):
+            return "Check the measurement details and try again."
+        vital_type = str(item.get("vital_type") or "").strip().lower()
+        value = item.get("value")
+        if not vital_type or isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) <= 0:
+            return "Enter a valid measurement value before saving."
+        unit = item.get("unit")
+        if not isinstance(unit, str) or not unit.strip():
+            return "Add the unit for each measurement before saving."
+        normalized_unit = unit.strip().casefold()
+        allowed = expected_units.get(vital_type)
+        if allowed is None and vital_type != "other":
+            return "Choose a supported measurement type before saving."
+        if allowed is not None and normalized_unit not in allowed:
+            return "Check the measurement unit and try again."
+        if vital_type == "other":
+            measurement_name = item.get("measurement_name")
+            if not isinstance(measurement_name, str) or not measurement_name.strip():
+                return "Name the measurement you recorded."
+        if vital_type in {"oxygen_sat", "oxygen_saturation"} and float(value) > 100:
+            return "Check the oxygen-level reading. It cannot be higher than 100%."
+        measured_at = item.get("measured_at")
+        if _capture_timestamp(measured_at) is None:
+            return "Choose when the measurement was taken before saving."
+        if vital_type in {"bp_systolic", "blood_pressure_systolic"}:
+            systolic_values.append(float(value))
+        elif vital_type in {"bp_diastolic", "blood_pressure_diastolic"}:
+            diastolic_values.append(float(value))
+
+    if bool(systolic_values) != bool(diastolic_values):
+        return "Enter both the top and bottom blood pressure numbers."
+    if systolic_values and diastolic_values and systolic_values[-1] <= diastolic_values[-1]:
+        return "Check the blood pressure reading. The top number should be higher than the bottom number."
+    return None
 
 
 def persist_structured_daily_capture_observations(
