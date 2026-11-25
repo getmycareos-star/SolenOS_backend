@@ -576,19 +576,28 @@ def build_claim_provenance(
                             and any(status in historical_statuses for status in related_source_statuses)
                         )
                     )
+                    # A care assertion is not eligible as current supporting
+                    # evidence until a same-record caregiver assessment explicitly
+                    # marks it supported. Missing, failed, stale, unreviewed, or
+                    # unrecognized assessment states must never fall through as current.
+                    assertion_assessment_not_supported = (
+                        source.get("record_type") == "care_assertion"
+                        and assessment_status != "supported"
+                        and assessment_status not in {"superseded", "withdrawn"}
+                    )
                     is_non_current = (
                         record_status in non_current_statuses
                         or lifecycle_status in non_current_statuses
+                        or assertion_assessment_not_supported
                         or assessment_status in {
                             "partially_supported", "contradicted", "conflicting",
-                            "uncertain", "missing_evidence", "stale",
+                            "uncertain", "missing_evidence", "stale", "unverified",
+                            "not_assessed", "unavailable", "failed", "invalid_reviewer",
                         }
                         or (
                             assessment_status
                             and assessment_status not in {
-                                "supported", "unverified", "not_assessed", "unavailable",
-                                "superseded", "withdrawn", "partially_supported", "contradicted",
-                                "conflicting", "uncertain", "missing_evidence", "stale",
+                                "supported", "superseded", "withdrawn",
                             }
                         )
                         or (

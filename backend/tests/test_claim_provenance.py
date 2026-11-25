@@ -994,7 +994,11 @@ def test_exact_wording_cannot_override_persisted_event_or_recording_date(
     ("assessment_status", "expected_status"),
     [
         ("supported", "matched_saved_wording"),
-        ("unverified", "matched_saved_wording"),
+        ("unverified", "matched_non_current_only"),
+        ("not_assessed", "matched_non_current_only"),
+        ("unavailable", "matched_non_current_only"),
+        ("invalid_reviewer", "matched_non_current_only"),
+        ("not_applicable", "matched_non_current_only"),
         ("conflicting", "matched_non_current_only"),
         ("contradicted", "matched_non_current_only"),
         ("stale", "matched_non_current_only"),
