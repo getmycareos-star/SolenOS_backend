@@ -157,6 +157,7 @@ Requires the migrated disposable PostgreSQL database supplied by CI. This is
 intentionally separate from the 10,000-journey longitudinal benchmark.
 """
 import asyncio
+import base64
 import hashlib
 import io
 import os
@@ -356,6 +357,89 @@ def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filena
         "false",
         db,
     ))
+
+
+def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provenance():
+    """Camera-origin photo evidence is durable, person-scoped and idempotent in PostgreSQL."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    retry_key = f"care-photo-retry-{suffix}"
+    original = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p0cAAAAASUVORK5CYII="
+    )
+    try:
+        with TestClient(app) as client:
+            owner = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "PostgreSQL photo owner"},
+            )
+            other = client.post(
+                "/api/v1/sessions/anonymous",
+                json={"caregiver_name": "PostgreSQL photo other caregiver"},
+            )
+            assert owner.status_code == 201, owner.text
+            assert other.status_code == 201, other.text
+            owner_headers = {"Authorization": f"Bearer {owner.json()['access_token']}"}
+            other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+            person_id = owner.json()["person"]["id"]
+            caregiver_id = owner.json()["caregiver"]["id"]
+            form = {
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "evidence_type": "care_photo",
+                "capture_method": "snap",
+                "ingestion_key": retry_key,
+            }
+
+            first = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data=form,
+                files={"file": ("care-photo.png", original, "image/png")},
+            )
+            assert first.status_code == 201, first.text
+            first_receipt = first.json()
+            assert first_receipt["persisted"] is True
+            assert first_receipt["processing_status"] == "not_applicable"
+            evidence_id = first_receipt["evidence_id"]
+
+            replay = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data=form,
+                files={"file": ("care-photo.png", original, "image/png")},
+            )
+            assert replay.status_code == 201, replay.text
+            assert replay.json()["evidence_id"] == evidence_id
+            assert replay.json()["idempotent_replay"] is True
+
+            changed = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data=form,
+                files={"file": ("care-photo.png", original + b"changed", "image/png")},
+            )
+            assert changed.status_code == 409, changed.text
+
+            retrieved = client.get(f"/api/v1/upload/{evidence_id}", headers=owner_headers)
+            assert retrieved.status_code == 200, retrieved.text
+            assert retrieved.content == original
+
+            denied = client.get(f"/api/v1/upload/{evidence_id}", headers=other_headers)
+            assert denied.status_code == 404, denied.text
+
+        with Session() as db:
+            evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
+            metadata = json.loads(evidence.extra_metadata or "{}")
+            assert evidence.type == "care_photo"
+            assert metadata["capture"]["method"] == "snap"
+            assert evidence.ingestion_key == retry_key
+            upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
+            assert upload.sha256 == hashlib.sha256(original).hexdigest()
+            assert upload.content == original
+    finally:
+        engine.dispose()
 
 
 def test_postgres_document_upload_commits_evidence_and_intake_job_atomically():
