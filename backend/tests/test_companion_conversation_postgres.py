@@ -594,7 +594,14 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
             relationship="daughter",
             person_id=person_id,
         )
-        db.add(other_caregiver)
+        second_session_id = f"session-only-caregiver-{suffix}"
+        second_session_caregiver = Caregiver(
+            id=second_session_id,
+            name="Second caregiver",
+            relationship="daughter",
+            person_id=person_id,
+        )
+        db.add_all([other_caregiver, second_session_caregiver])
         db.flush()
         current_profile = db.query(CaregiverProfile).filter_by(
             person_id=person_id,
@@ -698,6 +705,13 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
                 reported_by_caregiver_id=other_caregiver_id,
                 availability_notes="OTHER CAREGIVER OWNER CONTEXT",
             ),
+            CaregiverContext(
+                id=f"context-session-mismatch-{suffix}",
+                person_id=person_id,
+                caregiver_id=other_profile.id,
+                reported_by_caregiver_id=second_session_id,
+                availability_notes="SECOND SESSION MISMATCH SENTINEL",
+            ),
         ])
         db.commit()
 
@@ -725,3 +739,14 @@ def test_lcr_context_excludes_other_caregivers_private_observations_perspectives
         assert "CURRENT CAREGIVER SESSION ATTRIBUTION" in caregiver_context_text
         assert "CONFLICTING CAREGIVER ATTRIBUTION" not in caregiver_context_text
         assert "OTHER CAREGIVER OWNER CONTEXT" not in caregiver_context_text
+
+        session_only_context = build_lcr_context(
+            db,
+            person_id,
+            caregiver_id=second_session_id,
+            limit_per_source=50,
+        )
+        session_only_context_text = " ".join(
+            str(item) for item in session_only_context["sources"]["caregiver_contexts"]["items"]
+        )
+        assert "SECOND SESSION MISMATCH SENTINEL" not in session_only_context_text
