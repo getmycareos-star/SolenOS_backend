@@ -1118,3 +1118,39 @@ def test_event_aggregate_requires_unique_persisted_event_ids():
     assert aggregate["count"] == 1
     assert [item["record_id"] for item in aggregate["source_references"]] == ["persisted-event-1"]
 
+def test_material_care_claim_fragments_without_verbs_are_still_grounded():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    for statement in (
+        "Three falls this week.",
+        "No falls this week.",
+        "Mobility worsening.",
+        "Appetite: poor.",
+        "Medication discontinued.",
+    ):
+        provenance = build_claim_provenance(statement, [])
+        assert unmatched_material_claims(provenance), statement
+
+    exact = "Three falls this week."
+    supported = build_claim_provenance(
+        exact,
+        [{
+            "record_type": "care_evidence",
+            "record_id": "three-falls",
+            "source_text": exact,
+            "record_status": "recorded",
+        }],
+    )
+    assert unmatched_material_claims(supported) == []
+
+
+def test_non_assertive_questions_and_guidance_with_material_terms_remain_excluded():
+    from app.services.claim_provenance import unmatched_material_claims
+
+    provenance = build_claim_provenance(
+        "Would you ask whether there were three falls this week?\n"
+        "Please ask the clinician about the medication change.",
+        [],
+    )
+    assert unmatched_material_claims(provenance) == []
+
