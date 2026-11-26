@@ -305,3 +305,53 @@ def test_background_daily_capture_extraction_uses_internal_care_extraction_speci
         "SPECIALIST: CARE INFORMATION UNDERSTANDING AND EXTRACTION" in message.get("content", "")
         for message in prepared
     )
+
+def test_capture_candidates_reject_positive_substring_that_drops_source_negation(monkeypatch):
+    source = "No fall occurred yesterday."
+    model_output = {
+        "observations": [{
+            "subject": "fall",
+            "observation": "fall occurred yesterday",
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-negated-fall",
+        source_evidence_id="evidence-negated-fall",
+    )
+
+    assert result["observations"] == []
+
+
+def test_capture_candidates_keep_positive_claim_after_unrelated_negated_clause(monkeypatch):
+    source = "No fever was reported, but Mum fell yesterday."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum fell yesterday",
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-positive-after-negation",
+        source_evidence_id="evidence-positive-after-negation",
+    )
+
+    assert len(result["observations"]) == 1
+    assert result["observations"][0]["observation"] == "Mum fell yesterday"
