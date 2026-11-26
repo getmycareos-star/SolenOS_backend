@@ -1184,7 +1184,10 @@ async def _acquire_companion_turn_lease(
                 ),
                 {"lock_key": lock_key, "owner_token": owner_token},
             ).first()
-            db.commit()
+            if acquired is not None:
+                db.commit()
+            else:
+                db.rollback()
         except Exception:
             db.rollback()
             logger.exception("Companion turn lease acquisition failed")
@@ -12278,7 +12281,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 CompanionTurnLease.lock_key == key,
                 CompanionTurnLease.owner_token == lease_owner_token,
                 CompanionTurnLease.expires_at > datetime.now(timezone.utc),
-            ).first() is not None
+            ).with_for_update().first() is not None
         ]
         if len(still_owned) != len(owned_lease_keys):
             db.rollback()
