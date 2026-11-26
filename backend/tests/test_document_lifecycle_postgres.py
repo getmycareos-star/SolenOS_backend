@@ -442,6 +442,79 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
         engine.dispose()
 
 
+
+def test_postgres_clearer_page_copy_retains_source_document_and_page_number_and_rejects_cross_person_source():
+    """A clearer re-scan retains the original document and page provenance in PostgreSQL."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    original_image = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p0cAAAAASUVORK5CYII="
+    )
+    try:
+        with TestClient(app) as client:
+            owner = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Page recovery owner"})
+            other = client.post("/api/v1/sessions/anonymous", json={"caregiver_name": "Page recovery other"})
+            assert owner.status_code == 201, owner.text
+            assert other.status_code == 201, other.text
+            owner_headers = {"Authorization": f"Bearer {owner.json()['access_token']}"}
+            other_headers = {"Authorization": f"Bearer {other.json()['access_token']}"}
+            person_id = owner.json()["person"]["id"]
+            caregiver_id = owner.json()["caregiver"]["id"]
+
+            source = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data={"person_id": person_id, "caregiver_id": caregiver_id, "evidence_type": "document"},
+                files={"file": ("original-discharge.txt", b"Original discharge document.", "text/plain")},
+            )
+            assert source.status_code == 201, source.text
+            source_id = source.json()["evidence_id"]
+
+            clearer = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data={
+                    "person_id": person_id,
+                    "caregiver_id": caregiver_id,
+                    "evidence_type": "document",
+                    "capture_method": "scan",
+                    "capture_page_number": "3",
+                    "capture_source_evidence_id": source_id,
+                },
+                files={"file": ("clearer-page-3.png", original_image, "image/png")},
+            )
+            assert clearer.status_code == 201, clearer.text
+            clearer_id = clearer.json()["evidence_id"]
+
+            denied = client.post(
+                "/api/v1/upload",
+                headers=other_headers,
+                data={
+                    "person_id": other.json()["person"]["id"],
+                    "caregiver_id": other.json()["caregiver"]["id"],
+                    "evidence_type": "document",
+                    "capture_method": "scan",
+                    "capture_page_number": "3",
+                    "capture_source_evidence_id": source_id,
+                },
+                files={"file": ("clearer-page-3.png", original_image, "image/png")},
+            )
+            assert denied.status_code == 404, denied.text
+
+        with Session() as db:
+            source_row = db.query(Evidence).filter_by(id=source_id, person_id=person_id).one()
+            clearer_row = db.query(Evidence).filter_by(id=clearer_id, person_id=person_id).one()
+            metadata = json.loads(clearer_row.extra_metadata or "{}")
+            assert source_row.type == "document"
+            assert clearer_row.type == "document"
+            assert metadata["capture"]["source_evidence_id"] == source_id
+            assert metadata["capture"]["source_page_number"] == 3
+            assert metadata["capture"]["page_number"] == 3
+    finally:
+        engine.dispose()
+
+
+
 def test_postgres_document_upload_commits_evidence_and_intake_job_atomically():
     """The initial document job and immutable upload share one database commit."""
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
