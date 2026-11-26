@@ -5636,7 +5636,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     system = (
         "SOLENOS_WORKFLOW_ID: care_understanding. "
         "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
-        "Match these exact structures: observations [{description,approximate_time:null|string,confidence:low|medium|high,raw_fragment}]; "
+        "Match these exact structures: observations [{description,approximate_time:null|string,confidence:low|medium|high,raw_fragment}]. Confidence is an uncalibrated model hint only; the backend will expose it as unavailable, never as evidence of correctness. "
         "events [{description,time:null|string,participants:string[],raw_fragment}]; "
         "decisions [{description,who:string[],why:null|string,reason_unknown:boolean,status:active|completed|changed|reversed|uncertain|needs_review|pending,raw_fragment}]; "
         "outcomes [{description,status:observed|pending|uncertain|ongoing|resolved|changed,raw_fragment}]; "
@@ -5752,7 +5752,9 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 result[key].append({
                     "description": description,
                     "approximate_time": approximate_time,
-                    "confidence": confidence,
+                    # Model self-assessment is not calibrated; never expose it as a
+                    # confidence signal to caregivers or downstream decision logic.
+                    "confidence": "unavailable",
                     "raw_fragment": fragment,
                 })
             elif key == "events":
