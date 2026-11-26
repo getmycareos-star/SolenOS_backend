@@ -32,10 +32,12 @@ from app.services.unified_lcr_retrieval import (
 
 def test_companion_context_does_not_treat_legacy_pdf_page_total_as_verified():
     source_text = "[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\nSecond page."
+    source_text_sha256 = hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest()
     legacy = _document_extraction_metadata({
         "filename": "legacy-discharge.pdf",
         "mime_type": "application/pdf",
         "page_count": 2,
+        "source_text_sha256": source_text_sha256,
         "processed_page_numbers": [1, 2],
         "unprocessed_page_numbers": [],
     }, source_text)
@@ -52,6 +54,7 @@ def test_companion_context_does_not_treat_legacy_pdf_page_total_as_verified():
         "mime_type": "application/pdf",
         "page_count": 2,
         "page_count_source": "original_binary",
+        "source_text_sha256": source_text_sha256,
         "processed_page_numbers": [1, 2],
         "unprocessed_page_numbers": [],
     }, source_text)
