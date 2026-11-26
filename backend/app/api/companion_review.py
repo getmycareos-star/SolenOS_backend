@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.collaboration import _scope
+from app.api.collaboration import _companion_scope
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -68,7 +68,7 @@ def review_qwen_assistance_proposal(
     db: Session = Depends(get_db),
 ):
     """Caregiver explicitly accepts or rejects a source-validated Qwen summary."""
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "reject"}:
@@ -248,7 +248,7 @@ def create_companion_care_update_from_message(
     db: Session = Depends(get_db),
 ):
     """Create a review-only care report from an exact caregiver message after explicit confirmation."""
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     if payload.confirm_care_report is not True:
         raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
@@ -328,7 +328,7 @@ def list_companion_care_updates(
     include_reviewed: bool = False,
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     query = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.person_id == person_id,
@@ -361,7 +361,7 @@ def companion_care_update_history(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
@@ -397,7 +397,7 @@ def review_companion_care_update(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "correct", "reject"}:
