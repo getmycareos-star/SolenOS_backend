@@ -1976,6 +1976,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         ) if part),
         "occurred_at": getattr(event, "occurred_at", None).isoformat() if getattr(event, "occurred_at", None) else None,
         "recorded_at": getattr(event, "recorded_at", None).isoformat() if getattr(event, "recorded_at", None) else None,
+        "time_provenance": getattr(event, "time_provenance", None),
     } for event in prior_events)
     summary_source_records.extend({
         "record_type": "care_assertion",
@@ -1983,6 +1984,8 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "label": str(item.get("field") or "Care record detail"),
         "source_text": str(item.get("value") or ""),
         "occurred_at": item.get("observed_at"),
+        "recorded_at": item.get("recorded_at"),
+        "time_provenance": item.get("time_provenance"),
     } for item in active_state if item.get("assertion_id"))
     summary_source_records.extend({
         "record_type": "evidence",
@@ -1991,6 +1994,7 @@ def reconcile_event(db: Session, *, person_id: str, event_date: datetime | None,
         "source_text": item.source_text or "",
         "occurred_at": item.occurred_at.isoformat() if item.occurred_at else None,
         "recorded_at": item.ingested_at.isoformat() if item.ingested_at else (item.uploaded_at.isoformat() if item.uploaded_at else None),
+        "time_provenance": getattr(item, "time_provenance", None),
     } for item in source_evidence_rows)
     # Every source above was selected through this reconciliation's
     # authenticated person-scoped queries. Carry that server-derived scope into
