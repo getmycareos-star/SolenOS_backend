@@ -935,7 +935,7 @@ def list_document_intelligence(
             continue
         if _persisted_unprocessed_pages(analysis, metadata, verified_page_count):
             continue
-        text_without_quality = re.sub(r"(?m)^\\[OCR quality:.*\\]\\s*$", "", _page_parsing_text(source_text))
+        text_without_quality = re.sub(r"(?m)^\[OCR quality:.*\]\s*$", "", _page_parsing_text(source_text))
         normalized_text = _normalized_extraction_text(text_without_quality).casefold()
         if len(normalized_text) < 80:
             continue
