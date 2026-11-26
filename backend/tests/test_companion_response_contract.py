@@ -3148,7 +3148,7 @@ def test_companion_repairs_unsupported_care_claim_before_failing_closed(monkeypa
     client = setup_client(monkeypatch)
     outputs = iter([
         "The doctor confirmed the medication dose was changed yesterday.",
-        "The caregiver reported poor sleep and that lunch was barely eaten.",
+        "The caregiver reported: “Caregiver reported poor sleep last night and barely touched lunch.”",
     ])
     calls = []
 
@@ -3180,7 +3180,8 @@ def test_companion_repairs_unsupported_care_claim_before_failing_closed(monkeypa
         assert response.status_code == 200, response.text
         assert response.json()["ai_generated"] is True
         assert response.json()["written_to_lcr"] is False
-        assert response.json()["reply"] == "The caregiver reported poor sleep and that lunch was barely eaten."
+        assert response.json()["reply"] == "The caregiver reported: “Caregiver reported poor sleep last night and barely touched lunch.”"
+        assert response.json()["claim_provenance"]["claims"][0]["support_status"] == "matched_saved_wording"
         assert len(calls) == 2
         assert "source-grounding checks" in calls[1][0][-1]["content"]
     finally:
@@ -4910,4 +4911,53 @@ def test_companion_rejection_audit_storage_failure_fails_closed(monkeypatch):
         assert exc_info.value.detail["code"] == "output_validation_audit_unavailable"
     finally:
         db.close()
+        teardown()
+
+
+def test_companion_rejects_material_paraphrase_without_exact_source_match(monkeypatch):
+    client = setup_client(monkeypatch)
+    outputs = iter([
+        "The doctor confirmed the medication dose was changed yesterday.",
+        "The caregiver reported poor sleep and that lunch was barely eaten.",
+    ])
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        return next(outputs)
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        db = TestingSessionLocal()
+        db.add(Evidence(
+            person_id=person_id,
+            type="caregiver_report",
+            source_text="Caregiver reported poor sleep last night and barely touched lunch.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            epistemic_status="caregiver_reported",
+        ))
+        db.commit()
+        db.close()
+
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"person_id": person_id, "text": "What was recorded about sleep and lunch?"},
+        )
+        assert response.status_code == 503, response.text
+        assert "No reply was saved" in response.json()["detail"]
+        db = TestingSessionLocal()
+        try:
+            assert db.query(ConversationMessage).count() == 0
+            rejected = db.query(AISafetyCheck).filter_by(
+                person_id=person_id,
+                check_name="companion_response_grounding",
+                result="rejected",
+            ).first()
+            assert rejected is not None
+            assert "unmatched_material_care_claim" in rejected.details_json
+        finally:
+            db.close()
+    finally:
         teardown()
