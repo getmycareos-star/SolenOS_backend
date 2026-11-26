@@ -502,6 +502,49 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
 
 
 
+def test_exact_duplicate_link_ignores_deleted_sources_and_other_evidence_types(client):
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    payload = {
+        "person_id": session["person"]["id"],
+        "caregiver_id": session["caregiver"]["id"],
+    }
+    original = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={**payload, "evidence_type": "document"},
+        files={"file": ("same-content.txt", b"shared bytes for evidence classification", "text/plain")},
+    )
+    assert original.status_code == 201, original.text
+    original_id = original.json()["evidence_id"]
+
+    photo = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={**payload, "evidence_type": "care_photo"},
+        files={"file": ("same-content.txt", b"shared bytes for evidence classification", "text/plain")},
+    )
+    assert photo.status_code == 201, photo.text
+    assert photo.json()["duplicate_detected"] is False
+    assert photo.json()["duplicate_of_evidence_id"] is None
+
+    with TestSessionLocal() as db:
+        source = db.query(Evidence).filter_by(id=original_id).one()
+        source.evidence_status = "deleted_by_caregiver"
+        db.commit()
+
+    reuploaded = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={**payload, "evidence_type": "document"},
+        files={"file": ("same-content.txt", b"shared bytes for evidence classification", "text/plain")},
+    )
+    assert reuploaded.status_code == 201, reuploaded.text
+    assert reuploaded.json()["duplicate_detected"] is False
+    assert reuploaded.json()["duplicate_of_evidence_id"] is None
+
+
+
 def test_clearer_page_copy_retains_source_document_and_page_number_and_rejects_cross_person_source(client):
     test_client, session = client
     auth = {"Authorization": f"Bearer {session['access_token']}"}
