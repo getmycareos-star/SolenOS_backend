@@ -18,6 +18,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.care_continuity import CareRecordRelationship
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareDeltaRun, CareStateRevision
+from app.models.ai_output_governance import AISafetyCheck
 
 main_module = importlib.import_module("app.main")
 app = main_module.app
@@ -949,6 +950,17 @@ def test_qwen_support_covers_all_care_workflows_without_lcr_writes(monkeypatch):
             assert expected_length in prompt, workflow
             expected_tokens = 64 if workflow == "emergency_readiness" else min(policy.token_budget, 384)
             assert captured[-1][1]["options"]["num_predict"] == expected_tokens, workflow
+
+        # Each read-only assist answer must have a durable passed-output audit.
+        # This endpoint has no persisted conversation turn to commit that receipt,
+        # so the route itself must commit it before returning the answer.
+        with TestingSessionLocal() as audit_db:
+            for workflow in workflows:
+                assert audit_db.query(AISafetyCheck).filter_by(
+                    person_id=person_id,
+                    check_name=f"{workflow}_response_grounding",
+                    result="passed",
+                ).count() == 1, workflow
 
         after = client.get(f"/api/v1/events/{person_id}", headers=headers)
         assert after.status_code == 200, after.text
