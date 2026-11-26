@@ -19,13 +19,47 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareRec
 from app.models.collaboration import ConversationMessage, ConversationSession
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _document_extraction_metadata, _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
 from app.api.collaboration import _lcr_retrieval_incomplete_notice
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
     build_unified_lcr_context,
 )
+
+
+
+def test_companion_context_does_not_treat_legacy_pdf_page_total_as_verified():
+    source_text = "[Page 1 OCR]\\nFirst page.\\n[Page 2 OCR]\\nSecond page."
+    legacy = _document_extraction_metadata({
+        "filename": "legacy-discharge.pdf",
+        "mime_type": "application/pdf",
+        "page_count": 2,
+        "processed_page_numbers": [1, 2],
+        "unprocessed_page_numbers": [],
+    }, source_text)
+    status, explanation = _information_status("document_extractions", {
+        "extraction_status": "available",
+        "extraction_metadata": legacy,
+    })
+    assert legacy["page_count_verified"] is False
+    assert status == "document_page_count_unverified"
+    assert "do not assume every page was read" in explanation
+
+    verified = _document_extraction_metadata({
+        "filename": "verified-discharge.pdf",
+        "mime_type": "application/pdf",
+        "page_count": 2,
+        "page_count_source": "original_binary",
+        "processed_page_numbers": [1, 2],
+        "unprocessed_page_numbers": [],
+    }, source_text)
+    verified_status, _ = _information_status("document_extractions", {
+        "extraction_status": "available",
+        "extraction_metadata": verified,
+    })
+    assert verified["page_count_verified"] is True
+    assert verified_status == "document_extracted_unreviewed"
 
 
 def test_generic_record_understanding_question_does_not_become_lexical_filter():
