@@ -214,14 +214,16 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
 
     result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
 
-    assert result["understanding"]["observations"] == [
-        {
-            "description": "Mom fell",
-            "approximate_time": "yesterday",
-            "confidence": "unavailable",
-            "raw_fragment": "Mom fell yesterday",
-        }
-    ]
+    observation = result["understanding"]["observations"][0]
+    assert observation["description"] == "Mom fell"
+    assert observation["approximate_time"] == "yesterday"
+    assert observation["confidence"] == "unavailable"
+    assert observation["candidate_id"]
+    assert observation["source_id"] == "evidence-1"
+    assert observation["recorded_at"] is None
+    assert observation["recorded_time_status"] == "unavailable"
+    assert observation["event_time"] == "yesterday"
+    assert observation["event_time_resolution"] == "unresolved"
     unknown = result["understanding"]["unknowns"][0]
     assert unknown["question"] == "What happened to her after she fell?"
     assert unknown["status"] == "open"
