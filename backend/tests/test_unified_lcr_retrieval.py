@@ -66,6 +66,38 @@ def test_companion_context_does_not_treat_legacy_pdf_page_total_as_verified():
     assert verified_status == "document_extracted_unreviewed"
 
 
+def test_document_extraction_metadata_verifies_original_upload_hash_before_trusting_pdf_page_count():
+    source_text = "[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\nSecond page."
+    digest = hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest()
+    extraction = {
+        "filename": "verified-discharge.pdf",
+        "mime_type": "application/pdf",
+        "page_count": 2,
+        "page_count_source": "original_binary",
+        "binary_sha256": "verified-upload-digest",
+        "source_text_sha256": digest,
+        "processed_page_numbers": [1, 2],
+        "unprocessed_page_numbers": [],
+    }
+
+    verified = _document_extraction_metadata(
+        extraction, source_text, "verified-upload-digest", upload_check_performed=True,
+    )
+    mismatched = _document_extraction_metadata(
+        {**extraction, "binary_sha256": "different-upload-digest"},
+        source_text,
+        "verified-upload-digest",
+        upload_check_performed=True,
+    )
+
+    assert verified["original_upload_present"] is True
+    assert verified["binary_integrity_verified"] is True
+    assert verified["source_text_integrity_verified"] is True
+    assert verified["page_count_verified"] is True
+    assert mismatched["binary_integrity_verified"] is False
+    assert mismatched["page_count_verified"] is False
+
+
 def test_generic_record_understanding_question_does_not_become_lexical_filter():
     assert _query_search_terms("Please help me understand the care information saved for her.") == []
 
@@ -133,7 +165,7 @@ def _postgres_conversation_db():
             ConversationSession.__table__, ConversationMessage.__table__,
             CaregiverProfile.__table__, CaregiverHandoff.__table__,
             metadata.tables["care_facts"], metadata.tables["evidence"],
-            metadata.tables["care_fact_evidence"],
+            metadata.tables["care_fact_evidence"], EvidenceUpload.__table__,
             QwenBackgroundJob.__table__, QwenModelOutput.__table__,
             AIOutputLCRProposal.__table__, AIOutputLCRDecision.__table__,
         ],

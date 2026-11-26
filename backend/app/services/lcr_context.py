@@ -990,7 +990,13 @@ def _safe_appointment_workspace_payload(value: Any) -> dict[str, Any]:
     return result
 
 
-def _document_extraction_metadata(value: Any, source_text: str | None = None) -> dict[str, Any]:
+def _document_extraction_metadata(
+    value: Any,
+    source_text: str | None = None,
+    original_upload_sha256: str | None = None,
+    *,
+    upload_check_performed: bool = False,
+) -> dict[str, Any]:
     """Expose bounded processing facts and fail closed on incomplete PDF page coverage."""
     if isinstance(value, str):
         try:
