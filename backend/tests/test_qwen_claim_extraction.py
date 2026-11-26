@@ -80,3 +80,60 @@ def test_claim_extraction_fails_closed_on_malformed_model_output(monkeypatch):
         collaboration.qwen_claim_extraction(_request(), request=None, db=None)
 
     assert error.value.status_code == 503
+
+
+def test_claim_extraction_drops_claims_without_exact_source_spans(monkeypatch):
+    _allow_source(monkeypatch)
+    model_output = {
+        "claims": [
+            {
+                "claim_text": "Mom fell yesterday",
+                "entity_type": "event",
+                "event_type": "fall_reported",
+                "confidence_tag": "reported",
+                "source_span": {
+                    "start_offset": 0,
+                    "end_offset": 18,
+                    "text": "Mom fell yesterday",
+                },
+            },
+            {
+                "claim_text": "Mom had a severe fall",
+                "entity_type": "event",
+                "event_type": "fall_reported",
+                "confidence_tag": "reported",
+                "source_span": None,
+            },
+            {
+                "claim_text": "She was hospitalized",
+                "entity_type": "event",
+                "event_type": "hospitalization",
+                "confidence_tag": "confirmed",
+                "source_span": {
+                    "start_offset": 20,
+                    "end_offset": 36,
+                    "text": "She seemed tired",
+                },
+            },
+        ]
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_claim_extraction(_request(), request=None, db=None)
+
+    assert result["run_a"]["claims"] == [
+        {
+            "claim_text": "Mom fell yesterday",
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": 0,
+                "end_offset": 18,
+                "text": "Mom fell yesterday",
+            },
+        }
+    ]
+    assert result["run_b"]["claims"] == result["run_a"]["claims"]
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True

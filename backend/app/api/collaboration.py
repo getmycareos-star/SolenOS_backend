@@ -5466,9 +5466,10 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
         '"event_type":"string","confidence_tag":"confirmed|reported|inferred|unknown|contradictory",'
         '"source_span":{"start_offset":0,"end_offset":1,"text":"exact substring"} }]} . '
         "Maximum 20 claims. Each claim_text must be at most 1000 characters, event_type at most 200. "
-        "source_span may be null only if exact offsets cannot be established. Preserve attribution, negation, "
-        "time wording and uncertainty. Prefer precision over recall. Never diagnose, recommend treatment, "
-        "invent details, or convert uncertainty into certainty."
+        "Every accepted claim must have a valid source_span whose text is exactly equal to claim_text. "
+        "If exact source wording and offsets cannot be established, omit the claim; never return an unanchored claim. "
+        "Preserve attribution, negation, time wording and uncertainty. Prefer precision over recall. "
+        "Never diagnose, recommend treatment, invent details, or convert uncertainty into certainty."
     )
     def extract_once(label: str) -> dict:
         run_instruction = (
@@ -5518,6 +5519,10 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
                         span = None
                     else:
                         span = {"start_offset": start, "end_offset": end, "text": quote}
+            # Claim text is the extractable evidence, not a model paraphrase.
+            # Require the exact same bytes to be anchored by a validated source span.
+            if span is None or text_value.strip() != span["text"]:
+                continue
             claims.append({"claim_text": text_value.strip(), "entity_type": entity, "event_type": event.strip(),
                            "confidence_tag": confidence, "source_span": span})
         return {"claims": claims}
