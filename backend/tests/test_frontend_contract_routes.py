@@ -858,7 +858,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
                 "dose": "reported dose",
                 "scheduled_for": None,
                 "administered_at": "2026-10-24T08:00:00Z",
-                "photo_evidence_id": photo_evidence_id,
+                "photo_evidence_id": None,
                 "photo_ingestion_key": "daily-capture-medication-photo-001",
                 "note": "Recorded by caregiver",
             }],
