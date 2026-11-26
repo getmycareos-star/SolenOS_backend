@@ -954,7 +954,7 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
         with calls_lock:
             calls.append(messages)
         time.sleep(0.25)
-        return "The saved care information does not establish an additional conclusion."
+        return "I cannot confirm that from the records retrieved for this response."
 
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
