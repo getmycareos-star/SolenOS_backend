@@ -5800,7 +5800,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "events": {"description", "time", "participants", "raw_fragment"},
         "decisions": {"description", "who", "why", "reason_unknown", "status", "raw_fragment"},
         "outcomes": {"description", "status", "raw_fragment"},
-        "unknowns": {"question", "raw_fragment"},
+        "unknowns": {"question", "raw_fragment", "status"},
         "non_care_facts": {"layer", "text", "raw_fragment"},
         "possible_links": {"text", "causation_claimed"},
     }
