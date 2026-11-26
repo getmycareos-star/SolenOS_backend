@@ -63,6 +63,40 @@ NEAR_DUPLICATE_RATIO = 0.92
 NEAR_DUPLICATE_MAX_RECORDS = 200
 
 
+def _current_care_projection_sort_key(item: dict[str, Any]) -> tuple[int, float, float, str]:
+    """Order same-priority care entries by when care happened, not when it was entered.
+
+    Backfilled records are commonly saved today but describe an earlier event.
+    Event time therefore leads; record time is only the fallback and tie-breaker.
+    Missing or invalid times remain last rather than being assigned an invented date.
+    """
+    def timestamp(value: Any) -> float | None:
+        if value is None:
+            return None
+        parsed = value if isinstance(value, datetime) else None
+        if parsed is None:
+            try:
+                parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            except (TypeError, ValueError, OverflowError):
+                return None
+        try:
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except (ValueError, OverflowError, OSError):
+            return None
+
+    recorded = timestamp(item.get("recorded_at"))
+    occurred = timestamp(item.get("occurred_at"))
+    effective_event_time = occurred if occurred is not None else recorded
+    return (
+        int(item.get("priority", 99)),
+        -(effective_event_time if effective_event_time is not None else float("-inf")),
+        -(recorded if recorded is not None else float("-inf")),
+        str(item.get("id") or ""),
+    )
+
+
 def _change_source_refs(
     change: Any,
     *,
