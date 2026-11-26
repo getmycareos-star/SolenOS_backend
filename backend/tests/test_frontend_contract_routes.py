@@ -836,6 +836,19 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
     client, token, person_id, caregiver_id, other_token, other_person_id = setup_client(monkeypatch)
     try:
         auth = {"Authorization": f"Bearer {token}"}
+        photo_upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "ingestion_key": "daily-capture-medication-photo-001",
+            },
+            files={"file": ("medication.png", b"\\x89PNG\\r\\n\\x1a\\nmedication-photo", "image/png")},
+        )
+        assert photo_upload.status_code == 201, photo_upload.text
+        photo_evidence_id = photo_upload.json()["evidence_id"]
+
         payload = {
             "person_id": person_id,
             "caregiver_id": caregiver_id,
@@ -845,7 +858,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
                 "dose": "reported dose",
                 "scheduled_for": None,
                 "administered_at": "2026-10-24T08:00:00Z",
-                "photo_evidence_id": None,
+                "photo_evidence_id": photo_evidence_id,
                 "note": "Recorded by caregiver",
             }],
             "vitals": [{"vital_type": "heart_rate", "value": 72, "unit": "bpm"}],
@@ -855,6 +868,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
         assert saved.status_code == 200, saved.text
         assert saved.json()["success"] is True
+        assert photo_evidence_id in saved.json()["evidence_ids"], "the uploaded medicine photo must be linked to the saved Daily Care event"
 
         events = client.get(f"/api/v1/events/{person_id}", headers=auth)
         assert events.status_code == 200, events.text
@@ -863,6 +877,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         stored = json_module.loads(row["description"])
         assert stored["notes"] == "Daily capture contract test"
         assert stored["medications"][0]["medication_name"] == "Caregiver-reported medication"
+        assert photo_evidence_id in row["evidence_ids"], "event history must retain the medicine photo evidence link"
 
         mismatched_delta = client.post(
             "/api/v1/care-delta/reconcile",
