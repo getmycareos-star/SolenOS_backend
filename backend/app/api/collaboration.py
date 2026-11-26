@@ -1351,6 +1351,8 @@ async def upload_evidence(
         capture_method = "upload"
     if not isinstance(capture_timestamp, str):
         capture_timestamp = ""
+    if not isinstance(photo_rotation_degrees, str):
+        photo_rotation_degrees = "0"
     if not isinstance(ingestion_key, str):
         ingestion_key = ""
     if isinstance(capture_page_number, bool) or not isinstance(capture_page_number, int):
