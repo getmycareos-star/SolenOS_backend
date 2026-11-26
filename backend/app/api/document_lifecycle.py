@@ -1070,6 +1070,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         _verify_persisted_extraction(row, upload, db, content)
         exhausted_before_retry = {int(page) for page in (metadata.get("retry_exhausted_page_numbers") or [])}
         failed_pages = set(_retryable_page_numbers(row.source_text or "")) - exhausted_before_retry
+        original_page_count = None
         is_paginated_pdf = (
             (upload.mime_type or "").split(";", 1)[0].strip().casefold() == "application/pdf"
             or (upload.filename or "").casefold().endswith(".pdf")
@@ -1144,8 +1145,17 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             for page in failed_pages:
                 page_retry_attempts[str(page)] = int(page_retry_attempts.get(str(page)) or 1) + 1
             current_retryable_pages = set(_retryable_page_numbers(retry_text))
+            retry_observed_pages = {
+                int(match.group(1))
+                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", retry_text)
+            }
+            remaining_missing_pages = (
+                set(range(1, original_page_count + 1)) - retry_observed_pages
+                if isinstance(original_page_count, int) else set()
+            )
+            retry_failure_pages = current_retryable_pages | remaining_missing_pages
             retry_exhausted_pages = sorted(
-                page for page in current_retryable_pages
+                page for page in retry_failure_pages
                 if int(page_retry_attempts.get(str(page)) or 1) >= MAX_DOCUMENT_PAGE_EXTRACTION_ATTEMPTS
             )
             if retry_text.strip() != (row.source_text or "").strip() or retry_method != metadata.get("extraction_method"):
@@ -1156,7 +1166,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 retry_metadata["last_extraction_attempt_at"] = retry_timestamp
                 retry_metadata["page_retry_history"] = list(metadata.get("page_retry_history") or []) + [
                     {"page_number": page, "attempt": page_retry_attempts[str(page)], "attempted_at": retry_timestamp,
-                     "result": "retryable_failure" if page in current_retryable_pages else "processed"}
+                     "result": "retryable_failure" if page in retry_failure_pages else "processed"}
                     for page in sorted(failed_pages)
                 ]
                 has_intelligence = isinstance(metadata.get("document_intelligence"), dict)
@@ -1197,7 +1207,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             metadata["last_extraction_attempt_at"] = retry_timestamp
             metadata["page_retry_history"] = list(metadata.get("page_retry_history") or []) + [
                 {"page_number": page, "attempt": page_retry_attempts[str(page)], "attempted_at": retry_timestamp,
-                 "result": "retryable_failure" if page in current_retryable_pages else "processed"}
+                 "result": "retryable_failure" if page in retry_failure_pages else "processed"}
                 for page in sorted(failed_pages)
             ]
             row.candidates = metadata
