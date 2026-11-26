@@ -1266,6 +1266,8 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         try:
             assert db.query(Evidence).filter_by(id=medication_id).one().type == "medication_photo"
             assert db.query(Evidence).filter_by(id=document_id).one().type == "document"
+            assert db.query(Evidence).filter_by(person_id=person_id).count() == 2,
+                "retrying the same medication photo must not create another evidence row"
         finally:
             db.close()
 
