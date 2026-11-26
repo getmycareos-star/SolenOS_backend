@@ -3107,6 +3107,14 @@ def _build_situation_understanding_assessment(db: Session, person_id: str) -> di
             "title": str(item.get("title") or item.get("topic") or item.get("question") or item.get("fact_type") or item.get("field") or item.get("attribute") or item.get("subject_label") or item.get("event_type") or source)[:240],
             "status": status or str(item.get("epistemic_state") or item.get("epistemic_status") or "not_recorded").lower(),
             "epistemic_status": item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "not_specified",
+            # Preserve the structured reason for an information gap. A generic
+            # "missing" label loses the distinction between not provided,
+            # outdated, conflicting, inaccessible and not yet assessed.
+            "gap_reason": item.get("gap_reason"),
+            "lifecycle_status": item.get("lifecycle_status") or item.get("status"),
+            "description": item.get("description"),
+            "expected_by": item.get("expected_by"),
+            "resolution_date": item.get("resolution_date"),
             "source_label": item.get("source_label") or "Source label not recorded",
             "source_type": item.get("source_type") or "not_recorded",
             "reported_at": item.get("reported_at"),
