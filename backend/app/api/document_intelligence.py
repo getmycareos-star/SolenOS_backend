@@ -158,6 +158,45 @@ def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | Non
     return sorted(unprocessed)
 
 
+def _resolve_candidate_source_page(candidate: dict, source_text: str) -> int:
+    """Bind a candidate quotation to exactly one preserved source page."""
+    quote = candidate.get("source_quote")
+    if not isinstance(quote, str) or not quote.strip():
+        raise HTTPException(status_code=409, detail="This document suggestion has no traceable source quotation")
+
+    page_markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text))
+    matching_pages: list[int] = []
+    if page_markers:
+        for index, marker in enumerate(page_markers):
+            page_number = int(marker.group(1))
+            page_end = page_markers[index + 1].start() if index + 1 < len(page_markers) else len(source_text)
+            if quote in source_text[marker.end():page_end]:
+                matching_pages.append(page_number)
+    elif quote in source_text:
+        # Non-paginated text and single-image sources are represented as page 1.
+        matching_pages = [1]
+
+    canonical = candidate.get("canonical_candidate")
+    canonical_page = canonical.get("page_number") if isinstance(canonical, dict) else None
+    supplied_page = candidate.get("page_number")
+    if supplied_page is None:
+        supplied_page = canonical_page
+    if supplied_page is not None:
+        if isinstance(supplied_page, bool) or not isinstance(supplied_page, int) or supplied_page < 1:
+            raise HTTPException(status_code=409, detail="This document suggestion has an invalid source-page reference")
+        if supplied_page not in matching_pages:
+            raise HTTPException(status_code=409, detail="This document suggestion could not be matched to its quoted source page")
+        return supplied_page
+    if len(matching_pages) != 1:
+        detail = (
+            "This document quotation appears on more than one page, so its source page cannot be identified safely."
+            if matching_pages else
+            "This document suggestion could not be matched to a page in the preserved original text."
+        )
+        raise HTTPException(status_code=409, detail=detail)
+    return matching_pages[0]
+
+
 def _require_complete_extraction(analysis: CaptureAnalysis) -> None:
     """Do not interpret or accept facts from a document with missing page content."""
     source_text = analysis.source_text or ""
@@ -1525,6 +1564,12 @@ def review_document_candidate(
     updated = copy.deepcopy(metadata)
     intelligence = updated["document_intelligence"]
     candidate = intelligence["observations"][payload.candidate_index]
+    # Every review decision, including rejection, retains an exact source-page
+    # link. A quote that cannot be bound to one preserved page is not reviewable.
+    resolved_source_page = _resolve_candidate_source_page(candidate, analysis.source_text or "")
+    candidate["page_number"] = resolved_source_page
+    if isinstance(candidate.get("canonical_candidate"), dict):
+        candidate["canonical_candidate"]["page_number"] = resolved_source_page
     # Reject a decision based on a stale UI snapshot. Candidate indices are
     # positional; source wording and subject bind the action to what the
     # caregiver actually saw, while the existing row lock serializes review.
