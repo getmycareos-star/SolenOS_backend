@@ -995,11 +995,16 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     mime_type = str(value.get("mime_type") or "").split(";", 1)[0].strip().casefold()
     filename = str(value.get("filename") or "").casefold()
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
+    page_count = value.get("page_count")
     metadata["page_count_verified"] = (
         not is_paginated_pdf
-        or value.get("page_count_source") == "original_binary"
+        or (
+            value.get("page_count_source") == "original_binary"
+            and isinstance(page_count, int)
+            and not isinstance(page_count, bool)
+            and 1 <= page_count <= 100
+        )
     )
-    page_count = value.get("page_count")
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
         processed = value.get("processed_page_numbers")
         manifest_pages = {
