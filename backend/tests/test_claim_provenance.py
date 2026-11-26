@@ -1034,3 +1034,51 @@ def test_latest_human_claim_assessment_limits_assertion_source_support(
     assert claim["source_references"][0]["claim_assessment_version"] == 3
     if expected_status != "matched_saved_wording":
         assert unmatched_material_claims(provenance)
+
+def test_event_aggregate_excludes_events_without_an_explicit_eligible_status():
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": "explicit-recorded",
+            "event_type": "mobility",
+            "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen",
+            "description": "Caregiver reported unsteadiness.",
+        },
+        {
+            "id": "missing-status",
+            "event_type": "mobility",
+            "occurred_at": datetime(2026, 11, 3, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness in hallway",
+            "description": "Caregiver reported unsteadiness.",
+        },
+        {
+            "id": "empty-status",
+            "event_type": "mobility",
+            "status": " ",
+            "occurred_at": datetime(2026, 11, 4, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness by doorway",
+            "description": "Caregiver reported unsteadiness.",
+        },
+        {
+            "id": "pending-status",
+            "event_type": "mobility",
+            "status": "pending",
+            "occurred_at": datetime(2026, 11, 5, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near stairs",
+            "description": "Awaiting review.",
+        },
+    ]
+    aggregate = build_distinct_event_aggregate(
+        events,
+        topic="unsteadiness",
+        start_at=start,
+        end_at=end,
+        window_label="November 1–12",
+    )
+    assert aggregate["status"] == "validated"
+    assert aggregate["count"] == 1
+    assert [item["record_id"] for item in aggregate["source_references"]] == ["explicit-recorded"]
+
