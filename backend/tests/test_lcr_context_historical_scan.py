@@ -1092,8 +1092,9 @@ def test_document_extraction_metadata_detects_legacy_pdf_page_gaps():
         "document_extractions",
         {"extraction_status": "available", "extraction_metadata": metadata},
     )
-    assert status == "document_extraction_partial"
-    assert "Pages not yet processed: 2." in explanation
+    assert metadata["page_count_verified"] is False
+    assert status == "document_page_count_unverified"
+    assert "do not assume every page was read" in explanation
 
 
 def test_document_extraction_metadata_derives_pdf_gaps_without_processed_manifest():
