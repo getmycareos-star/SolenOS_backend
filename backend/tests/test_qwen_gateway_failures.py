@@ -749,3 +749,28 @@ def test_qwen_gateway_sends_product_identity_in_actual_inference_payload(monkeyp
     assert "The model is replaceable." in system
     assert "SOLENOS COMPANION — THOUGHTFUL CARE PARTNER" in system
     assert "## REASSURING THROUGH CLARITY" in system
+
+@pytest.mark.parametrize(
+    ("requested_timeout", "expected_timeout"),
+    [(9999, 2.0), (-5, 1.0), (0, 1.0)],
+)
+def test_qwen_gateway_bounds_caller_supplied_timeout(monkeypatch, requested_timeout, expected_timeout):
+    configure_gateway(monkeypatch)
+    captured = {}
+
+    def capture_request(_request, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        return FakeResponse(json.dumps({
+            "message": {"role": "assistant", "content": "Bounded response."},
+            "done": True,
+            "done_reason": "stop",
+        }).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_request)
+
+    assert qwen_gateway.qwen_chat(
+        [{"role": "user", "content": "Synthetic timeout test."}],
+        timeout=requested_timeout,
+    ) == "Bounded response."
+    assert captured["timeout"] == expected_timeout
+    assert 1.0 <= captured["timeout"] <= 2.0
