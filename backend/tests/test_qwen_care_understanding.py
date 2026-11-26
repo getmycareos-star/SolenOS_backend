@@ -409,3 +409,32 @@ def test_care_understanding_discards_items_with_unrequested_fields(monkeypatch):
     assert result["understanding"]["observations"] == []
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
+
+def test_care_understanding_does_not_reverse_negation_in_possible_links(monkeypatch):
+    _allow(monkeypatch)
+    source = "There was no link between the fall and the cough."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [{
+            "text": "link between the fall and the cough",
+            "causation_claimed": False,
+        }],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["possible_links"] == []
