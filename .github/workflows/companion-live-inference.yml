@@ -186,8 +186,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: solenos-qwen-ten-area-acceptance
-          path: ${{ runner.temp }}/solenos-qwen-ten-area-acceptance.json
+          name: solenos-qwen-fifteen-case-acceptance
+          path: ${{ runner.temp }}/solenos-qwen-fifteen-case-acceptance.json
           if-no-files-found: warn
           retention-days: 30
       - name: Run real Qwen Companion inference against PostgreSQL
