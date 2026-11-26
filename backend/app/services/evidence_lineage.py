@@ -164,8 +164,16 @@ def assess_corroboration(
     _, independence = build_evidence_lineage(rows, links, selected)
     independent_pairs: set[tuple[str, str]] = set()
     shared_pairs: set[tuple[str, str]] = set()
+    unassessed_pairs: set[tuple[str, str]] = set()
     failed_pairs: set[tuple[str, str]] = set()
     corroborating_pairs: set[tuple[str, str]] = set()
+    independent_relationship_pairs: set[tuple[str, str]] = set()
+    shared_relationship_pairs: set[tuple[str, str]] = set()
+    shared_origin_statuses = {"shared_origin", "copied_or_same_origin"}
+    shared_origin_types = {"same_origin", "copied_from", "forwarded_from", "derived_from"}
+    failed_types = {"corroboration_attempt_failed", "not_corroborating", "does_not_corroborate"}
+    corroboration_types = {"corroborates", "corroborates_claim", "corroborates_detail", "independently_corroborates"}
+
     for link in links:
         left = str(getattr(link, "source_evidence_id", "") or "").strip()
         right = str(getattr(link, "related_evidence_id", "") or "").strip()
@@ -174,32 +182,50 @@ def assess_corroboration(
         pair = tuple(sorted((left, right)))
         source_status = str(getattr(link, "source_independence_status", "") or "").strip().casefold()
         kind = str(getattr(link, "relationship_type", "") or "").strip().casefold().replace("-", "_").replace(" ", "_")
-        if source_status in INDEPENDENT_STATUSES:
-            independent_pairs.add(pair)
-            if kind in {"corroborates", "corroborates_claim", "corroborates_detail", "independently_corroborates"}:
-                corroborating_pairs.add(pair)
-        else:
-            shared_pairs.add(pair)
-        if kind in {"corroboration_attempt_failed", "not_corroborating", "does_not_corroborate"}:
+        if kind in failed_types:
             failed_pairs.add(pair)
+            continue
+        if source_status in INDEPENDENT_STATUSES:
+            independent_relationship_pairs.add(pair)
+            if kind in corroboration_types:
+                corroborating_pairs.add(pair)
+        elif source_status in shared_origin_statuses or kind in shared_origin_types:
+            shared_relationship_pairs.add(pair)
+        else:
+            unassessed_pairs.add(pair)
+
+    # Conflicting reviewed declarations about the same pair cannot be resolved
+    # by row order. Remove the pair from both positive classifications.
+    conflicting_pairs = independent_relationship_pairs & shared_relationship_pairs
+    independent_pairs = independent_relationship_pairs - conflicting_pairs
+    shared_pairs = shared_relationship_pairs - conflicting_pairs
+    for left, right in conflicting_pairs:
+        independence[left] = "independence_conflict"
+        independence[right] = "independence_conflict"
 
     # Evidence-to-evidence relationships do not carry a claim identifier in
     # this contract. Even a reviewed "corroborates" label therefore cannot
     # establish support for the free-text claim currently being assessed.
     if failed_pairs:
         status, established, review_required = "attempted_but_not_corroborated", False, True
-    elif shared_pairs and not independent_pairs:
+    elif conflicting_pairs:
+        status, established, review_required = "conflicting_source_relationships", False, True
+    elif shared_pairs and not independent_pairs and not unassessed_pairs:
         status, established, review_required = "shared_origin_only", False, True
     elif independent_pairs:
         status, established, review_required = "independent_sources_reviewed_claim_support_unassessed", False, True
+    elif unassessed_pairs:
+        status, established, review_required = "independence_not_assessed", False, True
     else:
         status, established, review_required = "corroboration_not_assessed", False, True
 
     return {"status": status, "evidence_ids_considered": selected,
             "independent_source_pairs": [list(pair) for pair in sorted(independent_pairs)],
             "shared_origin_pairs": [list(pair) for pair in sorted(shared_pairs)],
+            "unassessed_relationship_pairs": [list(pair) for pair in sorted(unassessed_pairs)],
+            "conflicting_relationship_pairs": [list(pair) for pair in sorted(conflicting_pairs)],
             "failed_corroboration_pairs": [list(pair) for pair in sorted(failed_pairs)],
-            "relationship_labelled_corroborates_pairs": [list(pair) for pair in sorted(corroborating_pairs)],
+            "relationship_labelled_corroborates_pairs": [list(pair) for pair in sorted(corroborating_pairs - conflicting_pairs)],
             "independent_corroboration_established": established, "review_required": review_required,
             "source_independence_by_evidence_id": {key: independence[key] for key in sorted(independence)},
             "interpretation_limit": "A reviewed source relationship supports only its recorded scope. Source independence does not prove claim truth; corroboration must be explicitly linked to the particular claim or detail."}
