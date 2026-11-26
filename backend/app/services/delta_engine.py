@@ -793,6 +793,7 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "source_excerpt": _delta_excerpt(item.description),
                 "occurred_at": _delta_iso(item.occurred_at),
                 "recorded_at": _delta_iso(getattr(item, "recorded_at", None)),
+                "time_provenance": getattr(item, "time_provenance", None),
             })
         elif record_id in evidence_by_id:
             item = evidence_by_id[record_id]
@@ -802,6 +803,7 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "label": str(getattr(item, "source_label", None) or getattr(item, "type", None) or "Saved care evidence"),
                 "source_excerpt": _delta_excerpt(getattr(item, "source_text", None)),
                 "recorded_at": _delta_iso(getattr(item, "uploaded_at", None)),
+                "time_provenance": getattr(item, "time_provenance", None),
             })
         elif record_id in assertion_by_id:
             item = assertion_by_id[record_id]
@@ -812,6 +814,7 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "source_excerpt": _delta_excerpt(item.source_text or item.asserted_value),
                 "occurred_at": _delta_iso(item.observed_at),
                 "recorded_at": _delta_iso(item.recorded_at),
+                "time_provenance": getattr(item, "time_provenance", None),
             })
         elif record_id in observation_by_id:
             item = observation_by_id[record_id]
@@ -822,6 +825,7 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "source_excerpt": _delta_excerpt(item.source_passage),
                 "occurred_at": _delta_iso(item.occurred_at),
                 "recorded_at": _delta_iso(item.recorded_at),
+                "time_provenance": getattr(item, "time_provenance", None),
             })
         elif record_id in fact_by_id:
             item = fact_by_id[record_id]
@@ -832,6 +836,7 @@ def _resolve_delta_source_refs(db: Session, person_id: str, record_ids: list[str
                 "source_excerpt": _delta_excerpt(item.get("fact_value")),
                 "occurred_at": _delta_iso(item.get("effective_at")),
                 "recorded_at": _delta_iso(item.get("recorded_at")),
+                "time_provenance": item.get("time_provenance"),
                 "epistemic_status": str(item.get("epistemic_status") or "not_recorded"),
                 "source_evidence": fact_evidence_by_id.get(record_id, []),
                 "source_evidence_status": (
