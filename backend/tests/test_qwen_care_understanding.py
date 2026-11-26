@@ -210,7 +210,11 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
         "events": [],
         "decisions": [],
         "outcomes": [],
-        "unknowns": [],
+        "unknowns": [{
+            "question": "What happened to her after she fell?",
+            "status": "open",
+            "raw_fragment": "Mom fell yesterday",
+        }],
         "non_care_facts": [],
         "possible_links": [],
     }
@@ -226,6 +230,7 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
             "raw_fragment": "Mom fell yesterday",
         }
     ]
+    assert result["understanding"]["unknowns"] == []
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
 
