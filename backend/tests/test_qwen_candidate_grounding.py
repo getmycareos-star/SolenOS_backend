@@ -66,11 +66,11 @@ def test_capture_candidates_keep_only_verbatim_source_grounded_observations(monk
         source_evidence_id="evidence-456",
     )
 
-    assert len(result["observations"]) == 2
+    assert len(result["observations"]) == 1
     assert [item["observation"] for item in result["observations"]] == [
         "Mum slept badly last night.",
-        "She ate half of breakfast this morning.",
     ]
+    assert any("Who does “She” refer to" in question for question in result["open_questions"])
     assert all(item["review_status"] == "pending_review" for item in result["observations"])
     assert captured["kwargs"]["audit_context"]["source_event_ids"] == ["event-123"]
     assert captured["kwargs"]["audit_context"]["source_evidence_ids"] == ["evidence-456"]
@@ -458,3 +458,63 @@ def test_capture_candidates_deduplicate_repeated_model_items(monkeypatch):
     )
 
     assert len(result["observations"]) == 1
+
+
+
+def test_capture_candidates_do_not_resolve_pronouns_without_an_authorized_entity_map(monkeypatch):
+    source = "Mum slept badly last night. She ate half of breakfast this morning."
+    model_output = {
+        "observations": [
+            {
+                "subject": "Mum",
+                "observation": "Mum slept badly last night.",
+                "source_quote": "Mum slept badly last night.",
+            },
+            {
+                "subject": "She",
+                "observation": "She ate half of breakfast this morning.",
+                "source_quote": "She ate half of breakfast this morning.",
+            },
+        ],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-pronoun-resolution",
+    )
+
+    assert [item["subject"] for item in result["observations"]] == ["Mum"]
+    assert result["open_questions"] == [
+        "Who does “She” refer to in this care update?"
+    ]
+
+
+def test_capture_candidates_preserve_explicit_person_identity_in_same_quote(monkeypatch):
+    source = "Mum ate half of breakfast this morning."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum ate half of breakfast this morning.",
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-explicit-person",
+    )
+
+    assert len(result["observations"]) == 1
+    assert result["observations"][0]["subject"] == "Mum"
