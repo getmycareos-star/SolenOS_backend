@@ -12334,6 +12334,9 @@ def list_conversations(
     request: Request,
     limit: int = Query(default=30, ge=1, le=50),
     offset: int = Query(default=0, ge=0, le=10000),
+    before_last_message_at: datetime | None = Query(default=None),
+    before_created_at: datetime | None = Query(default=None),
+    before_session_id: str | None = Query(default=None, min_length=1, max_length=64),
     db: Session = Depends(get_db),
 ):
     """List the authenticated caregiver's durable Companion conversations.
@@ -12343,7 +12346,28 @@ def list_conversations(
     without trusting a browser-local conversation ID.
     """
     person_id, caregiver_id = _scope(request, db)
-    rows = (
+    cursor_values = (before_last_message_at, before_created_at, before_session_id)
+    if any(value is not None for value in cursor_values) and not all(value is not None for value in cursor_values):
+        raise HTTPException(status_code=422, detail="All conversation cursor fields are required together")
+    if before_last_message_at is not None and offset:
+        raise HTTPException(status_code=422, detail="Offset cannot be combined with a conversation cursor")
+    last_message_at_expr = func.max(ConversationMessage.created_at)
+    if before_last_message_at is not None:
+        cursor_predicate = or_(
+            last_message_at_expr < before_last_message_at,
+            and_(
+                last_message_at_expr == before_last_message_at,
+                ConversationSession.created_at < before_created_at,
+            ),
+            and_(
+                last_message_at_expr == before_last_message_at,
+                ConversationSession.created_at == before_created_at,
+                ConversationSession.id > before_session_id,
+            ),
+        )
+    else:
+        cursor_predicate = None
+    query = (
         db.query(
             ConversationSession,
             func.count(ConversationMessage.id).label("message_count"),
@@ -12356,23 +12380,35 @@ def list_conversations(
         )
         .group_by(ConversationSession.id)
         .order_by(
-            func.max(ConversationMessage.created_at).desc(),
+            last_message_at_expr.desc(),
             ConversationSession.created_at.desc(),
             # Session timestamps can collide (including imported/restored
             # conversations). A unique final key makes page boundaries
             # deterministic instead of relying on PostgreSQL row order.
             ConversationSession.id.asc(),
         )
-        .offset(offset)
-        .limit(limit + 1)
-        .all()
     )
+    if cursor_predicate is not None:
+        query = query.having(cursor_predicate)
+    if before_last_message_at is None:
+        query = query.offset(offset)
+    rows = query.limit(limit + 1).all()
     has_more = len(rows) > limit
     page_rows = rows[:limit]
+    last_page_item = page_rows[-1] if page_rows else None
+    next_cursor = None
+    if has_more and last_page_item:
+        last_session, _, last_message_at = last_page_item
+        next_cursor = {
+            "before_last_message_at": last_message_at.isoformat() if last_message_at else None,
+            "before_created_at": last_session.created_at.isoformat() if last_session.created_at else None,
+            "before_session_id": last_session.id,
+        }
     return {
         "person_id": person_id,
         "has_more": has_more,
-        "next_offset": offset + len(page_rows) if has_more else None,
+        "next_offset": offset + len(page_rows) if has_more and before_last_message_at is None else None,
+        "next_cursor": next_cursor,
         "items": [
             {
                 "session_id": session.id,
