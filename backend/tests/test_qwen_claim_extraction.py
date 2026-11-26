@@ -304,3 +304,69 @@ def test_claim_extraction_discards_items_with_unrequested_fields(monkeypatch):
     assert result["run_a"]["claims"] == []
     assert result["run_b"]["claims"] == []
     assert result["written_to_lcr"] is False
+
+def test_claim_extraction_preserves_source_uncertainty_in_exact_spans(monkeypatch):
+    _allow_source(monkeypatch)
+    source = "Mum may have pneumonia."
+    unsupported_claim = "pneumonia"
+    start = source.index(unsupported_claim)
+    model_output = {
+        "claims": [{
+            "claim_text": unsupported_claim,
+            "entity_type": "symptom",
+            "event_type": "condition_mention",
+            "confidence_tag": "inferred",
+            "source_span": {
+                "start_offset": start,
+                "end_offset": start + len(unsupported_claim),
+                "text": unsupported_claim,
+            },
+        }]
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"] == []
+    assert result["run_b"]["claims"] == []
+    assert result["written_to_lcr"] is False
+
+
+def test_claim_extraction_accepts_uncertainty_when_the_full_source_claim_is_preserved(monkeypatch):
+    _allow_source(monkeypatch)
+    source = "Mum may have pneumonia."
+    model_output = {
+        "claims": [{
+            "claim_text": source,
+            "entity_type": "symptom",
+            "event_type": "condition_mention",
+            "confidence_tag": "inferred",
+            "source_span": {
+                "start_offset": 0,
+                "end_offset": len(source),
+                "text": source,
+            },
+        }]
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"][0]["claim_text"] == source
+    assert result["run_b"]["claims"][0]["claim_text"] == source
