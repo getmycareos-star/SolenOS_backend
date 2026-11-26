@@ -1147,7 +1147,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             current_retryable_pages = set(_retryable_page_numbers(retry_text))
             retry_observed_pages = {
                 int(match.group(1))
-                for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", retry_text)
+                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", retry_text)
             }
             remaining_missing_pages = (
                 set(range(1, original_page_count + 1)) - retry_observed_pages
