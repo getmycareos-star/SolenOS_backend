@@ -1201,14 +1201,35 @@ def test_upload_preserves_medication_photo_default_and_accepts_word_documents(mo
         assert oversized_request.status_code == 413, oversized_request.text
 
         png_bytes = b"\x89PNG\r\n\x1a\n" + b"medication image bytes"
+        medication_form = {
+            "person_id": person_id,
+            "caregiver_id": caregiver_id,
+            "ingestion_key": "medication-photo-upload-retry-001",
+        }
         medication = client.post(
             "/api/v1/upload",
             headers=headers,
-            data={"person_id": person_id, "caregiver_id": caregiver_id},
+            data=medication_form,
             files={"file": ("medication.png", png_bytes, "image/png")},
         )
         assert medication.status_code == 201, medication.text
         medication_id = medication.json()["evidence_id"]
+        medication_replay = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=medication_form,
+            files={"file": ("medication.png", png_bytes, "image/png")},
+        )
+        assert medication_replay.status_code == 201, medication_replay.text
+        assert medication_replay.json()["evidence_id"] == medication_id
+        assert medication_replay.json()["idempotent_replay"] is True
+        changed_medication = client.post(
+            "/api/v1/upload",
+            headers=headers,
+            data=medication_form,
+            files={"file": ("medication.png", png_bytes + b" changed", "image/png")},
+        )
+        assert changed_medication.status_code == 409, changed_medication.text
 
         disguised_docx = client.post(
             "/api/v1/upload",
