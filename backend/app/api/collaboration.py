@@ -1375,14 +1375,6 @@ async def upload_evidence(
             capture_source_evidence_id = str(uuid.UUID(capture_source_evidence_id))
         except (TypeError, ValueError, AttributeError) as exc:
             raise HTTPException(status_code=422, detail="The source document reference is invalid") from exc
-        source_document = db.query(EvidenceModel).filter(
-            EvidenceModel.id == capture_source_evidence_id,
-            EvidenceModel.person_id == scoped_person_id,
-            EvidenceModel.type == "document",
-            EvidenceModel.evidence_status != "deleted_by_caregiver",
-        ).first()
-        if source_document is None:
-            raise HTTPException(status_code=404, detail="The source document for this page copy was not found")
     capture_timestamp_value = None
     if capture_timestamp:
         try:
@@ -1410,6 +1402,16 @@ async def upload_evidence(
             require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "add_evidence")
     else:
         require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "add_evidence")
+
+    if capture_source_evidence_id:
+        source_document = db.query(EvidenceModel).filter(
+            EvidenceModel.id == capture_source_evidence_id,
+            EvidenceModel.person_id == scoped_person_id,
+            EvidenceModel.type == "document",
+            EvidenceModel.evidence_status != "deleted_by_caregiver",
+        ).first()
+        if source_document is None:
+            raise HTTPException(status_code=404, detail="The source document for this page copy was not found")
 
     caregiver = db.query(Caregiver).filter_by(id=scoped_caregiver_id, person_id=scoped_person_id).first()
     if not caregiver:
