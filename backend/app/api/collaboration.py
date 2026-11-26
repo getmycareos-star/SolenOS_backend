@@ -1409,7 +1409,7 @@ async def upload_evidence(
             EvidenceModel.person_id == scoped_person_id,
             EvidenceModel.type == "document",
             EvidenceModel.evidence_status != "deleted_by_caregiver",
-        ).first()
+        ).with_for_update().first()
         if source_document is None:
             raise HTTPException(status_code=404, detail="The source document for this page copy was not found")
 
