@@ -2101,28 +2101,60 @@ def build_lcr_context(
     relationship_table = metadata.tables.get("evidence_source_relationships")
     evidence_table = metadata.tables.get("evidence")
     if selected_ids and relationship_table is not None and evidence_table is not None:
-        from app.services.evidence_lineage import (
-            load_evidence_lineage_scope,
-            summarize_evidence_lineage,
-        )
-        lineage_scope = load_evidence_lineage_scope(db, str(person_id), selected_ids)
-        lineage_summary = summarize_evidence_lineage(
-            lineage_scope["evidence_rows"],
-            lineage_scope["relationships"],
-            selected_ids,
-        )
-        evidence_lineage.update({
-            **lineage_summary,
-            "status": "assessed_bounded_subset",
-            "relationship_records_examined": len(lineage_scope["relationships"]),
-            "relationship_history_bounded": bool(lineage_scope["has_more"]),
-            "scope_truncated": bool(lineage_scope["truncated"]),
-            "lineage_nodes_examined": len(lineage_scope["evidence_rows"]),
-            "interpretation_limit": (
-                lineage_summary["interpretation_limit"]
-                + " Retrieval is person-scoped and bounded; unreturned lineage is unknown, not absent."
-            ),
-        })
+        try:
+            with db.begin_nested():
+                from app.services.evidence_lineage import (
+                    load_evidence_lineage_scope,
+                    summarize_evidence_lineage,
+                )
+                lineage_scope = load_evidence_lineage_scope(db, str(person_id), selected_ids)
+                lineage_summary = summarize_evidence_lineage(
+                    lineage_scope["evidence_rows"],
+                    lineage_scope["relationships"],
+                    selected_ids,
+                )
+            evidence_lineage.update({
+                **lineage_summary,
+                "status": "assessed_bounded_subset",
+                "relationship_records_examined": len(lineage_scope["relationships"]),
+                "relationship_history_bounded": bool(lineage_scope["has_more"]),
+                "scope_truncated": bool(lineage_scope["truncated"]),
+                "lineage_nodes_examined": len(lineage_scope["evidence_rows"]),
+                "interpretation_limit": (
+                    lineage_summary["interpretation_limit"]
+                    + " Retrieval is person-scoped and bounded; unreturned lineage is unknown, not absent."
+                ),
+            })
+        except SQLAlchemyError:
+            evidence_lineage.update({
+                "status": "failed",
+                "evidence_ids_considered": sorted(selected_ids),
+                "interpretation_limit": (
+                    "Source evidence was retrieved, but its provenance relationships could not be checked. "
+                    "Do not infer independent sources, shared origins, or complete evidence lineage."
+                ),
+            })
+            for source_name, source_value in sources.items():
+                source_items = source_value.get("items", []) if isinstance(source_value, dict) else []
+                contains_selected_evidence = any(
+                    isinstance(item, dict)
+                    and (
+                        str(item.get("id") or "") in selected_ids
+                        or str(item.get("evidence_id") or "") in selected_ids
+                        or bool(set(str(value) for value in item.get("evidence_ids", []) if value) & selected_ids)
+                    )
+                    for item in source_items
+                )
+                if contains_selected_evidence:
+                    _mark_source_enrichment_partial(
+                        sources,
+                        source_name,
+                        error_code="evidence_lineage_lookup_failed",
+                        interpretation_limit=(
+                            "The care information was retrieved, but its source relationships could not be checked. "
+                            "Do not assume the evidence is independent or that its provenance is complete."
+                        ),
+                    )
     elif selected_ids:
         evidence_lineage["status"] = "unavailable_schema"
     # Appointment workspaces are caregiver-authored snapshots. Match the
