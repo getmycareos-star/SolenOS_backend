@@ -64,6 +64,7 @@ DUPLICATE_COPY_WARNING = (
 MAX_DOCUMENT_QWEN_PAGES = 25
 MAX_DOCUMENT_QWEN_CHUNKS = 60
 MAX_DOCUMENT_CANDIDATE_BATCH = 60
+MAX_DOCUMENT_TEXT_MATCH_CANDIDATES = 200
 
 
 def _explicit_document_event_datetime(candidate: dict, source_quote: str) -> datetime | None:
@@ -913,6 +914,8 @@ def list_document_intelligence(
     # relationship is created without a caregiver decision.
     latest_by_evidence = {}
     for analysis, evidence_id in document_analyses:
+        if len(latest_by_evidence) >= MAX_DOCUMENT_TEXT_MATCH_CANDIDATES:
+            break
         if evidence_id in valid_evidence_ids and evidence_id not in latest_by_evidence:
             latest_by_evidence[evidence_id] = analysis
     text_fingerprints = {}
