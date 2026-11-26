@@ -250,3 +250,57 @@ def test_claim_extraction_keeps_positive_claim_after_unrelated_negated_clause(mo
     assert len(result["run_b"]["claims"]) == 1
     assert result["run_a"]["claims"][0]["claim_text"] == claim
     assert result["run_b"]["claims"][0]["claim_text"] == claim
+
+@pytest.mark.parametrize(
+    "model_output",
+    [
+        {"claims": [], "write_to_lcr": True},
+        {"claims": [{}] * 21},
+    ],
+)
+def test_claim_extraction_rejects_schema_drift_and_over_limit_output(monkeypatch, model_output):
+    _allow_source(monkeypatch)
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        collaboration.qwen_claim_extraction(_request(), request=None, db=None)
+
+    assert error.value.status_code == 503
+
+
+def test_claim_extraction_discards_items_with_unrequested_fields(monkeypatch):
+    _allow_source(monkeypatch)
+    source = "Mom fell yesterday."
+    model_output = {
+        "claims": [{
+            "claim_text": source,
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": 0,
+                "end_offset": len(source),
+                "text": source,
+            },
+            "write_to_lcr": True,
+        }]
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"] == []
+    assert result["run_b"]["claims"] == []
+    assert result["written_to_lcr"] is False
