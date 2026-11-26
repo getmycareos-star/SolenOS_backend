@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 from uuid import UUID
 import json
 
@@ -1077,14 +1078,17 @@ def test_companion_source_caveats_are_bounded_and_visible_in_prompt_metadata():
 def test_document_extraction_metadata_detects_legacy_pdf_page_gaps():
     from app.services.lcr_context import _document_extraction_metadata, _information_status
 
+    source_text = "[Page 1 OCR]\\nFirst page.\\n[Page 3 OCR]\\nThird page."
     metadata = _document_extraction_metadata(
         {
             "filename": "legacy-care-plan.pdf",
             "mime_type": "application/pdf",
             "page_count": 3,
             "processed_page_numbers": [1, 3],
+            "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
             "document_intelligence": {"status": "available", "observations": []},
-        }
+        },
+        source_text,
     )
 
     assert metadata["unprocessed_page_numbers"] == [2]
