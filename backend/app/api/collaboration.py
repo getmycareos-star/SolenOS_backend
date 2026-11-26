@@ -5628,12 +5628,16 @@ def review_two_week_output(
 
 
 @router.post("/assistant/claim-extraction")
-def _source_claim_preserves_negation(claim: str, source: str) -> bool:
-    """Reject exact source substrings that omit negation in their own clause."""
+def _source_claim_preserves_qualifiers(claim: str, source: str) -> bool:
+    """Reject exact source substrings that drop negation or uncertainty."""
     if not claim or claim not in source:
         return False
     negation = re.compile(
         r"\b(?:no|not|never|neither|nor|without|denies|denied|doesn't|didn't|isn't|wasn't|weren't|haven't|hasn't|hadn't|cannot|can't|couldn't|wouldn't|won't)\b",
+        flags=re.IGNORECASE,
+    )
+    uncertainty = re.compile(
+        r"\b(?:may|might|could|possibly|possible|suspected|suspects|seems|seemed|appears|appeared|perhaps|likely|unlikely|unclear|uncertain|not sure)\b",
         flags=re.IGNORECASE,
     )
     boundaries = re.compile(
@@ -5646,7 +5650,11 @@ def _source_claim_preserves_negation(claim: str, source: str) -> bool:
     )
     if claim_clause is None:
         return False
-    return not negation.search(claim_clause) or bool(negation.search(claim))
+    if negation.search(claim_clause) and not negation.search(claim):
+        return False
+    if uncertainty.search(claim_clause) and not uncertainty.search(claim):
+        return False
+    return True
 
 
 def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request, db: Session = Depends(get_db)):
@@ -5734,7 +5742,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
             if (
                 span is None
                 or text_value.strip() != span["text"]
-                or not _source_claim_preserves_negation(text_value.strip(), source)
+                or not _source_claim_preserves_qualifiers(text_value.strip(), source)
             ):
                 continue
             span_identity = (span["start_offset"], span["end_offset"], span["text"])
