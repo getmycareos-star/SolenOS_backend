@@ -429,6 +429,10 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
             denied = client.get(f"/api/v1/upload/{evidence_id}", headers=other_headers)
             assert denied.status_code == 404, denied.text
 
+            source_delete = client.delete(f"/api/v1/upload/{source_id}", headers=owner_headers)
+            assert source_delete.status_code == 409, source_delete.text
+            assert "source for clearer page copies" in source_delete.json()["detail"]
+
         with Session() as db:
             evidence = db.query(Evidence).filter_by(id=evidence_id, person_id=person_id).one()
             metadata = json.loads(evidence.extra_metadata or "{}")
