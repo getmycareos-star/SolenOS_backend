@@ -500,6 +500,10 @@ def test_clearer_page_copy_retains_source_document_and_page_number_and_rejects_c
         assert metadata["capture"]["source_page_number"] == 3
         assert metadata["capture"]["page_number"] == 3
 
+    source_delete = test_client.delete(f"/api/v1/upload/{original_id}", headers=auth)
+    assert source_delete.status_code == 409, source_delete.text
+    assert "source for clearer page copies" in source_delete.json()["detail"]
+
     other_session = test_client.post(
         "/api/v1/sessions/anonymous",
         json={"name": "Separate document owner", "caregiver_name": "Other caregiver"},
