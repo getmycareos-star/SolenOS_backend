@@ -1622,9 +1622,15 @@ def review_document_candidate(
     updated = copy.deepcopy(metadata)
     intelligence = updated["document_intelligence"]
     candidate = intelligence["observations"][payload.candidate_index]
-    # Every review decision, including rejection, retains an exact source-page
-    # link. A quote that cannot be bound to one preserved page is not reviewable.
-    resolved_source_page = _resolve_candidate_source_page(candidate, analysis.source_text or "")
+    # Accepted or corrected details must have an exact source-page link.
+    # A caregiver may still reject an untraceable suggestion so it cannot remain
+    # in the review queue or be mistaken for accepted care information.
+    try:
+        resolved_source_page = _resolve_candidate_source_page(candidate, analysis.source_text or "")
+    except HTTPException:
+        if payload.decision != "reject":
+            raise
+        resolved_source_page = None
     candidate["page_number"] = resolved_source_page
     if isinstance(candidate.get("canonical_candidate"), dict):
         candidate["canonical_candidate"]["page_number"] = resolved_source_page
