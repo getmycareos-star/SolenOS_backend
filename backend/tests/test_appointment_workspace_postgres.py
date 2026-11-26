@@ -162,6 +162,30 @@ def test_postgres_appointment_workspace_create_update_retry_and_isolation(monkey
             )
             assert denied_update.status_code == 404, denied_update.text
 
+            owner_brief = client.get(
+                "/api/v1/appointment-workspaces/preparation-brief?window_days=90",
+                headers=headers,
+            )
+            assert owner_brief.status_code == 200, owner_brief.text
+            assert owner_brief.json()["person_id"] == owner.json()["person"]["id"]
+            assert owner_brief.json()["next_appointment"] is None, (
+                "appointment workspace follow-ups must not be presented as a booked visit"
+            )
+            assert owner_brief.json()["appointment_context_status"]["code"] == "follow_up_needed"
+            assert owner_brief.json()["appointment_related_open_loops"], (
+                "persisted appointment follow-ups must be returned in the PostgreSQL-backed preparation brief"
+            )
+
+            other_brief = client.get(
+                "/api/v1/appointment-workspaces/preparation-brief?window_days=90",
+                headers=other_headers,
+            )
+            assert other_brief.status_code == 200, other_brief.text
+            assert other_brief.json()["person_id"] == other.json()["person"]["id"]
+            assert other_brief.json()["appointment_related_open_loops"] == [], (
+                "the preparation brief must not expose another care recipient's appointment follow-ups"
+            )
+
             print("POSTGRES_APPOINTMENT_HTTP_BENCHMARK=" + json.dumps({
                 "sample_count": sample_count,
                 "create_post_duration_ms": _percentiles(create_ms),
