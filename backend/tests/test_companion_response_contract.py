@@ -19,6 +19,7 @@ from app.models.care import CareEvent, Caregiver, Correction, Evidence, Person
 from app.models.capture_analysis import CaptureAnalysis
 from app.models.care_continuity import CareAssertion, CareRecordRelationship, EvidenceFreshnessPolicy, EvidenceFreshnessAssessment, EvidenceSourceRelationship
 from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.ai_output_governance import AISafetyCheck
 from app.models.uncertainty import OpenQuestion
 from app.core.uncertainty_enums import Priority
 from app.services.unified_lcr_retrieval import _conversation_context
@@ -4956,7 +4957,7 @@ def test_companion_rejects_material_paraphrase_without_exact_source_match(monkey
                 result="rejected",
             ).first()
             assert rejected is not None
-            assert "unmatched_material_care_claim" in rejected.details_json
+            assert "unmatched_material_care_claim" in rejected.details_json["rejection_reasons"]
         finally:
             db.close()
     finally:
