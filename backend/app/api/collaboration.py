@@ -5695,8 +5695,17 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Qwen returned invalid care-understanding data. No result was accepted.") from exc
     limits = {"observations": 20, "events": 10, "decisions": 10, "outcomes": 10, "unknowns": 10, "non_care_facts": 10, "possible_links": 10}
-    if not isinstance(parsed, dict) or any(not isinstance(parsed.get(k, []), list) for k in limits):
+    if (
+        not isinstance(parsed, dict)
+        or set(parsed) != set(limits)
+        or any(not isinstance(parsed.get(key), list) for key in limits)
+    ):
         raise HTTPException(status_code=503, detail="Qwen returned an invalid care-understanding structure.")
+    if any(len(parsed[key]) > limit for key, limit in limits.items()):
+        raise HTTPException(
+            status_code=503,
+            detail="Qwen exceeded the care-understanding output limits. No result was accepted.",
+        )
     result = {k: [] for k in limits}
 
     def bounded_text(value, maximum: int) -> str | None:
