@@ -24,7 +24,6 @@ def test_care_understanding_returns_source_grounded_review_only_proposal(monkeyp
         "observations": [{
             "description": "Mom fell yesterday",
             "approximate_time": "yesterday",
-            "confidence": "medium",
             "raw_fragment": "Mom fell yesterday",
         }],
         "events": [],
@@ -58,7 +57,6 @@ def test_care_understanding_discards_unverifiable_fragments_and_links(monkeypatc
         "observations": [{
             "description": "Invented event",
             "approximate_time": None,
-            "confidence": "high",
             "raw_fragment": "not present in the original source",
         }],
         "events": [],
@@ -114,7 +112,6 @@ def test_care_understanding_does_not_accept_unverifiable_fragments(monkeypatch):
         "observations": [{
             "description": "Invented observation",
             "approximate_time": None,
-            "confidence": "high",
             "raw_fragment": "This text is not in the source",
         }],
         "events": [],
@@ -196,13 +193,11 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
             {
                 "description": "She experienced a fall yesterday",
                 "approximate_time": "yesterday",
-                "confidence": "high",
                 "raw_fragment": "Mom fell yesterday",
             },
             {
                 "description": "Mom fell",
                 "approximate_time": "yesterday",
-                "confidence": "medium",
                 "raw_fragment": "Mom fell yesterday",
             },
         ],
@@ -300,7 +295,6 @@ def test_care_understanding_does_not_drop_source_negation(monkeypatch):
             # must reject it because it drops the source's leading negation.
             "description": "fall occurred yesterday",
             "approximate_time": "yesterday",
-            "confidence": "high",
             "raw_fragment": "No fall occurred yesterday",
         }],
         "events": [],
