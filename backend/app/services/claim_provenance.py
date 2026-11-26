@@ -275,7 +275,10 @@ def build_distinct_event_aggregate(
             occurred = occurred.replace(tzinfo=timezone.utc)
         if not (start <= occurred < end):
             continue
-        status = str(event.get("status") or "recorded").casefold()
+        # A missing lifecycle status is not evidence that an event was recorded.
+        # Only explicit persisted lifecycle states may contribute to a numeric
+        # event aggregate; otherwise incomplete source rows could inflate counts.
+        status = str(event.get("status") or "").strip().casefold()
         if status not in eligible_statuses:
             continue
         searchable = " ".join(str(event.get(key) or "") for key in ("event_type", "title", "description", "tags")).casefold()
