@@ -1092,10 +1092,21 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
             id=session_id, person_id=person_id, caregiver_id=caregiver_id,
             title="Restricted conversation", status="active",
         ))
+        source_message_id = f"restricted-source-{suffix}"
+        db.add(ConversationMessage(
+            id=source_message_id, session_id=session_id, role="user",
+            content="I noticed a change in sleep last night.",
+        ))
         db.commit()
 
     listed = client.get("/api/v1/conversations", headers=headers)
     history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+    care_updates = client.get("/api/v1/companion/care-updates", headers=headers)
+    create_update = client.post(
+        f"/api/v1/companion/care-updates/from-message/{source_message_id}",
+        headers=headers,
+        json={"confirm_care_report": True},
+    )
     sent = client.post(
         "/api/v1/conversation/message",
         headers=headers,
@@ -1108,6 +1119,8 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
     )
     assert listed.status_code == 403, listed.text
     assert history.status_code == 403, history.text
+    assert care_updates.status_code == 403, care_updates.text
+    assert create_update.status_code == 403, create_update.text
     assert sent.status_code == 403, sent.text
 
     with Session() as db:
