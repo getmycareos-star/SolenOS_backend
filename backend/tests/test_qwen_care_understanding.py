@@ -438,3 +438,44 @@ def test_care_understanding_does_not_reverse_negation_in_possible_links(monkeypa
     result = collaboration.qwen_care_understanding(payload, request=None, db=None)
 
     assert result["understanding"]["possible_links"] == []
+
+def test_care_understanding_does_not_accept_model_status_without_same_clause_source_cue(monkeypatch):
+    _allow(monkeypatch)
+    source = "We plan to call the clinic tomorrow. The follow-up call was completed today."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [{
+            "description": "We plan to call the clinic tomorrow",
+            "who": ["We"],
+            "why": None,
+            "reason_unknown": True,
+            "status": "completed",
+            "raw_fragment": source,
+        }],
+        "outcomes": [{
+            "description": "The follow-up call",
+            "status": "resolved",
+            "raw_fragment": source,
+        }],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert len(result["understanding"]["decisions"]) == 1
+    assert result["understanding"]["decisions"][0]["status"] == "uncertain"
+    assert len(result["understanding"]["outcomes"]) == 1
+    assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
+    assert result["written_to_lcr"] is False
