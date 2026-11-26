@@ -821,8 +821,8 @@ def test_postgres_document_deletion_refuses_to_orphan_companion_conversation_sou
                 session_id=session.id,
                 role="assistant",
                 content="This response refers to the uploaded document.",
-                evidence_ids_json=json.dumps([evidence_id]),
-                source_record_refs_json="[]",
+                evidence_ids_json="[]",
+                source_record_refs_json=json.dumps([{"record_type": "evidence", "record_id": evidence_id}]),
                 response_metadata_json="{}",
             ))
             db.commit()
