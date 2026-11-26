@@ -173,7 +173,7 @@ from starlette.requests import Request
 from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion
-from app.models.collaboration import EvidenceUpload
+from app.models.collaboration import ConversationMessage, ConversationSession, EvidenceUpload
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.models.uncertainty import OpenQuestion
@@ -779,6 +779,59 @@ def test_postgres_document_deletion_refuses_to_orphan_another_caregivers_saved_o
                 delete_uploaded_document(evidence_id, _request(person_id, uploader_id), db)
             assert blocked.value.status_code == 409
             assert "saved assistant response" in blocked.value.detail
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
+    finally:
+        engine.dispose()
+
+
+
+def test_postgres_document_deletion_refuses_to_orphan_companion_conversation_sources():
+    """Conversation history from another caregiver must retain its source link."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-conversation-source-person-{suffix}"
+    uploader_id = f"doc-conversation-source-uploader-{suffix}"
+    other_caregiver_id = f"doc-conversation-source-other-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Conversation source deletion fixture"))
+            db.flush()
+            db.add_all([
+                Caregiver(id=uploader_id, name="Document uploader", relationship="family", person_id=person_id),
+                Caregiver(id=other_caregiver_id, name="Other caregiver", relationship="family", person_id=person_id),
+            ])
+            db.commit()
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, uploader_id, "conversation-source.txt",
+                ("source retained in Companion " + suffix).encode(),
+            )
+            evidence_id = uploaded["evidence_id"]
+            session = ConversationSession(
+                person_id=person_id,
+                caregiver_id=other_caregiver_id,
+                title="Document discussion",
+                status="active",
+            )
+            db.add(session)
+            db.flush()
+            db.add(ConversationMessage(
+                session_id=session.id,
+                role="assistant",
+                content="This response refers to the uploaded document.",
+                evidence_ids_json=json.dumps([evidence_id]),
+                source_record_refs_json="[]",
+                response_metadata_json="{}",
+            ))
+            db.commit()
+
+        with Session() as db:
+            with pytest.raises(HTTPException) as blocked:
+                delete_uploaded_document(evidence_id, _request(person_id, uploader_id), db)
+            assert blocked.value.status_code == 409
+            assert "Companion conversation" in blocked.value.detail
             assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
     finally:
         engine.dispose()
