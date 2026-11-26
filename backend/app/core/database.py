@@ -46,7 +46,7 @@ import app.models.privacy_request  # noqa: E402, F401
 import app.models.privacy_export  # noqa: E402, F401
 
 
-def get_db(request: Request):
+def get_db(request: Request = None):
     db = SessionLocal()
     try:
         yield db
@@ -55,8 +55,8 @@ def get_db(request: Request):
         # the request transaction so inference does not pin a PostgreSQL
         # connection. Release only leases owned by this request; if cleanup
         # cannot reach PostgreSQL, the bounded expiry is the crash-recovery path.
-        leases = getattr(request.state, "companion_turn_leases", [])
-        owner_token = getattr(request.state, "companion_turn_lease_owner", None)
+        leases = getattr(getattr(request, "state", None), "companion_turn_leases", [])
+        owner_token = getattr(getattr(request, "state", None), "companion_turn_lease_owner", None)
         if leases and owner_token and db.get_bind().dialect.name == "postgresql":
             try:
                 for lock_key in reversed(leases):
