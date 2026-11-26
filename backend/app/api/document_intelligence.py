@@ -30,6 +30,7 @@ from app.api.document_lifecycle import (
     _ocr_quality_by_page,
     _page_count,
     _page_parsing_text,
+    _normalized_extraction_text,
     _unprocessed_page_numbers,
     _retryable_page_numbers,
     _blocked_page_numbers,
@@ -907,6 +908,48 @@ def list_document_intelligence(
             ).all()
         }
 
+    # Detect a conservative same-readable-text match after extraction. This
+    # is a suggestion only: originals are retained and no version or duplicate
+    # relationship is created without a caregiver decision.
+    latest_by_evidence = {}
+    for analysis, evidence_id in document_analyses:
+        if evidence_id in valid_evidence_ids and evidence_id not in latest_by_evidence:
+            latest_by_evidence[evidence_id] = analysis
+    text_fingerprints = {}
+    possible_text_matches = {}
+    for evidence_id, analysis in latest_by_evidence.items():
+        upload = uploads_by_evidence_id.get(evidence_id)
+        metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
+        source_text = analysis.source_text or ""
+        if (
+            upload is None
+            or analysis.extraction_status != "available"
+            or metadata.get("kind") != "document_extraction_v1"
+            or metadata.get("binary_sha256") != upload.sha256
+            or metadata.get("source_text_sha256") != hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest()
+            or _unreadable_page_numbers(source_text)
+        ):
+            continue
+        verified_page_count = _verified_pdf_page_count(metadata, upload)
+        if _is_paginated_pdf(metadata) and verified_page_count is None:
+            continue
+        if _persisted_unprocessed_pages(analysis, metadata, verified_page_count):
+            continue
+        text_without_quality = re.sub(r"(?m)^\\[OCR quality:.*\\]\\s*$", "", _page_parsing_text(source_text))
+        normalized_text = _normalized_extraction_text(text_without_quality).casefold()
+        if len(normalized_text) < 80:
+            continue
+        fingerprint = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+        previous = text_fingerprints.get(fingerprint)
+        if previous and previous["binary_sha256"] != upload.sha256:
+            possible_text_matches[evidence_id] = previous
+        else:
+            text_fingerprints.setdefault(fingerprint, {
+                "evidence_id": evidence_id,
+                "document_name": metadata.get("filename") or "another saved document",
+                "binary_sha256": upload.sha256,
+            })
+
     items = []
     seen_evidence_ids = set()
     for analysis, evidence_id in document_analyses:
@@ -916,7 +959,12 @@ def list_document_intelligence(
             continue
         seen_evidence_ids.add(evidence_id)
         if len(items) < limit:
-            items.append(_response(analysis, uploads_by_evidence_id.get(evidence_id)))
+            response = _response(analysis, uploads_by_evidence_id.get(evidence_id))
+            text_match = possible_text_matches.get(evidence_id)
+            if text_match:
+                response["possible_text_duplicate_of_evidence_id"] = text_match["evidence_id"]
+                response["possible_text_duplicate_document_name"] = text_match["document_name"]
+            items.append(response)
     # A completed worker job is not proof that document extraction was
     # persisted. Keep that distinction visible to the caregiver: if the
     # completed job has no corresponding saved analysis, surface it as a
