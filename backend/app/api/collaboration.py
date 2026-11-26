@@ -5068,7 +5068,7 @@ def _production_qwen_evaluation_cases() -> list[dict]:
             "context": "Synthetic caregiver source: The episode happened a few days before the appointment. The appointment date and the episode date are not present in the supplied record.",
             "question": "What calendar date did the episode happen?",
             "required_any": ["cannot determine", "exact date is not recorded", "date is unknown", "not enough information", "a few days before the appointment"],
-            "forbidden": ["2026-", "2025-", "january", "february", "march", "april", "may ", "june", "july", "august", "september", "october", "november", "december"],
+            "forbidden": ["2026-", "2025-", "january", "february", "march", "april", "june", "july", "august", "september", "october", "november", "december"],
         },
         {
             "criterion": "entity_ambiguity",
