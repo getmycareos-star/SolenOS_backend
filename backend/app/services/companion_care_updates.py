@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy.orm import sessionmaker
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.models.ai_output_governance import AIOutputLCRProposal
 from app.models.anonymous_session import AnonymousSession
@@ -90,9 +91,23 @@ def persist_companion_candidates(
             proposal_version=1,
             status="pending_authorization",
         )
-        db.add(proposal)
-        db.flush()
-        output.append(proposal_payload(proposal))
+        try:
+            with db.begin_nested():
+                db.add(proposal)
+                db.flush()
+            output.append(proposal_payload(proposal))
+        except IntegrityError:
+            existing = db.query(AIOutputLCRProposal).filter(
+                AIOutputLCRProposal.person_id == person_id,
+                AIOutputLCRProposal.caregiver_id == caregiver_id,
+                AIOutputLCRProposal.proposal_type == "companion_care_observation",
+                AIOutputLCRProposal.source_message_id == message_id,
+                AIOutputLCRProposal.candidate_index == index,
+                AIOutputLCRProposal.proposal_version == 1,
+            ).first()
+            if existing is None:
+                raise
+            output.append(proposal_payload(existing))
     if output:
         db.commit()
     else:
