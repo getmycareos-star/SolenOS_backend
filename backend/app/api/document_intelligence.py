@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import io
 import json
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Literal
+
+from pypdf import PdfReader
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -30,6 +33,7 @@ from app.api.document_lifecycle import (
     _retryable_page_numbers,
     _blocked_page_numbers,
     _unreadable_page_numbers,
+    MAX_PDF_PAGES,
 )
 from app.services.care_continuity_execution import execute_care_continuity_reconciliation
 from app.services.delta_engine import reconcile_event as reconcile_document_delta
@@ -125,8 +129,38 @@ def _metadata(analysis: CaptureAnalysis) -> dict:
     return value
 
 
-def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | None = None) -> list[int]:
-    """Combine explicit failures with PDF page gaps, including legacy records without page metadata."""
+def _is_paginated_pdf(metadata: dict) -> bool:
+    mime_type = str(metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+    filename = str(metadata.get("filename") or "").casefold()
+    return mime_type == "application/pdf" or filename.endswith(".pdf")
+
+
+def _verified_pdf_page_count(metadata: dict, upload: EvidenceUpload | None = None) -> int | None:
+    """Use the preserved PDF bytes as the authority when available."""
+    if not _is_paginated_pdf(metadata):
+        return None
+    if upload is None:
+        stored_count = metadata.get("page_count")
+        return (
+            stored_count
+            if isinstance(stored_count, int) and not isinstance(stored_count, bool)
+            and 1 <= stored_count <= MAX_PDF_PAGES
+            else None
+        )
+    try:
+        reader = PdfReader(io.BytesIO(read_document_binary(upload)), strict=True)
+        actual_count = len(reader.pages)
+    except Exception:
+        return None
+    return actual_count if 1 <= actual_count <= MAX_PDF_PAGES else None
+
+
+def _persisted_unprocessed_pages(
+    analysis: CaptureAnalysis,
+    metadata: dict | None = None,
+    verified_page_count: int | None = None,
+) -> list[int]:
+    """Combine explicit failures with page gaps against the verified PDF page total."""
     value = metadata if isinstance(metadata, dict) else (
         analysis.candidates if isinstance(analysis.candidates, dict) else {}
     )
@@ -140,11 +174,8 @@ def _persisted_unprocessed_pages(analysis: CaptureAnalysis, metadata: dict | Non
         and page > 0
     } if isinstance(recorded, list) else set()
     unprocessed = set(_unprocessed_page_numbers(source_text)) | persisted
-    mime_type = str(value.get("mime_type") or "").split(";", 1)[0].strip().casefold()
-    filename = str(value.get("filename") or "").casefold()
-    is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
-    if is_paginated_pdf:
-        raw_page_count = value.get("page_count")
+    if _is_paginated_pdf(value):
+        raw_page_count = verified_page_count or value.get("page_count")
         page_count = (
             raw_page_count
             if isinstance(raw_page_count, int) and not isinstance(raw_page_count, bool) and raw_page_count > 0
@@ -197,12 +228,18 @@ def _resolve_candidate_source_page(candidate: dict, source_text: str) -> int:
     return matching_pages[0]
 
 
-def _require_complete_extraction(analysis: CaptureAnalysis) -> None:
+def _require_complete_extraction(analysis: CaptureAnalysis, upload: EvidenceUpload | None = None) -> None:
     """Do not interpret or accept facts from a document with missing page content."""
     source_text = analysis.source_text or ""
     unreadable_pages = _unreadable_page_numbers(source_text)
     metadata = _metadata(analysis)
-    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata)
+    verified_page_count = _verified_pdf_page_count(metadata, upload)
+    if _is_paginated_pdf(metadata) and verified_page_count is None:
+        raise HTTPException(
+            status_code=409,
+            detail="The original PDF page count could not be verified. Read the saved original again before reviewing its details.",
+        )
+    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata, verified_page_count)
     if analysis.extraction_status != "available" or unreadable_pages or unprocessed_pages:
         details = []
         if unreadable_pages:
