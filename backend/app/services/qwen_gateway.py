@@ -636,6 +636,29 @@ def qwen_chat(
         failure_category, failure_reason = "invalid_upstream_response", "unexpected_response_shape"
         _log_inference_result(model, started, effective_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    # When Ollama identifies the model that actually served the request,
+    # require it to match the configured model. Missing metadata remains
+    # backward-compatible; an explicit mismatch is never accepted.
+    response_model = result.get("model")
+    if response_model is not None:
+        if not isinstance(response_model, str) or response_model.strip().casefold() != model.casefold():
+            _mark_inference_unverified(model)
+            failure_category, failure_reason = "unexpected_model_response", "configured_model_mismatch"
+            response_metadata = dict(result)
+            response_metadata["response_model_mismatch"] = True
+            _log_inference_result(
+                model, started, effective_timeout, failure_category, failure_reason,
+                audit_metadata=audit_metadata, response_metadata=response_metadata, audit_id=audit_id,
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "code": failure_category,
+                    "reason": failure_reason,
+                    "message": "SolenOS could not verify which AI model produced this response. No answer was accepted.",
+                },
+            )
+        audit_metadata["response_model"] = response_model.strip()
     # Ollama can return a syntactically valid assistant message when generation
     # stopped before completion (for example, the output-token limit was reached).
     # Non-streaming requests must not be reported as successful in that case.
