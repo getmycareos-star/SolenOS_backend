@@ -146,10 +146,10 @@ def _verified_pdf_page_count(metadata: dict, upload: EvidenceUpload | None = Non
         and not isinstance(stored_count, bool)
         and 1 <= stored_count <= MAX_PDF_PAGES
     )
-    if metadata.get("page_count_source") == "original_binary" and stored_count_is_valid:
-        return stored_count
     if upload is None:
         return None
+    if metadata.get("page_count_source") == "original_binary" and stored_count_is_valid:
+        return stored_count
     try:
         reader = PdfReader(io.BytesIO(read_document_binary(upload)), strict=True)
         actual_count = len(reader.pages)
