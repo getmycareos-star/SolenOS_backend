@@ -33,7 +33,7 @@ def test_relative_date_resolution_uses_injected_reference_time_and_timezone():
     assert window["timezone"] == "America/Los_Angeles"
     # At 01:30 UTC it is still November 25 in Los Angeles.
     assert window["basis"] == "explicit_user_temporal_expression"
-    assert window["start"].startswith("2026-11-24T07:00:00")
+    assert window["start"].startswith("2026-11-24T08:00:00")
     assert window["end"].startswith("2026-11-25T07:59:59")
 
 
@@ -50,5 +50,5 @@ def test_relative_date_resolution_does_not_depend_on_wall_clock_when_injected():
     )
 
     assert window is not None
-    assert window["start"].startswith("2024-02-23T00:00:00")
+    assert window["start"].startswith("2024-02-19T00:00:00")
     assert window["end"].startswith("2024-03-01T23:59:59")
