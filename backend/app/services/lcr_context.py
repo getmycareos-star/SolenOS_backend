@@ -6,6 +6,7 @@ the Living Care Record.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from enum import Enum as PyEnum
@@ -794,6 +795,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "document_source_integrity_unverified",
                 "The saved original file could not be matched to the extracted text. Treat this text as unverified and do not rely on it as a complete source.",
             )
+        if metadata.get("source_text_integrity_verified") is False:
+            return (
+                "document_extraction_text_integrity_unverified",
+                "The saved extracted text does not match its recorded checksum. Do not rely on this text until it is checked again against the original file.",
+            )
         if metadata.get("page_count_verified") is False:
             return (
                 "document_page_count_unverified",
@@ -1015,8 +1021,14 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
             and 1 <= page_count <= 100
         )
     )
+    source_text_digest = hashlib.sha256(str(source_text or "").strip().encode("utf-8")).hexdigest()
+    source_text_integrity_verified = bool(
+        value.get("source_text_sha256")
+        and value.get("source_text_sha256") == source_text_digest
+    )
     metadata["original_upload_present"] = bool(original_upload_sha256) if upload_check_performed else None
     metadata["binary_integrity_verified"] = binary_integrity_verified if upload_check_performed else None
+    metadata["source_text_integrity_verified"] = source_text_integrity_verified
     metadata["page_count_verified"] = (
         binary_integrity_verified and page_manifest_verified
         if upload_check_performed
