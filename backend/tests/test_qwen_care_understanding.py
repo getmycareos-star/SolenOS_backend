@@ -238,3 +238,26 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
 
+
+
+def test_care_understanding_does_not_label_explicit_causal_source_as_noncausal_link(monkeypatch):
+    _allow(monkeypatch)
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text="Mom fell yesterday. The fall caused the call.",
+    )
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [{
+            "text": "The fall caused the call.",
+            "causation_claimed": False,
+        }],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+    assert result["understanding"]["possible_links"] == []

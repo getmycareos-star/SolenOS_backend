@@ -5607,7 +5607,17 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 continue
             if key == "possible_links":
                 link_text = bounded_text(item.get("text"), 500)
-                if item.get("causation_claimed") is False and link_text and link_text in source:
+                causal_language = bool(re.search(
+                    r"\\b(?:cause[sd]?|caus(?:e|es|ed|ing)|because|due to|as a result|led to|resulted in|therefore|consequently)\\b",
+                    link_text or "",
+                    flags=re.IGNORECASE,
+                ))
+                if (
+                    item.get("causation_claimed") is False
+                    and link_text
+                    and link_text in source
+                    and not causal_language
+                ):
                     result[key].append({"text": link_text, "causation_claimed": False})
                 continue
 
