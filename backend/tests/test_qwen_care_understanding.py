@@ -381,3 +381,31 @@ def test_care_understanding_rejects_schema_drift_and_over_limit_output(monkeypat
         collaboration.qwen_care_understanding(_request(), request=None, db=None)
 
     assert error.value.status_code == 503
+
+def test_care_understanding_discards_items_with_unrequested_fields(monkeypatch):
+    _allow(monkeypatch)
+    model_output = {
+        "observations": [{
+            "description": "Mom fell yesterday",
+            "approximate_time": "yesterday",
+            "raw_fragment": "Mom fell yesterday",
+            "write_to_lcr": True,
+        }],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
+
+    assert result["understanding"]["observations"] == []
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
