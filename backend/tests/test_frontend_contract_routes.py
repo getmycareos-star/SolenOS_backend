@@ -896,6 +896,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
             "medications": [{
                 **payload["medications"][0],
                 "photo_evidence_id": missing_blob_id,
+                "photo_ingestion_key": None,
             }],
         }
         missing_blob_response = client.post("/api/v1/daily/log", headers=auth, json=missing_blob_payload)
