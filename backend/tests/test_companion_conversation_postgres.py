@@ -1099,13 +1099,13 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
         source_message_id = f"restricted-source-{suffix}"
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
-            content="I noticed a change in sleep last night.",
+            content="I noticed a change in sleep.",
         ))
         db.add(ConversationMessage(
             id=f"conversation-only-assistant-{suffix}",
             session_id=session_id,
             role="assistant",
-            content="The care record says the medication dose changed yesterday.",
+            content="The care record says the medication dose changed.",
             evidence_ids_json='["restricted-evidence-id"]',
             source_record_refs_json='[{"record_type":"evidence","record_id":"restricted-evidence-id"}]',
             response_metadata_json=json.dumps({
@@ -1279,14 +1279,14 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
         db.flush()
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
-            content="I noticed a change in sleep last night.",
+            content="I noticed a change in sleep.",
         ))
         db.flush()
         db.add(ConversationMessage(
             id=f"conversation-only-assistant-{suffix}",
             session_id=session_id,
             role="assistant",
-            content="The care record says the medication dose changed yesterday.",
+            content="The care record says the medication dose changed.",
             evidence_ids_json='["restricted-evidence-id"]',
             source_record_refs_json='[{"record_type":"evidence","record_id":"restricted-evidence-id"}]',
             response_metadata_json=json.dumps({
@@ -1308,7 +1308,7 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
     assert listed.status_code == 200, listed.text
     assert history.status_code == 200, history.text
     history_messages = history.json()["messages"]
-    assert any(item["role"] == "user" and item["text"] == "I noticed a change in sleep last night." for item in history_messages)
+    assert any(item["role"] == "user" and item["text"] == "I noticed a change in sleep." for item in history_messages)
     restricted_assistant = next(item for item in history_messages if item["role"] == "assistant")
     assert "unavailable because care-record access has changed" in restricted_assistant["text"]
     assert restricted_assistant["source_record_refs"] == []
