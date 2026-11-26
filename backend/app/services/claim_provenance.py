@@ -260,9 +260,16 @@ def build_distinct_event_aggregate(
     terms = _EVENT_TOPIC_TERMS[topic]
     eligible_statuses = {"recorded", "completed", "occurred", "resolved", "accepted"}
     candidates = []
+    seen_event_ids: set[str] = set()
     start = start_at if start_at.tzinfo else start_at.replace(tzinfo=timezone.utc)
     end = end_at if end_at.tzinfo else end_at.replace(tzinfo=timezone.utc)
     for event in events or []:
+        # Aggregates are about persisted event records. An absent identifier
+        # cannot be cited, and a repeated row for one ID must never count twice.
+        event_id = str(event.get("id") or "").strip()
+        if not event_id or event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(event_id)
         occurred = event.get("occurred_at")
         if isinstance(occurred, str):
             try:
