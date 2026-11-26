@@ -1367,8 +1367,8 @@ async def upload_evidence(
     if capture_page_number is not None and (capture_page_number < 1 or capture_page_number > 100):
         raise HTTPException(status_code=422, detail="Capture page number must be between 1 and 100")
     if capture_source_evidence_id:
-        if capture_method != "scan" or capture_page_number is None:
-            raise HTTPException(status_code=422, detail="A source document and page number are only valid for a scanned page copy")
+        if capture_method != "scan" or capture_page_number is None or not mime_type.startswith("image/"):
+            raise HTTPException(status_code=422, detail="A source document and page number are only valid for a scanned image page copy")
         if evidence_type.strip().lower() != "document":
             raise HTTPException(status_code=422, detail="A clearer page copy must be saved as a document")
         try:
