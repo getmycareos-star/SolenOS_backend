@@ -1142,6 +1142,66 @@ def _caregiver_preferences_scope(request: Request, db: Session) -> tuple[str, st
     return person_id, caregiver_id
 
 
+async def _acquire_companion_turn_lease(
+    db: Session,
+    request: Request,
+    lock_key: str,
+    *,
+    wait_timeout_seconds: float = 360.0,
+) -> None:
+    """Acquire a durable PostgreSQL lease without holding a connection during inference.
+
+    The lease is request-owned, expires after the maximum bounded model window,
+    and is released by get_db() during request teardown. Expiry recovers workers
+    that terminate before teardown; owner-token matching prevents one request
+    from releasing another request's lease.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return
+    if not lock_key or len(lock_key) > 160:
+        raise HTTPException(status_code=500, detail="Companion turn lock key is invalid")
+    owner_token = getattr(request.state, "companion_turn_lease_owner", None)
+    if not owner_token:
+        owner_token = str(uuid.uuid4())
+        request.state.companion_turn_lease_owner = owner_token
+        request.state.companion_turn_leases = []
+    deadline = _time.monotonic() + max(1.0, wait_timeout_seconds)
+    while True:
+        try:
+            acquired = db.execute(
+                text(
+                    "INSERT INTO companion_turn_leases "
+                    "(lock_key, owner_token, expires_at, updated_at) "
+                    "VALUES (:lock_key, :owner_token, "
+                    "now() + interval '360 seconds', now()) "
+                    "ON CONFLICT (lock_key) DO UPDATE SET "
+                    "owner_token = EXCLUDED.owner_token, "
+                    "expires_at = EXCLUDED.expires_at, "
+                    "updated_at = EXCLUDED.updated_at "
+                    "WHERE companion_turn_leases.expires_at <= now() "
+                    "RETURNING lock_key"
+                ),
+                {"lock_key": lock_key, "owner_token": owner_token},
+            ).first()
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Companion turn lease acquisition failed")
+            raise HTTPException(
+                status_code=503,
+                detail="Companion is temporarily unable to reserve this conversation safely. Please retry.",
+            )
+        if acquired is not None:
+            request.state.companion_turn_leases.append(lock_key)
+            return
+        if _time.monotonic() >= deadline:
+            raise HTTPException(
+                status_code=409,
+                detail="Another Companion response is still being saved. Please retry this message.",
+            )
+        await asyncio.sleep(0.1)
+
+
 def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
     """Revalidate the bearer capability at the point a conversation write/replay uses it.
 
