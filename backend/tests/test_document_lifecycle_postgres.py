@@ -185,7 +185,7 @@ from app.api.collaboration import (
     compare_document_version,
     DocumentVersionLinkRequest,
 )
-from app.models.capture_analysis import CaptureAnalysis
+from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 import app.api.document_lifecycle as lifecycle_module
 from app.api.document_lifecycle import extract_saved_document, get_document_extraction
 from app.api.document_intelligence import _existing_assertion_for_exact_document_duplicate
@@ -794,6 +794,82 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
         engine.dispose()
 
 
+
+
+
+def test_postgres_review_history_survives_document_analysis_retry_chain():
+    from datetime import datetime, timedelta, timezone
+    from app.api.document_intelligence import list_document_review_history
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-review-chain-person-{suffix}"
+    caregiver_id = f"doc-review-chain-caregiver-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Review history chain fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Review history caregiver", relationship="family", person_id=person_id))
+            db.flush()
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "review-chain.txt", b"original document evidence"
+            )
+            evidence_id = uploaded["evidence_id"]
+            old_analysis_id = f"old-analysis-{suffix}"
+            current_analysis_id = f"current-analysis-{suffix}"
+            now = datetime.now(timezone.utc)
+            db.add_all([
+                CaptureAnalysis(
+                    id=old_analysis_id,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=None,
+                    source_evidence_id=evidence_id,
+                    source_text="Original extracted text",
+                    extraction_status="available",
+                    candidates={"kind": "document_extraction_v1", "superseded_by_analysis_id": current_analysis_id},
+                    review_history=[],
+                    created_at=now - timedelta(minutes=2),
+                ),
+                CaptureAnalysis(
+                    id=current_analysis_id,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=None,
+                    source_evidence_id=evidence_id,
+                    source_text="Re-extracted text",
+                    extraction_status="available",
+                    candidates={"kind": "document_extraction_v1", "retry_of_analysis_id": old_analysis_id},
+                    review_history=[],
+                    created_at=now,
+                ),
+            ])
+            db.flush()
+            db.add(DocumentReviewEvent(
+                analysis_id=old_analysis_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                source_evidence_id=evidence_id,
+                candidate_index=0,
+                decision_version=1,
+                decision="accept",
+                rationale="Caregiver confirmed the source passage.",
+                before_state={"observation": "Original wording", "page_number": 1},
+                after_state={"observation": "Original wording", "page_number": 1, "review_status": "accepted_by_caregiver"},
+            ))
+            db.commit()
+
+        with Session() as db:
+            history = list_document_review_history(current_analysis_id, _request(person_id, caregiver_id), db)
+            assert history["count"] == 1
+            assert history["items"][0]["source_analysis_id"] == old_analysis_id
+            assert history["items"][0]["after"]["review_status"] == "accepted_by_caregiver"
+            assert old_analysis_id in history["source_analysis_ids"]
+            assert current_analysis_id in history["source_analysis_ids"]
+    finally:
+        engine.dispose()
 
 
 def test_postgres_matching_extracted_text_suggests_but_does_not_link_different_files():
