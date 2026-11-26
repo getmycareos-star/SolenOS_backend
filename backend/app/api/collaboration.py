@@ -1143,10 +1143,14 @@ def _caregiver_preferences_scope(request: Request, db: Session) -> tuple[str, st
 
 
 def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str, caregiver_id: str) -> str:
-    """Resolve the verified bearer session without depending on ASGI state propagation."""
-    session_id = getattr(request.state, "anonymous_session_id", None)
-    if session_id:
-        return str(session_id)
+    """Revalidate the bearer capability at the point a conversation write/replay uses it.
+
+    Middleware-populated ASGI state is a cache of an earlier authentication
+    decision, not an authorization capability. Companion inference can take
+    long enough for a bearer session or caregiver grant to be revoked/expire
+    after request entry. Always bind the returned session ID to the live bearer
+    token, recipient, caregiver, revocation state and expiry at this boundary.
+    """
     authorization = request.headers.get("authorization", "")
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -1161,6 +1165,11 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     ).first()
     if session is None:
         raise HTTPException(status_code=401, detail="Anonymous session is invalid or expired")
+
+    state_session_id = getattr(request.state, "anonymous_session_id", None)
+    if state_session_id and str(state_session_id) != str(session.id):
+        raise HTTPException(status_code=401, detail="The authenticated session changed during this request")
+    request.state.anonymous_session_id = str(session.id)
     return str(session.id)
 
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
