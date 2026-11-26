@@ -110,11 +110,11 @@ def _estimate_prompt_tokens(messages: list[dict]) -> int:
         for message in messages
         if isinstance(message, dict)
     )
-    # Calibrated against real Qwen3.5 prompt token counts. Four UTF-8 bytes
-    # per token remains conservative for English care text and structured
-    # records without rejecting prompts that fit the model's actual window.
-    # Message framing adds a small fixed allowance per message.
-    return math.ceil(content_bytes / 4.0) + (8 * len(messages))
+    # This is deliberately a conservative heuristic, not a tokenizer.
+    # Three UTF-8 bytes per estimated token avoids presenting byte counts as
+    # exact model tokens and provides headroom for English and multilingual text.
+    # Message framing adds a fixed allowance per message.
+    return math.ceil(content_bytes / 3.0) + (8 * len(messages))
 
 
 def _enforce_prompt_context_budget(
@@ -175,7 +175,7 @@ def _inference_audit_metadata(messages: list[dict], audit_context: dict | None =
         "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
         "system_prompt_sha256": hashlib.sha256(system_text.encode("utf-8")).hexdigest(),
         "request_context_sha256": hashlib.sha256(context_text.encode("utf-8")).hexdigest(),
-        "prompt_token_estimate_method": "utf8_bytes_div_3_5_plus_message_framing",
+        "prompt_token_estimate_method": "utf8_bytes_div_3_plus_message_framing",
     }
     for key in ("request_id", "person_id", "caregiver_id", "conversation_session_id", "job_id", "output_id"):
         value = trusted_context.get(key)
