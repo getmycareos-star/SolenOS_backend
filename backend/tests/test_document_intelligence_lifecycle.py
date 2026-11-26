@@ -742,7 +742,7 @@ def test_untraceable_document_candidate_cannot_be_accepted_but_can_be_rejected(m
     monkeypatch.setattr(main_module, "SessionLocal", Session)
     client = TestClient(app)
     quote = "Patient has a follow-up appointment."
-    source = f"[Page 1 OCR]\\n{quote}\\n[Page 2 OCR]\\n{quote}"
+    source = f"[Page 1 OCR]\n{quote}\n[Page 2 OCR]\n{quote}"
 
     def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None, audit_context=None):
         return {
