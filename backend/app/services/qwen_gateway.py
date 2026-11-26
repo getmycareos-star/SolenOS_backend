@@ -811,7 +811,7 @@ def extract_review_candidates(
                 f"SOLENOS_WORKFLOW_ID: {workflow_id}. "
                 "Extract explicit care statements from clinician, caregiver, or patient source text; outputs are "
                 "source claims for caregiver review, not verified findings. "
-                'Return JSON only: {"observations":[{"subject":"string","observation":"string","source_quote":"exact source substring"}],"open_questions":["string"]}. '
+                'Return JSON only: {"observations":[{"subject":"string","observation":"string","source_quote":"exact source substring","event_time_quote":"exact time phrase from source_quote or empty string"}],"open_questions":["string"]}. '
                 "Never infer diagnosis, cause, risk, or treatment change. Never turn these statements into a clinical conclusion, " 
                 "recommendation, prescription, or active instruction. Do extract a diagnosis, medication "
                 "discontinuation, dosage transition, or current/discharge discrepancy only as a review-required "
@@ -823,6 +823,8 @@ def extract_review_candidates(
                 "verbatim substrings of that quote. Do not paraphrase, normalize, add details, or merge clauses/people. "
                 "Preserve who reported/observed, time wording, negation, uncertainty/hedges, and qualifiers "
                 "(previously, discontinued, currently, seemed, yesterday, last night); never clip them. "
+                "event_time_quote must be copied character-for-character from source_quote; use an empty string when no event time is stated. "
+                "Do not convert relative or approximate time wording into an exact calendar date; do not confuse event time with this record's submission time. "
                 "Multiple patient identities: no observations; ask caregiver to separate records. "
                 "No supported statements: empty observations. Ask at most three questions; ignore greetings/small talk."
             ),
@@ -883,6 +885,12 @@ def extract_review_candidates(
         if quote not in bounded_source:
             continue
         quote = _expand_quote_to_source_sentence(bounded_source, quote)
+        event_time_quote = item.get("event_time_quote", "")
+        if not isinstance(event_time_quote, str):
+            continue
+        event_time_quote = event_time_quote.strip()
+        if event_time_quote and event_time_quote not in quote:
+            continue
         if (
             observation.strip() not in quote
             or subject.strip().casefold() not in quote.casefold()
@@ -898,6 +906,7 @@ def extract_review_candidates(
             "subject": subject.strip()[:120],
             "observation": observation.strip()[:500],
             "source_quote": quote,
+            "event_time_quote": event_time_quote or None,
             "review_status": "pending_review",
             "source_event_id": source_event_id,
         }
