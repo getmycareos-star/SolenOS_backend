@@ -11570,6 +11570,40 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ),
         "claim_provenance": claim_provenance,
     }
+    # Inference and retrieval can take long enough for a caregiver grant, bearer
+    # session, or conversation to be revoked/closed while this request is running.
+    # Re-check all three immediately before persisting or returning the generated
+    # response. The initial _scope() check alone is not sufficient for a long turn.
+    current_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).first()
+    if current_grant is None:
+        db.rollback()
+        raise HTTPException(status_code=403, detail="Caregiver access changed before this response could be saved")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+    current_bearer_session = db.query(AnonymousSession.id).filter(
+        AnonymousSession.id == authenticated_session_id,
+        AnonymousSession.person_id == person_id,
+        AnonymousSession.caregiver_id == caregiver_id,
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).first()
+    if current_bearer_session is None:
+        db.rollback()
+        raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before this response could be saved")
+    current_conversation = db.query(ConversationSession.id).filter(
+        ConversationSession.id == session.id,
+        ConversationSession.person_id == person_id,
+        ConversationSession.caregiver_id == caregiver_id,
+        ConversationSession.status == "active",
+    ).first()
+    if current_conversation is None:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="This conversation is no longer active. Start a new conversation to continue")
+
     turn_timestamp = datetime.now(timezone.utc)
     user_row = ConversationMessage(
         session_id=session.id, role="user", content=user_text,
