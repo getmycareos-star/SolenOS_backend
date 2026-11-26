@@ -814,6 +814,10 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assert review_events[0].before_state["observation"] == quote
             assert review_events[0].after_state["observation"] == quote
             assert review_events[0].after_state["source_quote"] == quote
+            assert review_events[0].before_state["page_number"] == 1
+            assert review_events[0].after_state["page_number"] == 1
+            assert review_events[1].before_state["page_number"] == 1
+            assert review_events[1].after_state["page_number"] == 1
             assert review_events[1].before_state["observation"] == quote
             assertion = db.query(CareAssertion).filter_by(
                 person_id=caregiver["person"]["id"]
