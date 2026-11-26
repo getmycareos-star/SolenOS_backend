@@ -739,17 +739,21 @@ def _intelligence(analysis: CaptureAnalysis) -> dict:
     return intelligence if isinstance(intelligence, dict) else {}
 
 
-def _response(analysis: CaptureAnalysis) -> dict:
+def _response(analysis: CaptureAnalysis, upload: EvidenceUpload | None = None) -> dict:
     metadata = _metadata(analysis)
     intelligence = _intelligence(analysis)
     source_text = analysis.source_text or ""
-    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata)
+    verified_pdf_page_count = _verified_pdf_page_count(metadata, upload)
+    page_count_verified = not _is_paginated_pdf(metadata) or verified_pdf_page_count is not None
+    unprocessed_pages = _persisted_unprocessed_pages(analysis, metadata, verified_pdf_page_count)
     retryable_pages = _retryable_page_numbers(source_text)
     blocked_pages = _blocked_page_numbers(source_text)
     unreadable_pages = _unreadable_page_numbers(source_text)
     metadata_page_count = metadata.get("page_count")
     page_count = (
-        metadata_page_count
+        verified_pdf_page_count
+        if _is_paginated_pdf(metadata) and verified_pdf_page_count is not None
+        else metadata_page_count
         if isinstance(metadata_page_count, int) and not isinstance(metadata_page_count, bool) and metadata_page_count > 0
         else _page_count(source_text)
     )
@@ -781,6 +785,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
     all_observations = stored_observations
     extraction_complete = (
         analysis.extraction_status == "available"
+        and page_count_verified
         and not unprocessed_pages
         and not _unreadable_page_numbers(source_text)
     )
@@ -810,8 +815,9 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "source_evidence_id": str(analysis.source_evidence_id),
         "document_name": metadata.get("filename") or "Uploaded document",
         "document_type": metadata.get("document_type") or "general_care_document",
-        "page_count": metadata.get("page_count") or page_count,
+        "page_count": page_count,
         "extraction_status": analysis.extraction_status,
+        "page_count_verified": page_count_verified,
         "intelligence_status": intelligence.get("status") or "not_run",
         "processed_page_count": intelligence.get("processed_page_count"),
         "total_page_count": intelligence.get("total_page_count") or metadata.get("page_count") or page_count,
@@ -883,6 +889,15 @@ def list_document_intelligence(
             ).all()
         }
 
+    uploads_by_evidence_id = {}
+    if valid_evidence_ids:
+        uploads_by_evidence_id = {
+            str(row.evidence_id): row
+            for row in db.query(EvidenceUpload).filter(
+                EvidenceUpload.evidence_id.in_(valid_evidence_ids)
+            ).all()
+        }
+
     items = []
     seen_evidence_ids = set()
     for analysis, evidence_id in document_analyses:
@@ -892,7 +907,7 @@ def list_document_intelligence(
             continue
         seen_evidence_ids.add(evidence_id)
         if len(items) < limit:
-            items.append(_response(analysis))
+            items.append(_response(analysis, uploads_by_evidence_id.get(evidence_id)))
     # A completed worker job is not proof that document extraction was
     # persisted. Keep that distinction visible to the caregiver: if the
     # completed job has no corresponding saved analysis, surface it as a
@@ -1063,7 +1078,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The extraction does not match the preserved original file")
     _verify_persisted_extraction(analysis, upload, db)
-    _require_complete_extraction(analysis)
+    _require_complete_extraction(analysis, upload)
     metadata = _metadata(analysis)
     original_candidates = copy.deepcopy(metadata)
     existing = _intelligence(analysis)
@@ -1086,7 +1101,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
                 )
                 if _metadata(current_analysis) != original_candidates:
                     db.rollback()
-                    return _response(current_analysis)
+                    return _response(current_analysis, upload)
                 analysis = current_analysis
                 persist_source_clarification_questions(
                     db,
