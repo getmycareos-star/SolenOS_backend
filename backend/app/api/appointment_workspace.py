@@ -749,7 +749,14 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
             effective_extraction_status = str(extraction.extraction_status or "unknown")
             verified_page_count = None
             unprocessed_pages = []
-            unreadable_pages = _unreadable_page_numbers(source_text)
+            persisted_unreadable_pages = metadata.get("unreadable_page_numbers") or []
+            unreadable_pages = sorted(
+                set(_unreadable_page_numbers(source_text))
+                | {
+                    page for page in persisted_unreadable_pages
+                    if isinstance(page, int) and not isinstance(page, bool) and page > 0
+                }
+            )
             if upload is None:
                 effective_extraction_status = "original_upload_missing"
             elif metadata.get("kind") != "document_extraction_v1":
@@ -758,6 +765,8 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 effective_extraction_status = "extraction_binary_checksum_mismatch"
             elif metadata.get("source_text_sha256") != source_text_digest:
                 effective_extraction_status = "extraction_text_checksum_mismatch"
+            elif extraction.extraction_status == "available" and not source_text.strip():
+                effective_extraction_status = "extraction_text_empty"
             else:
                 verified_page_count = _verified_pdf_page_count(metadata, upload)
                 if _is_paginated_pdf(metadata) and verified_page_count is None:
