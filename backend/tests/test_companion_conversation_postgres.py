@@ -986,3 +986,76 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
         assert db.query(ConversationMessage).filter_by(
             session_id=bodies[0]["session_id"],
         ).count() == 2
+
+
+def test_distinct_companion_turns_in_one_conversation_are_serialized(monkeypatch):
+    """A later turn cannot infer against a stale snapshot of the same thread."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Serialized Companion recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    session_id = f"companion-serialized-{suffix}"
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    first_started = threading.Event()
+    release_first = threading.Event()
+    observed_prompts = []
+    prompts_lock = threading.Lock()
+
+    with Session() as db:
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Serialized turns", status="active",
+        ))
+        db.commit()
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        prompt_text = "\\n".join(str(item.get("content") or "") for item in messages)
+        with prompts_lock:
+            observed_prompts.append(prompt_text)
+        if "FIRST TURN SENTINEL" in prompt_text:
+            first_started.set()
+            assert release_first.wait(timeout=10), "first turn was not released"
+        return "I cannot confirm that from the records retrieved for this response."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+
+    def submit(text, turn_id):
+        return client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": text,
+                "session_id": session_id,
+                "client_turn_id": turn_id,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(submit, "FIRST TURN SENTINEL: what is saved?", str(uuid.uuid4()))
+        assert first_started.wait(timeout=10), "first turn never reached model inference"
+        second_future = pool.submit(submit, "SECOND TURN SENTINEL: what did I just ask?", str(uuid.uuid4()))
+        time.sleep(0.25)
+        with prompts_lock:
+            assert not any("SECOND TURN SENTINEL" in prompt for prompt in observed_prompts), (
+                "second turn reached inference before the first turn committed"
+            )
+        release_first.set()
+        first_response = first_future.result(timeout=30)
+        second_response = second_future.result(timeout=30)
+
+    assert first_response.status_code == 200, first_response.text
+    assert second_response.status_code == 200, second_response.text
+    with prompts_lock:
+        second_prompts = [prompt for prompt in observed_prompts if "SECOND TURN SENTINEL" in prompt]
+    assert second_prompts, "second turn did not reach inference"
+    assert any("FIRST TURN SENTINEL" in prompt for prompt in second_prompts), (
+        "second turn did not receive the first committed turn as prior conversation context"
+    )
+    with Session() as db:
+        rows = db.query(ConversationMessage).filter_by(session_id=session_id).order_by(
+            ConversationMessage.created_at.asc(), ConversationMessage.id.asc(),
+        ).all()
+        assert [row.role for row in rows] == ["user", "assistant", "user", "assistant"]
