@@ -4,6 +4,7 @@ Revision ID: 20261126_01_companion_turn_leases
 Revises: 20261124_03_timezone_notification_provenance
 """
 from alembic import op
+import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
 revision = "20261126_01_companion_turn_leases"
@@ -20,9 +21,9 @@ def upgrade() -> None:
     if not inspector.has_table("companion_turn_leases"):
         op.create_table(
             "companion_turn_leases",
-            op.Column("lock_key", op.String(length=160), primary_key=True),
+            sa.Column("lock_key", sa.String(length=160), primary_key=True),
             op.Column("owner_token", op.String(length=36), nullable=False),
-            op.Column("expires_at", op.DateTime(timezone=True), nullable=False),
+            op.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
             op.Column(
                 "updated_at",
                 op.DateTime(timezone=True),
