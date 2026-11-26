@@ -736,6 +736,17 @@ _MATERIAL_ASSERTION_VERBS = re.compile(
     re.IGNORECASE,
 )
 
+# Care summaries often use grammatical fragments ("Three falls this week",
+# "No recent appetite change", "Mobility worsening"). These are still material
+# assertions even without a finite verb and must pass the same source-grounding
+# gate as full sentences.
+_MATERIAL_NOMINAL_ASSERTION = re.compile(
+    r"\b(?:no|zero|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"\d+|several|multiple|repeated|recurring|more|fewer|less|worse|better|"
+    r"poor|reduced|worsening|improving|discontinued|new|ongoing)\b",
+    re.IGNORECASE,
+)
+
 _NON_ASSERTIVE_OPENINGS = re.compile(
     r"^(?:if|when|please|call|ask|contact|seek|consider|you can|you may|"
     r"you should|do not|don't|never|i can|i can't|i cannot|it may help|"
@@ -763,7 +774,10 @@ def unmatched_material_claims(provenance: dict[str, Any]) -> list[dict[str, Any]
             continue
         if not _MATERIAL_CARE_TERMS.search(statement):
             continue
-        if not _MATERIAL_ASSERTION_VERBS.search(statement):
+        if (
+            not _MATERIAL_ASSERTION_VERBS.search(statement)
+            and not _MATERIAL_NOMINAL_ASSERTION.search(statement)
+        ):
             continue
         if claim.get("support_status") not in {
             "matched_saved_wording",
