@@ -5758,7 +5758,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "events [{description,time:null|string,participants:string[],raw_fragment}]; "
         "decisions [{description,who:string[],why:null|string,reason_unknown:boolean,status:active|completed|changed|reversed|uncertain|needs_review|pending,raw_fragment}]; "
         "outcomes [{description,status:observed|pending|uncertain|ongoing|resolved|changed,raw_fragment}]; "
-        "unknowns [{question,status:open|answered|declined|no_longer_relevant,raw_fragment}]; "
+        "unknowns [{question,raw_fragment}]; "
         "non_care_facts [{layer:contributor_load|disagreement_perspective,text,raw_fragment}]; "
         "possible_links [{text,causation_claimed:false}]. "
         "Limits: 20 observations, 10 per other section. Descriptions and questions max 500 characters. "
@@ -5800,7 +5800,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "events": {"description", "time", "participants", "raw_fragment"},
         "decisions": {"description", "who", "why", "reason_unknown", "status", "raw_fragment"},
         "outcomes": {"description", "status", "raw_fragment"},
-        "unknowns": {"question", "status", "raw_fragment"},
+        "unknowns": {"question", "raw_fragment"},
         "non_care_facts": {"layer", "text", "raw_fragment"},
         "possible_links": {"text", "causation_claimed"},
     }
@@ -5986,10 +5986,9 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 })
             elif key == "unknowns":
                 question = bounded_text(item.get("question"), 500)
-                status = item.get("status")
                 # Clarification questions may be newly phrased to resolve missing
                 # information; the raw fragment, not the question, is the source anchor.
-                if question is None or status not in {"open", "answered", "declined", "no_longer_relevant"}:
+                if question is None:
                     continue
                 result[key].append({
                     "question": question,
