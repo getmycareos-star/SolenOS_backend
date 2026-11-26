@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api.collaboration import _scope
 from app.core.database import get_db
+from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care import CareEvent, Evidence
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
@@ -68,9 +69,12 @@ def review_qwen_assistance_proposal(
 ):
     """Caregiver explicitly accepts or rejects a source-validated Qwen summary."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept or reject")
+    if decision == "accept":
+        require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
         AIOutputLCRProposal.person_id == person_id,
@@ -245,6 +249,7 @@ def create_companion_care_update_from_message(
 ):
     """Create a review-only care report from an exact caregiver message after explicit confirmation."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     if payload.confirm_care_report is not True:
         raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
     source = (
@@ -324,6 +329,7 @@ def list_companion_care_updates(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     query = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.person_id == person_id,
         AIOutputLCRProposal.caregiver_id == caregiver_id,
@@ -356,6 +362,7 @@ def companion_care_update_history(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
         AIOutputLCRProposal.person_id == person_id,
@@ -391,10 +398,13 @@ def review_companion_care_update(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "correct", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
 
+    if decision == "accept":
+        require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
         AIOutputLCRProposal.person_id == person_id,
