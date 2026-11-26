@@ -795,6 +795,97 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
 
 
 
+
+def test_postgres_matching_extracted_text_suggests_but_does_not_link_different_files():
+    """Re-scanned copies are surfaced as suggestions; neither original is discarded or linked."""
+    from datetime import datetime, timedelta, timezone
+    from app.api.document_intelligence import list_document_intelligence
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-text-match-person-{suffix}"
+    caregiver_id = f"doc-text-match-caregiver-{suffix}"
+    source_text = (
+        "[Page 1 OCR]\nHospital discharge summary. Follow-up appointment in two weeks. "
+        "Caregiver should confirm the current medication instructions with the pharmacist."
+    )
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Matching text fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Matching text caregiver", relationship="family", person_id=person_id))
+            db.flush()
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            first = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-scan-one.txt", ("first scan " + suffix).encode()
+            )
+            second = _upload_document_for_lifecycle(
+                db, person_id, caregiver_id, "discharge-scan-two.txt", ("second scan " + suffix).encode()
+            )
+            first_upload = db.query(EvidenceUpload).filter_by(evidence_id=first["evidence_id"]).one()
+            second_upload = db.query(EvidenceUpload).filter_by(evidence_id=second["evidence_id"]).one()
+            base_metadata = {
+                "kind": "document_extraction_v1",
+                "mime_type": "text/plain",
+                "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
+                "document_intelligence": {"status": "available", "observations": []},
+            }
+            older = datetime.now(timezone.utc) - timedelta(days=1)
+            newer = datetime.now(timezone.utc)
+            db.add_all([
+                CaptureAnalysis(
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=None,
+                    source_evidence_id=first["evidence_id"],
+                    source_text=source_text,
+                    extraction_status="available",
+                    candidates={
+                        **base_metadata,
+                        "filename": "discharge-scan-one.txt",
+                        "binary_sha256": first_upload.sha256,
+                    },
+                    review_history=[],
+                    created_at=older,
+                ),
+                CaptureAnalysis(
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    source_event_id=None,
+                    source_evidence_id=second["evidence_id"],
+                    source_text=source_text,
+                    extraction_status="available",
+                    candidates={
+                        **base_metadata,
+                        "filename": "discharge-scan-two.txt",
+                        "binary_sha256": second_upload.sha256,
+                    },
+                    review_history=[],
+                    created_at=newer,
+                ),
+            ])
+            db.commit()
+
+        with Session() as db:
+            result = list_document_intelligence(_request(person_id, caregiver_id), 50, db)
+            matches = {
+                item["source_evidence_id"]: item.get("possible_text_duplicate_of_evidence_id")
+                for item in result["items"]
+            }
+            assert matches[second["evidence_id"]] == first["evidence_id"]
+            assert matches.get(first["evidence_id"]) is None
+            assert db.query(EvidenceUpload).filter(
+                EvidenceUpload.evidence_id.in_([first["evidence_id"], second["evidence_id"]])
+            ).count() == 2
+            assert db.query(Evidence).filter(
+                Evidence.id.in_([first["evidence_id"], second["evidence_id"]]),
+                Evidence.parent_evidence_id.is_not(None),
+            ).count() == 0
+    finally:
+        engine.dispose()
+
+
 def test_postgres_document_deletion_refuses_to_orphan_another_caregivers_saved_output():
     """A shared-person assistant response keeps its document source dependency alive."""
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
