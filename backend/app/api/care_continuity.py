@@ -2239,6 +2239,17 @@ def current_care_projection(
     # the Timeline. Pending/legacy corrections remain visible without replacing it.
     latest_event_corrections: dict[str, dict[str, Any]] = {}
     latest_completed_event_corrections: dict[str, dict[str, Any]] = {}
+    # A correction can replace an event in the current projection only when
+    # the event's person-scoped source relationship was independently checked.
+    # A completed status by itself is not proof that the correction was linked.
+    verified_completed_correction_ids = {
+        str(correction.get("id"))
+        for event_row in (sources.get("events") or {}).get("items", [])
+        if event_row.get("correction_lineage_status") == "checked"
+        for correction in (event_row.get("superseded_by_corrections") or [])
+        if str(correction.get("processing_status") or "").casefold() == "completed"
+        and correction.get("id")
+    }
     for correction_row in (sources.get("corrections") or {}).get("items", []):
         if correction_row.get("target_type") != "care_event" or not correction_row.get("target_id"):
             continue
@@ -2352,6 +2363,9 @@ def current_care_projection(
             "source_event_type": row.get("event_type") if source_name == "events" else None,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
+            "information_status": row.get("information_status") if source_name == "events" else None,
+            "correction_lineage_status": row.get("correction_lineage_status") if source_name == "events" else None,
+            "interpretation_limit": row.get("interpretation_limit") if source_name == "events" else None,
             "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
             "reported_by_label": row.get("reported_by_label") or (primary_source.reported_by_label if primary_source else None),
             "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or row.get("created_by_caregiver_id") or row.get("caregiver_id") or row.get("uploaded_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
