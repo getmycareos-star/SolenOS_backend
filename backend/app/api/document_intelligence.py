@@ -1569,24 +1569,55 @@ def list_document_review_history(
 ):
     person_id, caregiver_id = _identity(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
-    analysis = db.query(CaptureAnalysis.id).filter(
+    analysis = db.query(CaptureAnalysis).filter(
         CaptureAnalysis.id == analysis_id,
         CaptureAnalysis.person_id == person_id,
     ).first()
     if analysis is None:
         raise HTTPException(status_code=404, detail="Document analysis not found")
+
+    # A retry that preserves review history creates a new analysis row and
+    # links it to its predecessor. Read the entire same-source chain so a
+    # successful re-extraction cannot make earlier caregiver decisions vanish.
+    source_evidence_id = str(analysis.source_evidence_id or "")
+    pending_analysis_ids = [analysis_id]
+    visited_analysis_ids = set()
+    while pending_analysis_ids:
+        current_id = pending_analysis_ids.pop()
+        if current_id in visited_analysis_ids:
+            continue
+        current = db.query(CaptureAnalysis).filter(
+            CaptureAnalysis.id == current_id,
+            CaptureAnalysis.person_id == person_id,
+            CaptureAnalysis.source_evidence_id == source_evidence_id,
+        ).first()
+        if current is None:
+            continue
+        visited_analysis_ids.add(current_id)
+        current_metadata = current.candidates if isinstance(current.candidates, dict) else {}
+        for linked_id in (
+            current_metadata.get("retry_of_analysis_id"),
+            current_metadata.get("superseded_by_analysis_id"),
+        ):
+            if isinstance(linked_id, str) and linked_id and linked_id not in visited_analysis_ids:
+                pending_analysis_ids.append(linked_id)
+
     rows = db.query(DocumentReviewEvent).filter(
-        DocumentReviewEvent.analysis_id == analysis_id,
+        DocumentReviewEvent.analysis_id.in_(visited_analysis_ids),
         DocumentReviewEvent.person_id == person_id,
+        DocumentReviewEvent.source_evidence_id == source_evidence_id,
     ).order_by(
-        DocumentReviewEvent.candidate_index.asc(),
+        DocumentReviewEvent.created_at.asc(),
         DocumentReviewEvent.decision_version.asc(),
     ).all()
     return {
         "analysis_id": analysis_id,
+        "source_evidence_id": source_evidence_id,
+        "source_analysis_ids": sorted(visited_analysis_ids),
         "items": [
             {
                 "id": row.id,
+                "source_analysis_id": row.analysis_id,
                 "candidate_index": row.candidate_index,
                 "decision_version": row.decision_version,
                 "decision": row.decision,
@@ -1601,7 +1632,7 @@ def list_document_review_history(
             for row in rows
         ],
         "count": len(rows),
-        "history_authority": "append_only_document_review_events",
+        "history_authority": "append_only_document_review_events_across_extraction_retries",
     }
 
 
