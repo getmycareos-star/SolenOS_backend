@@ -1059,7 +1059,7 @@ class QwenCareUnderstandingRequest(BaseModel):
     raw_text: str = Field(min_length=1, max_length=8000)
 
 
-def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, evidence_id: str, raw_text: str) -> None:
+def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, evidence_id: str, raw_text: str) -> EvidenceModel:
     evidence = _active_person_evidence_query(db, person_id).filter(
         EvidenceModel.id == evidence_id,
     ).first()
@@ -1067,6 +1067,7 @@ def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, e
         raise HTTPException(status_code=404, detail="Saved source could not be found.")
     if evidence.source_text != raw_text:
         raise HTTPException(status_code=409, detail="The source text does not match the saved record. No extraction was run.")
+    return evidence
 
 
 def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
@@ -5765,7 +5766,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     source = payload.raw_text
     if not source.strip():
         raise HTTPException(status_code=422, detail="Source text is required")
-    _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
+    evidence = _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
     system = (
         "SOLENOS_WORKFLOW_ID: care_understanding. "
         "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
@@ -6039,6 +6040,49 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 continue
             seen_candidates.add(fingerprint)
             unique_candidates.append(candidate)
+        recorded_at_value = getattr(evidence, "ingested_at", None) or getattr(evidence, "uploaded_at", None)
+        recorded_at = recorded_at_value.isoformat() if recorded_at_value is not None else None
+        source_epistemic_status = str(getattr(evidence, "epistemic_status", None) or "reported").strip().casefold()
+        if source_epistemic_status not in {"uncertain", "conflicting", "missing"}:
+            source_epistemic_status = "reported"
+        for candidate in unique_candidates:
+            candidate_text = (
+                candidate.get("description")
+                or candidate.get("question")
+                or candidate.get("text")
+                or ""
+            )
+            source_fragment = (
+                candidate.get("raw_fragment")
+                or candidate.get("text")
+                or ""
+            )
+            event_time = candidate.get("approximate_time")
+            if event_time is None:
+                event_time = candidate.get("time")
+            candidate["candidate_id"] = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"solenos:qwen-candidate:{payload.evidence_id}:{key}:{source_fragment}:{candidate_text}",
+            ).hex
+            candidate.update({
+                "candidate_type": key,
+                "candidate_description": candidate_text,
+                "source_id": payload.evidence_id,
+                "source_fragment": source_fragment,
+                "recorded_at": recorded_at,
+                "recorded_time_status": "available" if recorded_at is not None else "unavailable",
+                "person": {"id": None, "resolution_status": "unresolved"},
+                "care_recipient_id": person_id,
+                "event_time": event_time,
+                "event_time_resolution": "unresolved" if event_time is not None else "missing",
+                "epistemic_status": (
+                    "inferred" if key == "possible_links"
+                    else "missing" if key == "unknowns"
+                    else source_epistemic_status
+                ),
+                "confidence": "unavailable",
+                "review_state": "pending",
+            })
         result[key] = unique_candidates
     return {"evidence_id": payload.evidence_id, "understanding": result, "provider": "private_ollama_qwen",
             "written_to_lcr": False, "review_required": True}
