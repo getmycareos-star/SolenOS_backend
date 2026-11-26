@@ -2118,6 +2118,23 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                     "binary_sha256": upload.sha256,
                     "file_size_bytes": upload.size_bytes,
                     "extraction_status": effective_extraction_status,
+                    "page_count": (
+                        verified_pdf_page_count or extraction_details.get("page_count")
+                    ),
+                    "page_count_verified": bool(
+                        extraction is not None
+                        and (not is_pdf_extraction or verified_pdf_page_count is not None)
+                    ),
+                    "processed_page_numbers": extraction_details.get("processed_page_numbers") or [],
+                    "unreadable_page_numbers": (
+                        _unreadable_page_numbers(extraction.source_text or "") if extraction else []
+                    ),
+                    "unprocessed_page_numbers": (
+                        _persisted_unprocessed_pages(
+                            extraction, extraction_details, verified_pdf_page_count
+                        ) if extraction else []
+                    ),
+                    "retry_exhausted_page_numbers": extraction_details.get("retry_exhausted_page_numbers") or [],
                     "caregiver_review_status": "caregiver_reviewed_assertions_exist" if accepted_assertions else "not_reviewed",
                     "accepted_assertion_references": [row["assertion_id"] for row in assertion_references if row["status"] == "caregiver_reviewed"],
                     "assertion_references": assertion_references,
