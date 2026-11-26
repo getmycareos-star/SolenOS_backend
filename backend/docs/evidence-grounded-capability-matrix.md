@@ -105,3 +105,18 @@ At the latest observed frontend production workflow, the production build and va
 - PostgreSQL acceptance coverage now exercises the deterministic Companion claim validator against a persisted same-person event: an exact attributed source quote is accepted and an unsupported mobility-worsening paraphrase is rejected. Real Qwen generation remains a separate live-inference gate.
 
 - Companion now returns the existing deterministic low-capacity support response mode when a Qwen answer remains unsupported after the bounded repair attempt. The rejected model text is not returned as the caregiver answer; the response is marked ai_generated=false, grounding_status=insufficient_evidence, and no LCR write occurs. A separate direct safety fallback is used for critical messages. The frontend already recognizes this response mode, so no frontend change was needed. Regression assertions were updated; execution remains pending.
+
+
+### Direct-main Qwen evidence-boundary hardening — 2026-11-26
+
+**Classification: implemented in source; exact-current-main verification pending. Overall groups D, H, P and R remain partial.**
+
+- Ordinary Companion chat now enforces claim-level provenance before a passed response audit or message pair can be committed. Unmatched material care claims fail closed and are recorded as rejected; no rejected answer or false passed audit is persisted.
+- Person scope is explicit at the provenance boundary. Source records from person-scoped queries inherit the authenticated person ID only when the record has no explicit scope; a conflicting explicit scope is not overwritten.
+- Qwen claim extraction now requires exact source text and an exact validated source span for every returned claim. Unanchored claims are omitted, and Qwen cannot assign the `confirmed` tag.
+- Qwen care-understanding output is schema-validated by section and retains only bounded, source-grounded extractive fields. Possible links with causal wording are discarded even if the model labels them noncausal. Clarification questions remain review-only proposals, not accepted assertions.
+- Background worker persistence requires live inference plus a passed grounding status, and retains assertion/LCR-context references and retrieval coverage in the immutable output metadata. Outputs remain pending review and never write directly to the LCR.
+- The frontend source-pointer verifier now uses Unicode code-point indexing consistent with the Python backend and rejects fractional/out-of-range offsets.
+- Added regression coverage includes positive and negative Companion grounding paths, no-false-pass audit behavior, source-span validation, care-understanding schema/causality checks, worker provenance persistence, and Unicode source-pointer parity.
+
+These additions improve the trust boundary but do not prove semantic entailment for every generated statement, independent truth of a source, or end-to-end caregiver usability. Backend, PostgreSQL, frontend and live-Qwen workflows must pass on the exact current commits before these capabilities are called verified.

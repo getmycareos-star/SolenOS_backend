@@ -87,3 +87,18 @@ The AST contract test inventories direct `qwen_chat` imports/callback references
 - Run live Qwen evaluations for every enabled workflow and inspect actual request routing.
 - Exercise the background worker loop with PostgreSQL-backed jobs and confirm safe retry/failure behaviour.
 - Confirm deployed runtime revision separately; no deployment is performed by this inventory.
+
+## Direct-main Companion claim grounding and extraction hardening — 2026-11-26
+
+**Status: implemented on backend main; exact-current-main CI and live-model verification pending.**
+
+- The ordinary Companion conversation route now builds claim provenance against persisted, person-scoped source records before staging a passed response-grounding audit. Unmatched material care claims are rejected; the rejection audit is persisted without a passed audit or conversation turn.
+- The source-record scope derived from authenticated person-scoped queries is explicitly attached before provenance matching. Existing explicit mismatched person IDs remain mismatched and are rejected.
+- Companion success audits include handoff source IDs and commit with the corresponding user/assistant turn transaction. The read-only `/assistant/assist` path commits its output-validation receipt before returning because it has no conversation-turn transaction.
+- Claim extraction now returns only verbatim claims whose `claim_text` exactly equals a validated, exact-substring `source_span`. Missing, invalid, or mismatched spans are dropped; Qwen cannot emit the `confirmed` tag. The two independent passes remain review-only and do not write to the LCR.
+- Care-understanding proposals now validate every section's field types, lengths, and enumerations. Extractive descriptions, event/decision participants, reasons, outcome text, times, and non-care facts must be source-bound; clarification questions remain review proposals tied to an exact raw fragment. Possible links must quote source wording and cannot use causal wording while labelling causation false.
+- Background Qwen output persistence now requires both confirmed live inference and `grounding_status=backend_validation_passed`. Persisted output metadata includes assertion IDs, LCR context IDs, retrieval coverage, response origin/mode, and existing source IDs. Outputs remain pending human review and `written_to_lcr=false`.
+- Frontend claim source-pointer verification now uses Unicode code-point offsets to match Python backend indexing, rejects fractional and out-of-range offsets, and has regression coverage for emoji preceding the cited span.
+- Regression tests cover unsupported paraphrases, absence of false passed audits, missing/mismatched spans, overclaimed confirmation, malformed care-understanding structures, causal-link mislabelling, complete worker provenance, and Unicode offsets.
+
+**Verification boundary:** these changes are implemented in source and tests, but the exact current backend/frontend Actions runs have not completed successfully in the observed session. Live Qwen acceptance is not yet established. No deployment was performed.
