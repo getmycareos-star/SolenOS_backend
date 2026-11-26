@@ -640,6 +640,24 @@ def qwen_chat(
         failure_category, failure_reason = "invalid_upstream_response", "unexpected_response_shape"
         _log_inference_result(model, started, effective_timeout, failure_category, failure_reason, audit_metadata=audit_metadata, audit_id=audit_id)
         raise HTTPException(status_code=502, detail={"code": failure_category, "reason": failure_reason, "message": "SolenOS AI assistance is unavailable."})
+    response_role = message.get("role")
+    if response_role is not None and (
+        not isinstance(response_role, str) or response_role.strip().casefold() != "assistant"
+    ):
+        _mark_inference_unverified(model)
+        failure_category, failure_reason = "invalid_upstream_response", "unexpected_message_role"
+        _log_inference_result(
+            model, started, effective_timeout, failure_category, failure_reason,
+            audit_metadata=audit_metadata, response_metadata=result, audit_id=audit_id,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": failure_category,
+                "reason": failure_reason,
+                "message": "SolenOS could not verify the AI response format. No answer was accepted.",
+            },
+        )
     # When Ollama identifies the model that actually served the request,
     # require it to match the configured model. Missing metadata remains
     # backward-compatible; an explicit mismatch is never accepted.
