@@ -370,3 +370,80 @@ def test_copied_or_same_origin_status_unifies_lineage():
     assert lineage["copied-a"] == lineage["copied-b"]
     assert independence == {"copied-a": "shared_origin", "copied-b": "shared_origin"}
 
+def test_corroboration_does_not_mislabel_generic_relationships_as_shared_origin():
+    from app.services.evidence_lineage import assess_corroboration
+
+    rows = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    link = SimpleNamespace(
+        source_evidence_id="a",
+        related_evidence_id="b",
+        source_independence_status="related",
+        relationship_type="contradicts",
+        origin_group_key=None,
+    )
+    result = assess_corroboration(rows, [link], ["a", "b"])
+    assert result["status"] == "independence_not_assessed"
+    assert result["shared_origin_pairs"] == []
+    assert result["unassessed_relationship_pairs"] == [["a", "b"]]
+    assert result["independent_source_pairs"] == []
+    assert result["independent_corroboration_established"] is False
+
+
+def test_corroboration_rejects_conflicting_independent_and_shared_origin_reviews():
+    from app.services.evidence_lineage import assess_corroboration
+
+    rows = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    links = [
+        SimpleNamespace(
+            source_evidence_id="a",
+            related_evidence_id="b",
+            source_independence_status="independent",
+            relationship_type="corroborates",
+            origin_group_key=None,
+        ),
+        SimpleNamespace(
+            source_evidence_id="b",
+            related_evidence_id="a",
+            source_independence_status="shared_origin",
+            relationship_type="forwarded_from",
+            origin_group_key="same-message",
+        ),
+    ]
+    result = assess_corroboration(rows, links, ["a", "b"])
+    assert result["status"] == "conflicting_source_relationships"
+    assert result["independent_source_pairs"] == []
+    assert result["shared_origin_pairs"] == []
+    assert result["conflicting_relationship_pairs"] == [["a", "b"]]
+    assert result["source_independence_by_evidence_id"] == {
+        "a": "independence_conflict",
+        "b": "independence_conflict",
+    }
+    assert result["independent_corroboration_established"] is False
+
+
+def test_corroboration_marks_only_explicit_origin_relationships_as_shared():
+    from app.services.evidence_lineage import assess_corroboration
+
+    rows = [
+        SimpleNamespace(id="a", parent_evidence_id=None, original_source_reference=None),
+        SimpleNamespace(id="b", parent_evidence_id=None, original_source_reference=None),
+    ]
+    link = SimpleNamespace(
+        source_evidence_id="a",
+        related_evidence_id="b",
+        source_independence_status="shared_origin",
+        relationship_type="related",
+        origin_group_key="same-document",
+    )
+    result = assess_corroboration(rows, [link], ["a", "b"])
+    assert result["status"] == "shared_origin_only"
+    assert result["shared_origin_pairs"] == [["a", "b"]]
+    assert result["unassessed_relationship_pairs"] == []
+    assert result["independent_corroboration_established"] is False
+
