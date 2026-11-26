@@ -12321,6 +12321,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.rollback()
         raise HTTPException(status_code=403, detail="Caregiver access changed before this response could be saved")
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     current_bearer_session = db.query(AnonymousSession.id).filter(
         AnonymousSession.id == authenticated_session_id,
         AnonymousSession.person_id == person_id,
