@@ -510,16 +510,23 @@ def _extract(
             index for index, value in enumerate(native_pages)
             if len(value.strip()) < MIN_NATIVE_PDF_TEXT_CHARS
         ]
-        if native_pages and not ocr_page_indexes:
-            page_texts = [f"[Page {index + 1}]\n{text}" for index, text in enumerate(native_pages)]
-            return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
-
         previous_page_blocks = {}
         if retry_only_pages is not None and previous_source_text:
             markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]\s*$", previous_source_text))
             for marker_index, marker in enumerate(markers):
                 block_end = markers[marker_index + 1].start() if marker_index + 1 < len(markers) else len(previous_source_text)
                 previous_page_blocks[int(marker.group(1))] = previous_source_text[marker.start():block_end].strip()
+
+        if native_pages and not ocr_page_indexes:
+            page_texts = []
+            for index, native_text in enumerate(native_pages):
+                page_number = index + 1
+                previous_block = previous_page_blocks.get(page_number)
+                if retry_only_pages is not None and page_number not in retry_only_pages and previous_block:
+                    page_texts.append(previous_block)
+                else:
+                    page_texts.append(f"[Page {page_number}]\n{native_text}")
+            return _bounded_extraction("\n\n".join(page_texts), "server_pdf_text")
 
         rendered = None
         page_texts = []
