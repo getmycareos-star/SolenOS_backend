@@ -367,6 +367,12 @@ def test_postgres_interrupted_pdf_tail_is_persisted_as_unprocessed(monkeypatch):
             assert result["page_count"] == 4
             assert result["processed_page_numbers"] == [1, 2]
             assert result["unprocessed_page_numbers"] == [3, 4]
+            assert result["page_states"] == [
+                {"source_page_number": 1, "status": "processed", "attempt_count": 1},
+                {"source_page_number": 2, "status": "processed", "attempt_count": 1},
+                {"source_page_number": 3, "status": "unprocessed", "attempt_count": 1},
+                {"source_page_number": 4, "status": "unprocessed", "attempt_count": 1},
+            ]
             assert result["extraction_status"] == "partial"
             assert result["interpretation_blocked"] is True
     finally:
