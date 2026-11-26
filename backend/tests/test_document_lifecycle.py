@@ -277,6 +277,36 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     assert "Extracted page 30" in retrieved.json()["extracted_text"]
 
 
+
+def test_pdf_trailing_pages_missing_from_extraction_are_not_reported_complete(client, monkeypatch):
+    from pypdf import PdfWriter
+    from app.api import document_lifecycle
+
+    writer = PdfWriter()
+    for _ in range(4):
+        writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+
+    test_client, session = client
+    evidence_id = persist_document(session, output.getvalue(), "interrupted-four-page.pdf", "application/pdf")
+    monkeypatch.setattr(
+        document_lifecycle,
+        "_extract",
+        lambda upload, content, evidence: ("[Page 1]\\nReadable page one.\\n\\n[Page 2]\\nReadable page two.", "test_interrupted_extraction"),
+    )
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["page_count"] == 4
+    assert payload["processed_page_numbers"] == [1, 2]
+    assert payload["unprocessed_page_numbers"] == [3, 4]
+    assert payload["extraction_status"] == "partial"
+    assert payload["interpretation_blocked"] is True
+
+
 def test_partial_extraction_retries_saved_original_without_duplicate_upload(client, monkeypatch):
     from fastapi import HTTPException
     from pypdf import PdfWriter
