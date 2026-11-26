@@ -105,9 +105,9 @@ def test_claim_extraction_drops_claims_without_exact_source_spans(monkeypatch):
                 "source_span": None,
             },
             {
-                "claim_text": "She was hospitalized",
-                "entity_type": "event",
-                "event_type": "hospitalization",
+                "claim_text": "She seemed tired",
+                "entity_type": "symptom",
+                "event_type": "fatigue_reported",
                 "confidence_tag": "confirmed",
                 "source_span": {
                     "start_offset": 20,

@@ -5508,7 +5508,9 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
                 continue
             if not isinstance(event, str) or not event.strip() or len(event) > 200:
                 continue
-            if confidence not in {"confirmed", "reported", "inferred", "unknown", "contradictory"}:
+            # Qwen cannot promote a source statement to confirmed truth.
+            # Confirmation requires an independent backend/caregiver review.
+            if confidence not in {"reported", "inferred", "unknown", "contradictory"}:
                 continue
             span = item.get("source_span")
             if span is not None:
