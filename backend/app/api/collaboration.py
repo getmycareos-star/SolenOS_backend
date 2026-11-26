@@ -1543,6 +1543,8 @@ async def upload_evidence(
         .join(EvidenceModel, EvidenceModel.id == EvidenceUpload.evidence_id)
         .filter(
             EvidenceModel.person_id == scoped_person_id,
+            EvidenceModel.type == evidence_type,
+            (EvidenceModel.evidence_status.is_(None)) | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
             EvidenceUpload.sha256 == digest,
         )
         .order_by(EvidenceUpload.created_at.asc(), EvidenceUpload.evidence_id.asc())
