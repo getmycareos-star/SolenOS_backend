@@ -5886,7 +5886,6 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     or not valid_why
                     or (why is not None and not source_bound(why, fragment))
                     or not isinstance(reason_unknown, bool)
-                    or reason_unknown != (why is None)
                     or status not in {"active", "completed", "changed", "reversed", "uncertain", "needs_review", "pending"}
                 ):
                     continue
@@ -5894,7 +5893,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     "description": description,
                     "who": who,
                     "why": why,
-                    "reason_unknown": reason_unknown,
+                    "reason_unknown": why is None,
                     "status": source_status(status, fragment, description, _decision_status_evidence),
                     "raw_fragment": fragment,
                 })
