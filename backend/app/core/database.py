@@ -55,24 +55,44 @@ def get_db(request: Request = None):
         # the request transaction so inference does not pin a PostgreSQL
         # connection. Release only leases owned by this request; if cleanup
         # cannot reach PostgreSQL, the bounded expiry is the crash-recovery path.
-        leases = getattr(getattr(request, "state", None), "companion_turn_leases", [])
-        owner_token = getattr(getattr(request, "state", None), "companion_turn_lease_owner", None)
-        if leases and owner_token and db.get_bind().dialect.name == "postgresql":
+        request_state = getattr(request, "state", None)
+        leases = getattr(request_state, "companion_turn_leases", [])
+        owner_token = getattr(request_state, "companion_turn_lease_owner", None)
+        new_session_id = getattr(request_state, "companion_new_session_id", None)
+        if db.get_bind().dialect.name == "postgresql" and (
+            new_session_id or (leases and owner_token)
+        ):
             try:
                 db.rollback()
-                for lock_key in reversed(leases):
+                if new_session_id:
+                    # A conversation shell created by a failed first turn has
+                    # no user-visible history. Remove it only when no committed
+                    # message pair exists; successful or concurrent writes win.
                     db.execute(
                         text(
-                            "DELETE FROM companion_turn_leases "
-                            "WHERE lock_key = :lock_key AND owner_token = :owner_token"
+                            "DELETE FROM conversation_sessions "
+                            "WHERE id = :session_id "
+                            "AND NOT EXISTS ("
+                            "SELECT 1 FROM conversation_messages "
+                            "WHERE conversation_messages.session_id = conversation_sessions.id"
+                            ")"
                         ),
-                        {"lock_key": lock_key, "owner_token": owner_token},
+                        {"session_id": new_session_id},
                     )
+                if leases and owner_token:
+                    for lock_key in reversed(leases):
+                        db.execute(
+                            text(
+                                "DELETE FROM companion_turn_leases "
+                                "WHERE lock_key = :lock_key AND owner_token = :owner_token"
+                            ),
+                            {"lock_key": lock_key, "owner_token": owner_token},
+                        )
                 db.commit()
             except Exception:
                 db.rollback()
                 logging.getLogger(__name__).exception(
-                    "Companion turn lease cleanup failed; lease expiry will recover it"
+                    "Companion request cleanup failed; expiring leases will recover locks"
                 )
         db.close()
 
