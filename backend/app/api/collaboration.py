@@ -6524,6 +6524,20 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             source_lcr_context_ids=source_lcr_context_ids,
             source_freshness_assessment_ids=source_freshness_assessment_ids,
         )
+        # This legacy read-only endpoint has no conversation-turn transaction
+        # to own the success receipt. Commit the audit before returning the answer.
+        try:
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Qwen support-assist output validation audit could not be persisted")
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "output_validation_audit_unavailable",
+                    "message": "SolenOS could not verify the response record. No answer was delivered.",
+                },
+            ) from exc
     return {
         "workflow": payload.workflow,
         "reply": reply,
