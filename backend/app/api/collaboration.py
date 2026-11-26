@@ -5688,19 +5688,30 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         return cleaned if all(item is not None for item in cleaned) else None
 
     _negation_pattern = re.compile(
-        r"\\b(?:no|not|never|neither|nor|without|denies|denied|doesn't|didn't|isn't|wasn't|weren't|haven't|hasn't|hadn't|cannot|can't|couldn't|wouldn't|won't)\\b",
+        r"\b(?:no|not|never|neither|nor|without|denies|denied|doesn't|didn't|isn't|wasn't|weren't|haven't|hasn't|hadn't|cannot|can't|couldn't|wouldn't|won't)\b",
+        flags=re.IGNORECASE,
+    )
+    _negation_clause_boundary = re.compile(
+        r"(?<=[.!?;])\s+|,\s+|\b(?:but|however|yet)\b",
         flags=re.IGNORECASE,
     )
 
     def source_bound(value: str | None, fragment: str) -> bool:
-        """Require verbatim source support and preserve explicit negation."""
+        """Require verbatim support and preserve negation in the claim's clause."""
         if value is None or value not in fragment:
             return False
-        # A model must not turn "did not fall" into "fall" by selecting
-        # a positive substring from a negated source passage.
-        if _negation_pattern.search(fragment) and not _negation_pattern.search(value):
+        # Evaluate the clause containing the exact claim, not the whole fragment:
+        # an unrelated negative statement must not invalidate a positive claim.
+        claim_clause = next(
+            (clause for clause in _negation_clause_boundary.split(fragment) if value in clause),
+            None,
+        )
+        if claim_clause is None:
+            return False
+        if _negation_pattern.search(claim_clause) and not _negation_pattern.search(value):
             return False
         return True
+
 
     for key, limit in limits.items():
         for item in parsed.get(key, [])[:limit]:
