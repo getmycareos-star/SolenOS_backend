@@ -1248,17 +1248,21 @@ def _release_companion_turn_leases(db: Session, request: Request) -> None:
     owner_token = getattr(request.state, "companion_turn_lease_owner", None)
     if not leases or not owner_token or db.get_bind().dialect.name != "postgresql":
         return
-    db.rollback()
-    for lock_key in reversed(leases):
-        db.execute(
-            text(
-                "DELETE FROM companion_turn_leases "
-                "WHERE lock_key = :lock_key AND owner_token = :owner_token"
-            ),
-            {"lock_key": lock_key, "owner_token": owner_token},
-        )
-    db.commit()
-    request.state.companion_turn_leases = []
+    try:
+        db.rollback()
+        for lock_key in reversed(leases):
+            db.execute(
+                text(
+                    "DELETE FROM companion_turn_leases "
+                    "WHERE lock_key = :lock_key AND owner_token = :owner_token"
+                ),
+                {"lock_key": lock_key, "owner_token": owner_token},
+            )
+        db.commit()
+        request.state.companion_turn_leases = []
+    except Exception:
+        db.rollback()
+        logger.exception("Companion turn lease release deferred to request teardown")
 
 
 def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
