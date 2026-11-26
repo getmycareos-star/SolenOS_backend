@@ -1,8 +1,22 @@
 from datetime import datetime, timedelta, timezone
 
-from app.services.care_attention_intelligence import build_care_attention_assessment
+from app.services.care_attention_intelligence import build_care_attention_assessment, _record_ref
 
 NOW = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+
+def test_care_attention_source_reference_preserves_time_provenance():
+    reference = _record_ref({
+        "id": "event-1",
+        "source": "events",
+        "title": "Caregiver update",
+        "occurred_at": NOW,
+        "recorded_at": NOW,
+        "time_provenance": "server_recorded_at",
+    })
+    assert reference["time_provenance"] == "server_recorded_at"
+    assert reference["occurred_at"] == NOW
+    assert reference["recorded_at"] == NOW
+
 
 
 def test_missing_or_unrecognized_open_loop_status_is_not_silently_dropped():
