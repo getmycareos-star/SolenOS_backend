@@ -5753,6 +5753,28 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         r"(?<=[.!?;])\s+|,\s+|\b(?:but|however|yet)\b",
         flags=re.IGNORECASE,
     )
+    _decision_status_evidence = {
+        "active": re.compile(r"\b(?:active|ongoing|in progress|continuing)\b", re.IGNORECASE),
+        "completed": re.compile(r"\b(?:completed|finished|done)\b", re.IGNORECASE),
+        "changed": re.compile(r"\b(?:changed|updated|revised|switched)\b", re.IGNORECASE),
+        "reversed": re.compile(r"\b(?:reversed|cancelled|rescinded|withdrawn)\b", re.IGNORECASE),
+        "uncertain": re.compile(r"\b(?:uncertain|unsure|unclear|may|might|possibly|not sure)\b", re.IGNORECASE),
+        "needs_review": re.compile(r"\b(?:needs? review|review needed|requires? review|needs? confirmation)\b", re.IGNORECASE),
+        "pending": re.compile(r"\b(?:pending|awaiting|waiting|planned|will|going to)\b", re.IGNORECASE),
+    }
+    _outcome_status_evidence = {
+        "observed": re.compile(r"\b(?:observed|noticed|saw|heard|reported|recorded|documented)\b", re.IGNORECASE),
+        "pending": re.compile(r"\b(?:pending|awaiting|waiting|planned|will|going to)\b", re.IGNORECASE),
+        "uncertain": re.compile(r"\b(?:uncertain|unsure|unclear|may|might|possibly|not sure)\b", re.IGNORECASE),
+        "ongoing": re.compile(r"\b(?:ongoing|continuing|in progress|still happening)\b", re.IGNORECASE),
+        "resolved": re.compile(r"\b(?:resolved|cleared|completed|finished)\b", re.IGNORECASE),
+        "changed": re.compile(r"\b(?:changed|improved|worsened|declined|increased|decreased|stopped|started)\b", re.IGNORECASE),
+    }
+
+    def source_status(proposed: str, fragment: str, patterns: dict[str, re.Pattern]) -> str:
+        """Keep a model status only when the source contains an explicit status cue."""
+        pattern = patterns.get(proposed)
+        return proposed if pattern is not None and pattern.search(fragment) else "uncertain"
 
     def source_bound(value: str | None, fragment: str) -> bool:
         """Require verbatim support and preserve negation in the claim's clause."""
@@ -5849,6 +5871,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     or not valid_why
                     or (why is not None and not source_bound(why, fragment))
                     or not isinstance(reason_unknown, bool)
+                    or reason_unknown != (why is None)
                     or status not in {"active", "completed", "changed", "reversed", "uncertain", "needs_review", "pending"}
                 ):
                     continue
@@ -5857,7 +5880,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     "who": who,
                     "why": why,
                     "reason_unknown": reason_unknown,
-                    "status": status,
+                    "status": source_status(status, fragment, _decision_status_evidence),
                     "raw_fragment": fragment,
                 })
             elif key == "outcomes":
@@ -5867,7 +5890,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     continue
                 result[key].append({
                     "description": description,
-                    "status": status,
+                    "status": source_status(status, fragment, _outcome_status_evidence),
                     "raw_fragment": fragment,
                 })
             elif key == "unknowns":
