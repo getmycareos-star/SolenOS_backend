@@ -40,6 +40,47 @@ def test_sparse_page_markers_are_not_reported_as_a_complete_document():
     assert metadata["unprocessed_page_numbers"] == [2]
 
 
+
+def test_native_pdf_retry_preserves_saved_pages_and_extracts_only_missing_pages(monkeypatch):
+    from types import SimpleNamespace
+
+    from app.api import document_lifecycle
+
+    class NativePage:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self, extraction_mode=None):
+            return self.text
+
+    class NativeReader:
+        pages = [
+            NativePage("Current page one text is intentionally different from the saved first page."),
+            NativePage("Current page two text is intentionally different from the saved second page."),
+            NativePage("Newly extracted page three has enough readable native text."),
+            NativePage("Newly extracted page four has enough readable native text."),
+        ]
+
+    monkeypatch.setattr(document_lifecycle, "PdfReader", lambda *args, **kwargs: NativeReader())
+    upload = SimpleNamespace(filename="resume.pdf", mime_type="application/pdf")
+    previous = "[Page 1]\\nSaved first page.\\n[Page 2]\\nSaved second page."
+
+    extracted, method = document_lifecycle._extract(
+        upload,
+        b"test-pdf",
+        retry_only_pages={3, 4},
+        previous_source_text=previous,
+    )
+
+    assert method == "server_pdf_text"
+    assert "[Page 1]\\nSaved first page." in extracted
+    assert "[Page 2]\\nSaved second page." in extracted
+    assert "Newly extracted page three" in extracted
+    assert "Newly extracted page four" in extracted
+    assert "Current page one" not in extracted
+    assert "Current page two" not in extracted
+
+
 def test_page_retry_failure_is_not_counted_as_processed():
     status, metadata = _extraction_metadata(
         _upload(),
