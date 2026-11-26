@@ -5772,9 +5772,15 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     }
 
     def source_status(proposed: str, fragment: str, patterns: dict[str, re.Pattern]) -> str:
-        """Keep a model status only when the source contains an explicit status cue."""
+        """Keep a model status only when an unnegated source cue supports it."""
         pattern = patterns.get(proposed)
-        return proposed if pattern is not None and pattern.search(fragment) else "uncertain"
+        match = pattern.search(fragment) if pattern is not None else None
+        if match is None:
+            return "uncertain"
+        clause_prefix = _negation_clause_boundary.split(fragment[:match.start()])[-1]
+        if _negation_pattern.search(clause_prefix):
+            return "uncertain"
+        return proposed
 
     def source_bound(value: str | None, fragment: str) -> bool:
         """Require verbatim support and preserve negation in the claim's clause."""
