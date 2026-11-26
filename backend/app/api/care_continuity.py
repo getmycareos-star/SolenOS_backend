@@ -2220,7 +2220,7 @@ def current_care_projection(
                     and (
                         str(item.get("id") or "") in candidate_evidence_ids
                         or str(item.get("evidence_id") or "") in candidate_evidence_ids
-                        or bool(set(str(value) for value in item.get("evidence_ids", []) if value) & candidate_evidence_ids)
+                        or bool({str(value) for value in (item.get("evidence_ids") if isinstance(item.get("evidence_ids"), (list, tuple, set)) else []) if value} & candidate_evidence_ids)
                     )
                     for item in source_items
                 ):
