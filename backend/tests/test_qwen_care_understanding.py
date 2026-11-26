@@ -586,3 +586,41 @@ def test_care_understanding_keeps_status_when_same_source_clause_explicitly_supp
 
     assert result["understanding"]["decisions"][0]["status"] == "completed"
     assert result["understanding"]["outcomes"][0]["status"] == "resolved"
+
+def test_care_understanding_does_not_promote_uncertain_status_to_completed(monkeypatch):
+    _allow(monkeypatch)
+    source = "The caregiver thinks the follow-up may have completed."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [{
+            "description": "the follow-up may have completed",
+            "who": ["caregiver"],
+            "why": None,
+            "reason_unknown": True,
+            "status": "completed",
+            "raw_fragment": source,
+        }],
+        "outcomes": [{
+            "description": "the follow-up may have completed",
+            "status": "resolved",
+            "raw_fragment": source,
+        }],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["decisions"][0]["status"] == "uncertain"
+    assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
