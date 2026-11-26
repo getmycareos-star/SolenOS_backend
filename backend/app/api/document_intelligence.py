@@ -917,7 +917,7 @@ def list_document_intelligence(
             latest_by_evidence[evidence_id] = analysis
     text_fingerprints = {}
     possible_text_matches = {}
-    for evidence_id, analysis in latest_by_evidence.items():
+    for evidence_id, analysis in reversed(list(latest_by_evidence.items())):
         upload = uploads_by_evidence_id.get(evidence_id)
         metadata = analysis.candidates if isinstance(analysis.candidates, dict) else {}
         source_text = analysis.source_text or ""
@@ -943,12 +943,11 @@ def list_document_intelligence(
         previous = text_fingerprints.get(fingerprint)
         if previous and previous["binary_sha256"] != upload.sha256:
             possible_text_matches[evidence_id] = previous
-        else:
-            text_fingerprints.setdefault(fingerprint, {
-                "evidence_id": evidence_id,
-                "document_name": metadata.get("filename") or "another saved document",
-                "binary_sha256": upload.sha256,
-            })
+        text_fingerprints[fingerprint] = {
+            "evidence_id": evidence_id,
+            "document_name": metadata.get("filename") or "another saved document",
+            "binary_sha256": upload.sha256,
+        }
 
     items = []
     seen_evidence_ids = set()
