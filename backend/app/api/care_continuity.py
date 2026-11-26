@@ -2162,7 +2162,6 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     }
 
 
-@router.get("/current-care")
 def _verified_event_correction_statuses(event_rows: list[dict[str, Any]]) -> dict[str, str]:
     """Return correction states only for links checked in this care-record scope."""
     verified: dict[str, str] = {}
@@ -2179,6 +2178,7 @@ def _verified_event_correction_statuses(event_rows: list[dict[str, Any]]) -> dic
     return verified
 
 
+@router.get("/current-care")
 def current_care_projection(
     request: Request,
     limit_per_source: int = Query(default=10, ge=1, le=50),
