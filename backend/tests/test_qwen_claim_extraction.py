@@ -222,6 +222,16 @@ def test_claim_extraction_keeps_positive_claim_after_unrelated_negated_clause(mo
                 "end_offset": end,
                 "text": claim,
             },
+        }, {
+            "claim_text": claim,
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": start,
+                "end_offset": end,
+                "text": claim,
+            },
         }]
     }
     monkeypatch.setattr(
@@ -236,5 +246,7 @@ def test_claim_extraction_keeps_positive_claim_after_unrelated_negated_clause(mo
 
     result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
 
+    assert len(result["run_a"]["claims"]) == 1
+    assert len(result["run_b"]["claims"]) == 1
     assert result["run_a"]["claims"][0]["claim_text"] == claim
     assert result["run_b"]["claims"][0]["claim_text"] == claim
