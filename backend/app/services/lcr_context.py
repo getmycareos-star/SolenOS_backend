@@ -2141,7 +2141,7 @@ def build_lcr_context(
                     and (
                         str(item.get("id") or "") in selected_ids
                         or str(item.get("evidence_id") or "") in selected_ids
-                        or bool(set(str(value) for value in item.get("evidence_ids", []) if value) & selected_ids)
+                        or bool({str(value) for value in (item.get("evidence_ids") if isinstance(item.get("evidence_ids"), (list, tuple, set)) else []) if value} & selected_ids)
                     )
                     for item in source_items
                 )
