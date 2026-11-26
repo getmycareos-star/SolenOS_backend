@@ -62,7 +62,7 @@ def _has_unattributed_dose_instruction(answer: str, doses: str) -> bool:
 
 
 def semantic_pass(item: dict) -> tuple[bool, dict]:
-    """Independently check the ten behavioral scenarios plus source-linked handoff."""
+    """Independently check fifteen care scenarios plus source-linked handoff."""
     criterion = item.get("criterion")
     answer = str(item.get("answer") or "").casefold()
     server_checks = item.get("checks") if isinstance(item.get("checks"), dict) else {}
