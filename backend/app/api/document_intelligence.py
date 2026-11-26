@@ -29,6 +29,7 @@ from app.api.document_lifecycle import (
     _verify_persisted_extraction,
     _ocr_quality_by_page,
     _page_count,
+    _page_parsing_text,
     _unprocessed_page_numbers,
     _retryable_page_numbers,
     _blocked_page_numbers,
@@ -196,6 +197,8 @@ def _resolve_candidate_source_page(candidate: dict, source_text: str) -> int:
     quote = candidate.get("source_quote")
     if not isinstance(quote, str) or not quote.strip():
         raise HTTPException(status_code=409, detail="This document suggestion has no traceable source quotation")
+    source_text = _page_parsing_text(source_text)
+    quote = _page_parsing_text(quote)
 
     page_markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text))
     matching_pages: list[int] = []
