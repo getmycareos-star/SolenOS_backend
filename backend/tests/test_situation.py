@@ -2455,3 +2455,43 @@ def test_situation_assessment_uses_linked_significance_and_person_scoped_follow_
     finally:
         teardown_db()
 
+
+
+def test_situation_understanding_preserves_information_gap_reason_for_caregiver_display():
+    from app.core.database import get_db
+    from app.core.uncertainty_enums import EpistemicState, GapLifecycleStatus, GapReason
+    from app.api.care_continuity import _build_situation_understanding_assessment
+
+    setup_db()
+    try:
+        app.dependency_overrides[get_db] = override_get_db
+        client = TestClient(app)
+        created, _headers = create_authenticated_session(client, "Gap Reason Person")
+        person_id = created["person"]["id"]
+        caregiver_id = created["caregiver"]["id"]
+        with TestingSessionLocal() as db:
+            db.add(InformationGap(
+                id="gap-reason-not-provided",
+                person_id=person_id,
+                subject_type="person",
+                subject_id=person_id,
+                field="appointment_date",
+                epistemic_state=EpistemicState.UNKNOWN,
+                gap_reason=GapReason.NOT_PROVIDED,
+                lifecycle_status=GapLifecycleStatus.OPEN,
+                description="The caregiver has not provided the appointment date.",
+                evidence_ids=[],
+                created_by_caregiver_id=caregiver_id,
+            ))
+            db.commit()
+            assessment = _build_situation_understanding_assessment(db, person_id)
+
+        gap = next(
+            item for item in assessment["missing_information"]
+            if item["id"] == "gap-reason-not-provided"
+        )
+        assert gap["gap_reason"] == "not_provided"
+        assert gap["lifecycle_status"] == "open"
+        assert gap["description"] == "The caregiver has not provided the appointment date."
+    finally:
+        teardown_db()
