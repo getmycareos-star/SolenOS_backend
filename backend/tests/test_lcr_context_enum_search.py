@@ -224,3 +224,17 @@ def test_correction_original_and_corrected_text_are_searchable():
     assert "corrections.original_text ILIKE" in compiled
     assert "corrections.corrected_text ILIKE" in compiled
     assert "corrections.reason ILIKE" in compiled
+
+
+def test_lcr_context_serializes_python_enum_values_as_stable_strings():
+    from enum import Enum
+    from app.services.lcr_context import _safe_value
+
+    class GapReason(Enum):
+        NOT_PROVIDED = "not_provided"
+
+    class GapStatus(Enum):
+        OPEN = "open"
+
+    assert _safe_value(GapReason.NOT_PROVIDED, "gap_reason") == "not_provided"
+    assert _safe_value(GapStatus.OPEN, "lifecycle_status") == "open"
