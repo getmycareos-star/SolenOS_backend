@@ -51,4 +51,4 @@ def test_relative_date_resolution_does_not_depend_on_wall_clock_when_injected():
 
     assert window is not None
     assert window["start"].startswith("2024-02-19T00:00:00")
-    assert window["end"].startswith("2024-03-01T23:59:59")
+    assert window["end"].startswith("2024-02-25T23:59:59")
