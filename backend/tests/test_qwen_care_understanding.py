@@ -624,3 +624,45 @@ def test_care_understanding_does_not_promote_uncertain_status_to_completed(monke
 
     assert result["understanding"]["decisions"][0]["status"] == "uncertain"
     assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
+
+def test_care_understanding_preserves_uncertainty_in_observation_descriptions(monkeypatch):
+    _allow(monkeypatch)
+    source = "Mum may have pneumonia."
+    model_output = {
+        "observations": [
+            {
+                "description": "pneumonia",
+                "approximate_time": None,
+                "raw_fragment": source,
+            },
+            {
+                "description": "Mum may have pneumonia",
+                "approximate_time": None,
+                "raw_fragment": source,
+            },
+        ],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["observations"] == [{
+        "description": "Mum may have pneumonia",
+        "approximate_time": None,
+        "confidence": "unavailable",
+        "raw_fragment": source,
+    }]
