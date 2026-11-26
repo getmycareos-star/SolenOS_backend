@@ -1506,16 +1506,30 @@ def test_appointment_preparation_brief_includes_person_scoped_extracted_document
         )
         db.add(evidence)
         db.flush()
+        original_bytes = b"original discharge summary file"
+        original_sha256 = hashlib.sha256(original_bytes).hexdigest()
+        source_text = "Discharge summary: follow-up requested in two weeks."
+        db.add(EvidenceUpload(
+            evidence_id=evidence.id,
+            filename="discharge-summary.txt",
+            mime_type="text/plain",
+            content=original_bytes,
+            size_bytes=len(original_bytes),
+            sha256=original_sha256,
+        ))
         db.add(CaptureAnalysis(
             id="appointment-prep-extraction",
             person_id=owner["person"]["id"],
             caregiver_id=owner["caregiver"]["id"],
             source_evidence_id=evidence.id,
-            source_text="Discharge summary: follow-up requested in two weeks.",
+            source_text=source_text,
             extraction_status="available",
             candidates={
                 "kind": "document_extraction_v1",
                 "filename": "discharge-summary.txt",
+                "mime_type": "text/plain",
+                "binary_sha256": original_sha256,
+                "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
                 "extraction_method": "server_utf8_text",
             },
             review_history=[],
