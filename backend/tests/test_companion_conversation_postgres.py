@@ -1059,3 +1059,58 @@ def test_distinct_companion_turns_in_one_conversation_are_serialized(monkeypatch
             ConversationMessage.created_at.asc(), ConversationMessage.id.asc(),
         ).all()
         assert [row.role for row in rows] == ["user", "assistant", "user", "assistant"]
+
+
+def test_companion_saved_conversation_list_paginates_with_recipient_scope():
+    """Saved conversation navigation can reach older sessions without crossing records."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Conversation list recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    token = created["access_token"]
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        for index in range(3):
+            session_id = f"conversation-list-{index}-{suffix}"
+            db.add(ConversationSession(
+                id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+                title=f"Saved conversation {index}", status="active",
+                created_at=now + timedelta(seconds=index),
+            ))
+            db.flush()
+            db.add(ConversationMessage(
+                id=f"conversation-list-message-{index}-{suffix}",
+                session_id=session_id, role="user", content=f"Conversation question {index}",
+                created_at=now + timedelta(seconds=index),
+            ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {token}"}
+    first = client.get("/api/v1/conversations?limit=2&offset=0", headers=headers)
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert len(first_body["items"]) == 2
+    assert first_body["has_more"] is True
+    assert first_body["next_offset"] == 2
+
+    second = client.get(
+        "/api/v1/conversations",
+        params={"limit": 2, "offset": first_body["next_offset"]},
+        headers=headers,
+    )
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert len(second_body["items"]) == 1
+    assert second_body["has_more"] is False
+    all_ids = [item["session_id"] for item in first_body["items"] + second_body["items"]]
+    assert len(set(all_ids)) == 3
+
+    other = _new_anonymous(client, f"Other conversation list recipient {suffix}")
+    isolated = client.get(
+        "/api/v1/conversations?limit=50",
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert isolated.status_code == 200, isolated.text
+    assert isolated.json()["items"] == []
