@@ -2121,6 +2121,7 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
                     or page_number < 1
                 ):
                     return None
+                quote = _page_parsing_text(quote)
                 if page_markers:
                     page_match = next((marker for marker in page_markers if int(marker.group(1)) == page_number), None)
                     if page_match is None:
