@@ -1369,7 +1369,7 @@ async def upload_evidence(
         if evidence_type.strip().lower() != "document":
             raise HTTPException(status_code=422, detail="A clearer page copy must be saved as a document")
         try:
-            uuid.UUID(capture_source_evidence_id)
+            capture_source_evidence_id = str(uuid.UUID(capture_source_evidence_id))
         except (TypeError, ValueError, AttributeError) as exc:
             raise HTTPException(status_code=422, detail="The source document reference is invalid") from exc
         source_document = db.query(EvidenceModel).filter(
