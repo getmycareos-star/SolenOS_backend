@@ -261,3 +261,31 @@ def test_care_understanding_does_not_label_explicit_causal_source_as_noncausal_l
     monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
     result = collaboration.qwen_care_understanding(payload, request=None, db=None)
     assert result["understanding"]["possible_links"] == []
+
+def test_causal_wording_is_rejected_even_when_model_denies_causation(monkeypatch):
+    _allow(monkeypatch)
+    source = "The fall caused the clinic call."
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [{
+            "text": source,
+            "causation_claimed": False,
+        }],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["possible_links"] == []
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
+
