@@ -59,6 +59,7 @@ def get_db(request: Request = None):
         owner_token = getattr(getattr(request, "state", None), "companion_turn_lease_owner", None)
         if leases and owner_token and db.get_bind().dialect.name == "postgresql":
             try:
+                db.rollback()
                 for lock_key in reversed(leases):
                     db.execute(
                         text(
