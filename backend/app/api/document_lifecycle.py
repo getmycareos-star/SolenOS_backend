@@ -895,10 +895,24 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         (upload.mime_type or "").split(";", 1)[0].strip().casefold() == "application/pdf"
         or (upload.filename or "").casefold().endswith(".pdf")
     )
-    # A PDF is one paginated source, so gaps between page markers are missing
-    # pages. A standalone scan/photo may retain its original page label (for
-    # example page 3 of a packet) without containing pages 1 and 2 itself.
-    total_pages = max(observed_pages, default=1) if is_paginated_pdf else max(len(observed_pages), 1)
+    # A PDF is one paginated source. Its page count must come from the
+    # immutable original binary, not the highest page marker in extracted text:
+    # a truncated/interrupted extraction can omit trailing pages entirely and
+    # otherwise look complete. Standalone scans may retain their source packet
+    # page number without containing the preceding pages.
+    if is_paginated_pdf:
+        try:
+            original_bytes = read_document_binary(upload)
+            total_pages = len(PdfReader(io.BytesIO(original_bytes), strict=True).pages)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=422,
+                detail="The saved PDF page count could not be verified against the original file.",
+            ) from exc
+        if total_pages < 1 or total_pages > MAX_PDF_PAGES:
+            raise HTTPException(status_code=422, detail="The saved PDF page count is outside the supported range")
+    else:
+        total_pages = max(len(observed_pages), 1)
     unreadable_pages = _unreadable_page_numbers(source_text)
     missing_page_numbers = (
         sorted(set(range(1, total_pages + 1)) - set(observed_pages))
