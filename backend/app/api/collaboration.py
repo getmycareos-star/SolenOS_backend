@@ -8702,10 +8702,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if replay is not None:
         return replay
 
+    # Serialize retries for the same client turn before creating a conversation
+    # or spending model capacity. Transaction-scoped advisory locks are released
+    # automatically on commit/rollback and avoid a new idempotency table.
+    idempotency_lock_acquired = False
+    if client_turn_id and db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:client_turn_id))"),
+            {"client_turn_id": client_turn_id},
+        )
+        idempotency_lock_acquired = True
+        replay = _companion_replay_response(
+            db,
+            client_turn_id=client_turn_id,
+            request_sha256=request_sha256,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=payload.session_id,
+        )
+        if replay is not None:
+            return replay
+        # Access may have changed while this request waited behind another turn.
+        require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
-        ).first()
+        ).with_for_update().first()
         if not session:
             raise HTTPException(status_code=404, detail="Active conversation not found for this care record")
     else:
@@ -8713,17 +8736,19 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
-        # Keep the conversation container durable even if model inference fails.
-        # This commit contains no care-record facts or conversation messages.
-        try:
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            logger.exception("Companion conversation session failed to persist")
-            raise HTTPException(
-                status_code=503,
-                detail="Companion conversation could not be confirmed as persisted. No saved response is confirmed; please retry.",
-            ) from exc
+        # Keep legacy no-key sessions durable on model failure. With a client
+        # turn key, retain the transaction so its advisory lock protects the
+        # session creation and response pair as one idempotent operation.
+        if not idempotency_lock_acquired:
+            try:
+                db.commit()
+            except Exception as exc:
+                db.rollback()
+                logger.exception("Companion conversation session failed to persist")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Companion conversation could not be confirmed as persisted. No saved response is confirmed; please retry.",
+                ) from exc
 
     lowered = user_text.casefold()
     # Use the shared safety classifier rather than a narrower route-local list.
