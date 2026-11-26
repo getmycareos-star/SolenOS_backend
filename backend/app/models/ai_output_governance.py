@@ -1,7 +1,7 @@
 """Durable AI output governance records, separate from authoritative care facts."""
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, Float
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text, Float, text
 from sqlalchemy.sql import func
 
 from app.core.database import Base
@@ -152,7 +152,16 @@ class AIHumanFeedback(Base):
 
 class AIOutputLCRProposal(Base):
     __tablename__ = "ai_output_lcr_proposals"
-    __table_args__ = (Index("ix_ai_output_lcr_proposals_status_created", "status", "created_at"),)
+    __table_args__ = (
+        Index("ix_ai_output_lcr_proposals_status_created", "status", "created_at"),
+        Index(
+            "uq_companion_care_proposal_source_version",
+            "person_id", "caregiver_id", "source_message_id", "candidate_index", "proposal_version",
+            unique=True,
+            postgresql_where=text("proposal_type = 'companion_care_observation' AND source_message_id IS NOT NULL"),
+            sqlite_where=text("proposal_type = 'companion_care_observation' AND source_message_id IS NOT NULL"),
+        ),
+    )
 
     id = Column(String, primary_key=True, default=_id)
     output_id = Column(String, ForeignKey("qwen_model_outputs.id", ondelete="SET NULL"), nullable=True, index=True)
