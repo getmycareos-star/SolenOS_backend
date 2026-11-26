@@ -548,3 +548,41 @@ def test_care_understanding_cannot_close_unknowns_from_model_status_alone(monkey
     assert result["understanding"]["unknowns"][0]["status"] == "open"
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
+
+def test_care_understanding_keeps_status_when_same_source_clause_explicitly_supports_it(monkeypatch):
+    _allow(monkeypatch)
+    source = "The caregiver completed the clinic call this morning."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [{
+            "description": source,
+            "who": ["caregiver"],
+            "why": None,
+            "reason_unknown": True,
+            "status": "completed",
+            "raw_fragment": source,
+        }],
+        "outcomes": [{
+            "description": source,
+            "status": "resolved",
+            "raw_fragment": source,
+        }],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["decisions"][0]["status"] == "completed"
+    assert result["understanding"]["outcomes"][0]["status"] == "resolved"
