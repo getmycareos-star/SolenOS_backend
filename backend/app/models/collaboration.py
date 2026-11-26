@@ -57,6 +57,15 @@ class ConversationMessage(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
 
+class CompanionTurnLease(Base):
+    """Durable, expiring cross-worker serialization lease for Companion turns."""
+    __tablename__ = "companion_turn_leases"
+    lock_key = Column(String(160), primary_key=True)
+    owner_token = Column(String(36), nullable=False, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class EvidenceUpload(Base):
     __tablename__ = "evidence_uploads"
     evidence_id = Column(String, ForeignKey("evidence.id", ondelete="CASCADE"), primary_key=True)
