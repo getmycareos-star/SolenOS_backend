@@ -1236,6 +1236,13 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     request.state.anonymous_session_id = str(session.id)
     return str(session.id)
 
+def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
+    """Require a live bearer capability for every Companion read and write."""
+    person_id, caregiver_id = _scope(request, db)
+    _resolve_anonymous_session_id(request, db, person_id, caregiver_id)
+    return person_id, caregiver_id
+
+
 def _post_json(db: Session, post: CommunityPost, actor_id: Optional[str] = None) -> dict:
     reactions = db.query(CommunityReaction).filter(CommunityReaction.post_id == post.id).all()
     counts = {"like": 0, "thank_you": 0, "support": 0}
@@ -9142,7 +9149,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     """Generate a context-grounded Companion response; ordinary chat never writes care facts."""
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(getattr(request, "state", None), "request_id", None)
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     can_view_documents = True
     try:
         require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
@@ -12450,7 +12457,7 @@ def list_conversations(
     supplied person/caregiver identifiers, so a new device can restore history
     without trusting a browser-local conversation ID.
     """
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     cursor_values = (before_last_message_at, before_created_at, before_session_id)
     if any(value is not None for value in cursor_values) and not all(value is not None for value in cursor_values):
@@ -12545,7 +12552,7 @@ def conversation_history(
     The cursor is the timestamp and ID of the oldest item in the previous page.
     Ordering by both fields prevents ties from duplicating or dropping messages.
     """
-    person_id, caregiver_id = _scope(request, db)
+    person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     session = db.query(ConversationSession).filter_by(
         id=session_id, person_id=person_id, caregiver_id=caregiver_id,
