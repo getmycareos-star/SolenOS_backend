@@ -20,7 +20,9 @@ from app.main import app
 from app.models.care import CareEvent, Evidence, Caregiver, Person
 from app.models.collaboration import CompanionTurnLease, ConversationMessage, ConversationSession
 from app.models.caregiver_access import CaregiverAccessGrant
-from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
+from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputRejection, AISafetyCheck
+from app.models.care_continuity import CareAssertion
+from app.services import companion_care_updates
 from app.api import collaboration
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
@@ -1167,6 +1169,57 @@ def test_failed_first_companion_turn_removes_empty_session_and_releases_leases(m
         assert db.query(CompanionTurnLease).filter(
             CompanionTurnLease.lock_key.in_(lock_keys),
         ).count() == 0
+
+
+def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(monkeypatch):
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Companion proposal recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    original_text = "Mum woke three times last night. What should I watch for today?"
+    exact_quote = "Mum woke three times last night."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "That sounds tiring. Keep an eye on how she feels today.")
+    monkeypatch.setattr(
+        companion_care_updates,
+        "extract_companion_care_candidates",
+        lambda text, audit_context=None: {
+            "observations": [{
+                "source_quote": exact_quote,
+                "event_time_quote": "last night",
+            }]
+        },
+    )
+
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "text": original_text,
+            "client_turn_id": str(uuid.uuid4()),
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["written_to_lcr"] is False
+    assert body["persistence"] == "conversation_only"
+
+    with Session() as db:
+        proposal = db.query(AIOutputLCRProposal).filter_by(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_message_id=body["source_message_id"],
+            proposal_type="companion_care_observation",
+        ).one()
+        assert proposal.status == "pending_authorization"
+        assert proposal.proposed_change_json["source_quote"] == exact_quote
+        assert proposal.proposed_change_json["asserted_value"] == exact_quote
+        assert proposal.proposed_change_json["event_time_text"] == "last night"
+        assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
 
 def test_companion_history_permission_does_not_grant_lcr_read_or_write():
