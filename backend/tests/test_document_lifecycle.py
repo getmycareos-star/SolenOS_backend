@@ -316,6 +316,46 @@ def test_pdf_trailing_pages_missing_from_extraction_are_not_reported_complete(cl
     assert payload["interpretation_blocked"] is True
 
 
+
+def test_document_candidate_source_page_is_inferred_only_when_unambiguous():
+    from app.api.document_intelligence import _resolve_candidate_source_page
+
+    source = "[Page 1 OCR]\nPatient seen on Monday.\n[Page 2 OCR]\nFollow-up in two weeks."
+    assert _resolve_candidate_source_page(
+        {"source_quote": "Follow-up in two weeks."}, source
+    ) == 2
+    assert _resolve_candidate_source_page(
+        {"source_quote": "Patient seen on Monday.", "page_number": 1}, source
+    ) == 1
+
+
+def test_document_candidate_source_page_rejects_missing_or_ambiguous_provenance():
+    from fastapi import HTTPException
+    from app.api.document_intelligence import _resolve_candidate_source_page
+
+    repeated = "[Page 1 OCR]\nContinue medication.\n[Page 2 OCR]\nContinue medication."
+    with pytest.raises(HTTPException) as ambiguous:
+        _resolve_candidate_source_page({"source_quote": "Continue medication."}, repeated)
+    assert ambiguous.value.status_code == 409
+    with pytest.raises(HTTPException) as mismatched:
+        _resolve_candidate_source_page(
+            {"source_quote": "Continue medication.", "page_number": 3}, repeated
+        )
+    assert mismatched.value.status_code == 409
+    with pytest.raises(HTTPException) as missing:
+        _resolve_candidate_source_page({"source_quote": "Not in the source."}, repeated)
+    assert missing.value.status_code == 409
+
+
+def test_non_paginated_document_candidate_uses_source_page_one():
+    from app.api.document_intelligence import _resolve_candidate_source_page
+
+    assert _resolve_candidate_source_page(
+        {"source_quote": "Caregiver reported reduced appetite."},
+        "Caregiver reported reduced appetite.",
+    ) == 1
+
+
 def test_partial_extraction_retries_saved_original_without_duplicate_upload(client, monkeypatch):
     from fastapi import HTTPException
     from pypdf import PdfWriter
