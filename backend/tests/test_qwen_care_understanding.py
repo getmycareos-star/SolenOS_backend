@@ -327,11 +327,18 @@ def test_care_understanding_preserves_positive_claim_after_unrelated_negated_cla
         raw_text=source,
     )
     model_output = {
-        "observations": [{
-            "description": "Mom fell",
-            "approximate_time": "yesterday",
-            "raw_fragment": source,
-        }],
+        "observations": [
+            {
+                "description": "Mom fell",
+                "approximate_time": "yesterday",
+                "raw_fragment": source,
+            },
+            {
+                "description": "Mom fell",
+                "approximate_time": "yesterday",
+                "raw_fragment": source,
+            },
+        ],
         "events": [],
         "decisions": [],
         "outcomes": [],
