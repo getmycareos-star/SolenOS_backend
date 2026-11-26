@@ -2320,7 +2320,6 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     # Do not erase its source while leaving that derived response available.
     for output in db.query(QwenModelOutput).filter(
         QwenModelOutput.person_id == person_id,
-        QwenModelOutput.caregiver_id == caregiver_id,
     ).all():
         try:
             output_sources = json.loads(output.source_evidence_ids_json or "[]")
