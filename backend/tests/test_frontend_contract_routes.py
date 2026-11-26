@@ -914,6 +914,8 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         stored = json_module.loads(row["description"])
         assert stored["notes"] == "Daily capture contract test"
         assert stored["medications"][0]["medication_name"] == "Caregiver-reported medication"
+        assert stored["medications"][0]["photo_evidence_id"] == photo_evidence_id
+        assert "photo_ingestion_key" not in stored["medications"][0], "internal upload keys must not leak into the caregiver-visible source record"
         assert photo_evidence_id in row["evidence_ids"], "event history must retain the medicine photo evidence link"
 
         mismatched_delta = client.post(
