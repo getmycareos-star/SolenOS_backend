@@ -883,7 +883,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
                 "caregiver_id": caregiver_id,
                 "ingestion_key": "daily-capture-medication-photo-missing-blob",
             },
-            files={"file": ("missing-blob.png", b"\\x89PNG\\r\\n\\x1a\\nmissing-blob", "image/png")},
+            files={"file": ("missing-blob.png", b"\x89PNG\r\n\x1a\nmissing-blob", "image/png")},
         )
         assert missing_blob_upload.status_code == 201, missing_blob_upload.text
         missing_blob_id = missing_blob_upload.json()["evidence_id"]
