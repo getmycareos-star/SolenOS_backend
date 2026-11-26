@@ -296,6 +296,24 @@ def candidate_warnings(field_type: str, observation: str, excerpt: str, subject:
     return warnings
 
 
+def _event_time_kind(value: str | None) -> str:
+    """Classify source wording without converting it into an unsupported date."""
+    phrase = (value or "").strip().casefold()
+    if not phrase:
+        return "not_stated"
+    if re.search(r"\\b(?:about|around|approximately|roughly|early|mid|late|sometime|between)\\b", phrase):
+        return "approximate"
+    if re.search(
+        r"\\b(?:yesterday|today|tomorrow|last night|tonight|this morning|this afternoon|"
+        r"this evening|last week|last month|last year|\\d+\\s+(?:minutes?|hours?|days?|weeks?|months?|years?)\\s+ago)\\b",
+        phrase,
+    ):
+        return "relative"
+    if _date_tokens(phrase) or re.search(r"\\b\\d{1,2}:\\d{2}\\b", phrase):
+        return "explicit"
+    return "source_quoted_unresolved"
+
+
 def canonical_candidate(
     item: dict[str, Any],
     *,
@@ -304,6 +322,12 @@ def canonical_candidate(
     recorded_at: datetime | None = None,
 ) -> dict[str, Any]:
     excerpt = str(item.get("source_quote") or "")
+    raw_event_time_quote = item.get("event_time_quote")
+    event_time_quote = (
+        str(raw_event_time_quote).strip()
+        if isinstance(raw_event_time_quote, str) and str(raw_event_time_quote).strip() in excerpt
+        else None
+    )
     subject = str(item.get("subject") or "")
     observation = str(item.get("observation") or "")
     field_type = classify_field(subject, observation, excerpt)
@@ -343,6 +367,8 @@ def canonical_candidate(
         "field_type": field_type,
         "extracted_value": observation or None,
         "event_date": None if len(set(_date_tokens(excerpt))) > 1 else _date_from_excerpt(excerpt),
+        "event_time_quote": event_time_quote,
+        "event_time_kind": _event_time_kind(event_time_quote),
         "recorded_date": _recorded_date_from_excerpt(excerpt),
         "extracted_at": timestamp,
         "confidence": None,
