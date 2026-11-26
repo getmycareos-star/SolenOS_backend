@@ -1233,6 +1233,7 @@ async def upload_evidence(
     capture_method: str = Form("upload"),
     capture_timestamp: str = Form(""),
     capture_page_number: Optional[int] = Form(None),
+    capture_source_evidence_id: str = Form(""),
     ingestion_key: str = Form(""),
 ):
     scoped_person_id, scoped_caregiver_id = _scope(request, db, allow_documents_only=True)
@@ -1353,12 +1354,31 @@ async def upload_evidence(
         ingestion_key = ""
     if isinstance(capture_page_number, bool) or not isinstance(capture_page_number, int):
         capture_page_number = None
+    if not isinstance(capture_source_evidence_id, str):
+        capture_source_evidence_id = ""
+    capture_source_evidence_id = capture_source_evidence_id.strip()
 
     capture_method = (capture_method or "upload").strip().lower()
     if capture_method not in {"scan", "snap", "upload", "share", "text", "voice"}:
         raise HTTPException(status_code=422, detail="Unsupported capture method")
     if capture_page_number is not None and (capture_page_number < 1 or capture_page_number > 100):
         raise HTTPException(status_code=422, detail="Capture page number must be between 1 and 100")
+    if capture_source_evidence_id:
+        if capture_method != "scan" or capture_page_number is None:
+            raise HTTPException(status_code=422, detail="A source document and page number are only valid for a scanned page copy")
+        if evidence_type.strip().lower() != "document":
+            raise HTTPException(status_code=422, detail="A clearer page copy must be saved as a document")
+        try:
+            uuid.UUID(capture_source_evidence_id)
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise HTTPException(status_code=422, detail="The source document reference is invalid") from exc
+        source_document = db.query(EvidenceModel).filter_by(
+            id=capture_source_evidence_id,
+            person_id=scoped_person_id,
+            type="document",
+        ).first()
+        if source_document is None:
+            raise HTTPException(status_code=404, detail="The source document for this page copy was not found")
     capture_timestamp_value = None
     if capture_timestamp:
         try:
@@ -1402,6 +1422,7 @@ async def upload_evidence(
         "scan_text_prepared": text_prepared,
         "capture_timestamp": capture_timestamp_value,
         "capture_page_number": capture_page_number,
+        "capture_source_evidence_id": capture_source_evidence_id or None,
         "rotation_degrees": rotation_degrees,
         "crop_insets_percent": crop_insets,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
@@ -1560,6 +1581,8 @@ async def upload_evidence(
                 "method": capture_method,
                 "captured_at": capture_timestamp_value,
                 "page_number": capture_page_number,
+                "source_evidence_id": capture_source_evidence_id or None,
+                "source_page_number": capture_page_number if capture_source_evidence_id else None,
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
