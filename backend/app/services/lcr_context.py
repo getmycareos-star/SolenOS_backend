@@ -774,6 +774,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
         metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
+        if metadata.get("binary_integrity_verified") is False:
+            return (
+                "document_source_integrity_unverified",
+                "The saved original file could not be matched to the extracted text. Treat this text as unverified and do not rely on it as a complete source.",
+            )
         if metadata.get("page_count_verified") is False:
             return (
                 "document_page_count_unverified",
@@ -996,13 +1001,22 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     filename = str(value.get("filename") or "").casefold()
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
     page_count = value.get("page_count")
-    metadata["page_count_verified"] = (
-        not is_paginated_pdf
-        or (
-            value.get("page_count_source") == "original_binary"
-            and isinstance(page_count, int)
-            and not isinstance(page_count, bool)
-            and 1 <= page_count <= 100
+    binary_integrity_verified = bool(
+        original_upload_sha256
+        and value.get("binary_sha256") == original_upload_sha256
+    )
+    metadata["original_upload_present"] = bool(original_upload_sha256)
+    metadata["binary_integrity_verified"] = binary_integrity_verified
+    metadata["page_count_verified"] = bool(
+        binary_integrity_verified
+        and (
+            not is_paginated_pdf
+            or (
+                value.get("page_count_source") == "original_binary"
+                and isinstance(page_count, int)
+                and not isinstance(page_count, bool)
+                and 1 <= page_count <= 100
+            )
         )
     )
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
@@ -1214,6 +1228,7 @@ def build_lcr_context(
     unsearchable_sources: list[str] = []
 
     source_offsets = source_offsets or {}
+    document_upload_hash_cache: dict[str, str | None] = {}
     for source_name, spec in SOURCE_SPECS.items():
         if only_sources is not None and source_name not in only_sources:
             continue
@@ -1585,7 +1600,22 @@ def build_lcr_context(
                             item["retrieved_source_passages"] = _exact_source_passages(
                                 row_values["source_text"], terms,
                             )
-                        item["extraction_metadata"] = _document_extraction_metadata(item.pop("candidates", None), item.get("source_text"))
+                        evidence_id = str(item.get("source_evidence_id") or "")
+                        upload_table = metadata.tables.get("evidence_uploads")
+                        if evidence_id and evidence_id not in document_upload_hash_cache:
+                            upload_sha256 = None
+                            if upload_table is not None and {"evidence_id", "sha256"}.issubset(upload_table.c.keys()):
+                                upload_sha256 = db.execute(
+                                    select(upload_table.c.sha256).where(
+                                        upload_table.c.evidence_id == evidence_id
+                                    ).limit(1)
+                                ).scalar_one_or_none()
+                            document_upload_hash_cache[evidence_id] = str(upload_sha256) if upload_sha256 else None
+                        item["extraction_metadata"] = _document_extraction_metadata(
+                            item.pop("candidates", None),
+                            item.get("source_text"),
+                            document_upload_hash_cache.get(evidence_id),
+                        )
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
                         item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
                     information_status, interpretation_limit = _information_status(source_name, item)
