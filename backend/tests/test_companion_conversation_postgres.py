@@ -1114,3 +1114,47 @@ def test_companion_saved_conversation_list_paginates_with_recipient_scope():
     )
     assert isolated.status_code == 200, isolated.text
     assert isolated.json()["items"] == []
+
+
+def test_companion_conversation_list_has_deterministic_order_when_timestamps_collide():
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Conversation tie-break recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    token = created["access_token"]
+    timestamp = datetime.now(timezone.utc).replace(microsecond=0)
+    session_ids = [f"tie-b-{suffix}", f"tie-a-{suffix}"]
+
+    with Session() as db:
+        for session_id in session_ids:
+            db.add(ConversationSession(
+                id=session_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title=session_id,
+                status="active",
+                created_at=timestamp,
+                updated_at=timestamp,
+            ))
+            db.flush()
+            db.add(ConversationMessage(
+                id=f"message-{session_id}",
+                session_id=session_id,
+                role="user",
+                content="Same timestamp conversation",
+                created_at=timestamp,
+            ))
+        db.commit()
+
+    response = client.get(
+        "/api/v1/conversations?limit=10",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    tied = [
+        item["session_id"]
+        for item in response.json()["items"]
+        if item["session_id"] in set(session_ids)
+    ]
+    assert tied == sorted(session_ids)
