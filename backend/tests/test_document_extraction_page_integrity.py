@@ -265,7 +265,7 @@ def test_legacy_pdf_page_gap_blocks_interpretation_without_saved_gap_metadata():
     )
 
     try:
-        _require_complete_extraction(analysis)
+        _require_complete_extraction(analysis, _upload(3))
     except HTTPException as exc:
         assert exc.status_code == 409
         assert "2" in exc.detail
