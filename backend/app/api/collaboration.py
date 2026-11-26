@@ -6196,6 +6196,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
 async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: Session = Depends(get_db)):
     """Read-only Qwen support across SolenOS; never mutates the Living Care Record."""
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     can_view_documents = True
     try:
         require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
@@ -12450,6 +12451,7 @@ def list_conversations(
     without trusting a browser-local conversation ID.
     """
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     cursor_values = (before_last_message_at, before_created_at, before_session_id)
     if any(value is not None for value in cursor_values) and not all(value is not None for value in cursor_values):
         raise HTTPException(status_code=422, detail="All conversation cursor fields are required together")
@@ -12544,6 +12546,7 @@ def conversation_history(
     Ordering by both fields prevents ties from duplicating or dropping messages.
     """
     person_id, caregiver_id = _scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     session = db.query(ConversationSession).filter_by(
         id=session_id, person_id=person_id, caregiver_id=caregiver_id,
     ).first()
