@@ -4931,6 +4931,13 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
                 prefix,
             ))
         checks["no_unsupported_trend"] = trend_claim is None or trend_is_qualified
+    elif criterion == "temporal_ambiguity":
+        checks["does_not_invent_exact_date"] = re.search(
+            r"\b20\d{2}-\d{2}-\d{2}\b"
+            r"|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}(?:,?\s+20\d{2})?\b"
+            r"|\b\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?\b",
+            normalized,
+        ) is None
     elif criterion == "caregiver_continuity_gap":
         missed_claim = re.search(
             r"\b(?:the follow-up call|the call)\s+(?:was|is|has been)\s+(?:missed|not completed|not made)\b"
