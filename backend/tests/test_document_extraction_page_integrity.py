@@ -393,11 +393,39 @@ def test_lifecycle_response_blocks_legacy_pdf_page_gaps_and_hides_old_candidates
     response = _response(analysis)
 
     assert response["page_count"] == 3
+    assert response["page_count_verified"] is False
     assert response["processed_page_numbers"] == [1, 3]
     assert response["unprocessed_page_numbers"] == [2]
     assert response["interpretation_blocked"] is True
     assert response["candidate_count"] == 0
     assert response["written_to_lcr"] is False
+
+
+
+def test_lifecycle_response_trusts_only_page_totals_marked_as_original_binary():
+    from types import SimpleNamespace
+
+    from app.api.document_lifecycle import _response
+
+    analysis = SimpleNamespace(
+        id="verified-pdf-page-total",
+        source_evidence_id="verified-pdf-source",
+        source_text="[Page 1 OCR]\\nFirst page.\\n[Page 2 OCR]\\nSecond page.",
+        extraction_status="available",
+        candidates={
+            "filename": "care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 2,
+            "page_count_source": "original_binary",
+            "unprocessed_page_numbers": [],
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["page_count"] == 2
+    assert response["page_count_verified"] is True
+    assert response["interpretation_blocked"] is False
 
 
 def test_lifecycle_response_does_not_invent_missing_pages_for_standalone_scan():
