@@ -2,7 +2,7 @@
 import os
 import uuid
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -801,3 +801,78 @@ def test_companion_discards_inference_when_caregiver_access_is_revoked_mid_reque
             ConversationSession.person_id == person_id,
             ConversationSession.caregiver_id == caregiver_id,
         ).count() == 0
+
+
+def test_companion_history_uses_stable_scoped_cursor_pages():
+    """Older history pages neither duplicate nor omit tied recipient messages."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Paginated Companion recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    token = created["access_token"]
+    session_id = f"companion-history-{suffix}"
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+
+    with Session() as db:
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="History pagination", status="active", created_at=now,
+        ))
+        db.flush()
+        for index in range(5):
+            db.add(ConversationMessage(
+                id=f"message-{index}-{suffix}", session_id=session_id,
+                role="user" if index % 2 == 0 else "assistant",
+                content=f"history item {index}", created_at=now + timedelta(seconds=index),
+                evidence_ids_json="[]", source_record_refs_json="[]",
+            ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {token}"}
+    first = client.get(f"/api/v1/conversation/{session_id}?limit=2", headers=headers)
+    assert first.status_code == 200, first.text
+    first_body = first.json()
+    assert [item["text"] for item in first_body["messages"]] == ["history item 3", "history item 4"]
+    assert first_body["has_more"] is True
+    assert first_body["next_before"] and first_body["next_before_id"]
+
+    second = client.get(
+        f"/api/v1/conversation/{session_id}",
+        params={
+            "limit": 2,
+            "before": first_body["next_before"],
+            "before_id": first_body["next_before_id"],
+        },
+        headers=headers,
+    )
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert [item["text"] for item in second_body["messages"]] == ["history item 1", "history item 2"]
+    assert second_body["has_more"] is True
+
+    third = client.get(
+        f"/api/v1/conversation/{session_id}",
+        params={
+            "limit": 2,
+            "before": second_body["next_before"],
+            "before_id": second_body["next_before_id"],
+        },
+        headers=headers,
+    )
+    assert third.status_code == 200, third.text
+    assert [item["text"] for item in third.json()["messages"]] == ["history item 0"]
+    assert third.json()["has_more"] is False
+
+    incomplete_cursor = client.get(
+        f"/api/v1/conversation/{session_id}?before={first_body['next_before']}",
+        headers=headers,
+    )
+    assert incomplete_cursor.status_code == 422
+
+    other = _new_anonymous(client, f"Other pagination recipient {suffix}")
+    denied = client.get(
+        f"/api/v1/conversation/{session_id}",
+        headers={"Authorization": f"Bearer {other['access_token']}"},
+    )
+    assert denied.status_code == 404
