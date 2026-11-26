@@ -135,9 +135,8 @@ def test_care_understanding_rejects_invalid_field_types_enums_and_oversized_valu
     _allow(monkeypatch)
     model_output = {
         "observations": [{
-            "description": "Mom fell yesterday",
+            "description": 42,
             "approximate_time": "yesterday",
-            "confidence": "certain",
             "raw_fragment": "Mom fell yesterday",
         }],
         "events": [{
