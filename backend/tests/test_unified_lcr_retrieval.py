@@ -30,7 +30,7 @@ from app.services.unified_lcr_retrieval import (
 
 
 def test_companion_context_does_not_treat_legacy_pdf_page_total_as_verified():
-    source_text = "[Page 1 OCR]\\nFirst page.\\n[Page 2 OCR]\\nSecond page."
+    source_text = "[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\nSecond page."
     legacy = _document_extraction_metadata({
         "filename": "legacy-discharge.pdf",
         "mime_type": "application/pdf",
