@@ -802,3 +802,23 @@ def test_qwen_gateway_retries_share_one_end_to_end_deadline(monkeypatch):
 
     assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Recovered within deadline."
     assert timeouts == [2.0, 1.0]
+
+def test_qwen_gateway_rejects_response_from_unexpected_model(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps({
+            "model": "qwen-unexpected:latest",
+            "message": {"role": "assistant", "content": "This must not be delivered."},
+            "done": True,
+            "done_reason": "stop",
+        }).encode()),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "unexpected_model_response"
+    assert error.value.detail["reason"] == "configured_model_mismatch"
