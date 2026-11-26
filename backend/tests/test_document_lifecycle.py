@@ -614,7 +614,7 @@ def test_multi_column_pdf_uses_layout_preserving_text_extraction(client, monkeyp
     class MultiColumnPage:
         def extract_text(self, extraction_mode=None):
             assert extraction_mode == "layout"
-            return "LEFT COLUMN: Medication 500 mg\nRIGHT COLUMN: Follow-up in 14 days"
+            return "LEFT COLUMN: Medication 500 mg\\nRIGHT COLUMN: Follow-up in 14 days"
 
     class LayoutReader:
         pages = [MultiColumnPage()]
