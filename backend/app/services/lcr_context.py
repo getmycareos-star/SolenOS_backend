@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from enum import Enum as PyEnum
 from datetime import date, datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -508,6 +509,11 @@ JSON_TEXT_FIELDS = {
 
 
 def _safe_value(value: Any, key: str | None = None) -> Any:
+    # SQLAlchemy returns native Python Enum instances for persisted enum
+    # columns. Serialize their stable values, not "EnumClass.MEMBER", so
+    # status and gap-reason contracts remain consistent across the API.
+    if isinstance(value, PyEnum):
+        return value.value
     if isinstance(value, (datetime, date)):
         return value.isoformat()
     if isinstance(value, UUID):
