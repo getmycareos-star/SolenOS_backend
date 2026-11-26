@@ -803,7 +803,8 @@ def _response(analysis: CaptureAnalysis, upload: EvidenceUpload | None = None) -
     page_count_verified = True
     if is_paginated_pdf:
         stored_count_is_verified = (
-            details.get("page_count_source") == "original_binary"
+            upload is not None
+            and details.get("page_count_source") == "original_binary"
             and isinstance(raw_page_count, int)
             and not isinstance(raw_page_count, bool)
             and 1 <= raw_page_count <= MAX_PDF_PAGES
