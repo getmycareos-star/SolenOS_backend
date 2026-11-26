@@ -2,6 +2,7 @@
 import os
 import uuid
 import json
+import hashlib
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated Post
 
 from app.main import app
 from app.models.care import CareEvent, Evidence, Caregiver, Person
-from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.collaboration import CompanionTurnLease, ConversationMessage, ConversationSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
 from app.api import collaboration
@@ -986,6 +987,13 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
         assert db.query(ConversationMessage).filter_by(
             session_id=bodies[0]["session_id"],
         ).count() == 2
+        expected_lock_keys = [
+            "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest(),
+            "conversation:" + hashlib.sha256(bodies[0]["session_id"].encode("utf-8")).hexdigest(),
+        ]
+        assert db.query(CompanionTurnLease).filter(
+            CompanionTurnLease.lock_key.in_(expected_lock_keys),
+        ).count() == 0
 
 
 def test_distinct_companion_turns_in_one_conversation_are_serialized(monkeypatch):
@@ -1059,6 +1067,8 @@ def test_distinct_companion_turns_in_one_conversation_are_serialized(monkeypatch
             ConversationMessage.created_at.asc(), ConversationMessage.id.asc(),
         ).all()
         assert [row.role for row in rows] == ["user", "assistant", "user", "assistant"]
+        conversation_lock_key = "conversation:" + hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+        assert db.query(CompanionTurnLease).filter_by(lock_key=conversation_lock_key).count() == 0
 
 
 def test_companion_saved_conversation_list_paginates_with_recipient_scope():
