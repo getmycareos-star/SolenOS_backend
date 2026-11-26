@@ -1002,22 +1002,25 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
     page_count = value.get("page_count")
     binary_integrity_verified = bool(
-        original_upload_sha256
+        upload_check_performed
+        and original_upload_sha256
         and value.get("binary_sha256") == original_upload_sha256
     )
-    metadata["original_upload_present"] = bool(original_upload_sha256)
-    metadata["binary_integrity_verified"] = binary_integrity_verified
-    metadata["page_count_verified"] = bool(
-        binary_integrity_verified
-        and (
-            not is_paginated_pdf
-            or (
-                value.get("page_count_source") == "original_binary"
-                and isinstance(page_count, int)
-                and not isinstance(page_count, bool)
-                and 1 <= page_count <= 100
-            )
+    page_manifest_verified = (
+        not is_paginated_pdf
+        or (
+            value.get("page_count_source") == "original_binary"
+            and isinstance(page_count, int)
+            and not isinstance(page_count, bool)
+            and 1 <= page_count <= 100
         )
+    )
+    metadata["original_upload_present"] = bool(original_upload_sha256) if upload_check_performed else None
+    metadata["binary_integrity_verified"] = binary_integrity_verified if upload_check_performed else None
+    metadata["page_count_verified"] = (
+        binary_integrity_verified and page_manifest_verified
+        if upload_check_performed
+        else page_manifest_verified
     )
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
         processed = value.get("processed_page_numbers")
@@ -1615,6 +1618,7 @@ def build_lcr_context(
                             item.pop("candidates", None),
                             item.get("source_text"),
                             document_upload_hash_cache.get(evidence_id),
+                            upload_check_performed=True,
                         )
                     if source_name in {"appointment_workspaces", "appointment_workspace_revisions"}:
                         item["payload"] = _safe_appointment_workspace_payload(item.get("payload"))
