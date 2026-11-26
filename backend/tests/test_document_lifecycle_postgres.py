@@ -814,6 +814,57 @@ def test_postgres_corrected_document_version_link_is_explicit_and_non_destructiv
         engine.dispose()
 
 
+
+def test_postgres_exact_duplicate_detection_ignores_deleted_and_other_type_sources():
+    """Exact-byte relationships must not cross evidence types or resurrect deleted sources."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-duplicate-scope-person-{suffix}"
+    caregiver_id = f"doc-duplicate-scope-caregiver-{suffix}"
+    raw = ("same bytes, distinct evidence lifecycle " + suffix).encode("utf-8")
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Duplicate scope fixture"))
+            db.flush()
+            db.add(Caregiver(id=caregiver_id, name="Duplicate scope caregiver", relationship="family", person_id=person_id))
+            db.commit()
+
+        with Session() as db:
+            original = _upload_document_for_lifecycle(db, person_id, caregiver_id, "source.txt", raw)
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            photo = asyncio.run(upload_evidence(
+                _request(person_id, caregiver_id),
+                UploadFile(
+                    filename="same-bytes.txt",
+                    file=io.BytesIO(raw),
+                    headers=Headers({"content-type": "text/plain"}),
+                ),
+                person_id,
+                caregiver_id,
+                "care_photo",
+                "",
+                "not_provided",
+                "0",
+                "{}",
+                "false",
+                db,
+            ))
+            assert photo["duplicate_detected"] is False
+            assert photo["duplicate_of_evidence_id"] is None
+
+            source = db.query(Evidence).filter_by(id=original["evidence_id"], person_id=person_id).one()
+            source.evidence_status = "deleted_by_caregiver"
+            db.commit()
+
+        with Session() as db:
+            replacement = _upload_document_for_lifecycle(db, person_id, caregiver_id, "source-again.txt", raw)
+            assert replacement["duplicate_detected"] is False
+            assert replacement["duplicate_of_evidence_id"] is None
+    finally:
+        engine.dispose()
+
+
 def test_postgres_exact_duplicate_documents_reuse_one_lcr_assertion():
     """Exact duplicate uploads cannot create a second assertion for the same source passage."""
     engine = create_engine(DATABASE_URL, pool_pre_ping=True)
