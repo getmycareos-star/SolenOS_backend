@@ -9301,16 +9301,13 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if replay is not None:
         return replay
 
-    # Serialize retries for the same client turn before creating a conversation
-    # or spending model capacity. Transaction-scoped advisory locks are released
-    # automatically on commit/rollback and avoid a new idempotency table.
-    idempotency_lock_acquired = False
-    if client_turn_id and db.get_bind().dialect.name == "postgresql":
-        db.execute(
-            text("SELECT pg_advisory_xact_lock(hashtext(:client_turn_id))"),
-            {"client_turn_id": client_turn_id},
+    # Durable leases serialize retries across workers without retaining a
+    # PostgreSQL connection during slow retrieval or model inference.
+    if client_turn_id:
+        idempotency_key = hashlib.sha256(client_turn_id.encode("utf-8")).hexdigest()
+        await _acquire_companion_turn_lease(
+            db, request, f"idempotency:{idempotency_key}",
         )
-        idempotency_lock_acquired = True
         replay = _companion_replay_response(
             db,
             client_turn_id=client_turn_id,
@@ -9327,7 +9324,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     if payload.session_id:
         session = db.query(ConversationSession).filter_by(
             id=payload.session_id, person_id=person_id, caregiver_id=caregiver_id, status="active"
-        ).with_for_update().first()
+        ).first()
         if not session:
             raise HTTPException(status_code=404, detail="Active conversation not found for this care record")
     else:
@@ -9335,19 +9332,33 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         db.add(session)
         db.flush()
         db.refresh(session)
-        # Keep legacy no-key sessions durable on model failure. With a client
-        # turn key, retain the transaction so its advisory lock protects the
-        # session creation and response pair as one idempotent operation.
-        if not idempotency_lock_acquired:
-            try:
-                db.commit()
-            except Exception as exc:
-                db.rollback()
-                logger.exception("Companion conversation session failed to persist")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Companion conversation could not be confirmed as persisted. No saved response is confirmed; please retry.",
-                ) from exc
+        try:
+            # The session must survive the read-transaction release below. The
+            # idempotency lease, not an open transaction, protects first-turn retries.
+            db.commit()
+            db.refresh(session)
+        except Exception as exc:
+            db.rollback()
+            logger.exception("Companion conversation session failed to persist")
+            raise HTTPException(
+                status_code=503,
+                detail="Companion conversation could not be confirmed as persisted. No saved response is confirmed; please retry.",
+            ) from exc
+
+    conversation_lock_key = hashlib.sha256(str(session.id).encode("utf-8")).hexdigest()
+    await _acquire_companion_turn_lease(
+        db, request, f"conversation:{conversation_lock_key}",
+    )
+    # Re-read the row after waiting for the prior turn. This prevents stale
+    # ORM state from carrying a conversation that was closed while queued.
+    session = db.query(ConversationSession).filter(
+        ConversationSession.id == str(session.id),
+        ConversationSession.person_id == person_id,
+        ConversationSession.caregiver_id == caregiver_id,
+        ConversationSession.status == "active",
+    ).first()
+    if session is None:
+        raise HTTPException(status_code=409, detail="This conversation is no longer active. Start a new conversation to continue")
 
     lowered = user_text.casefold()
     # Use the shared safety classifier rather than a narrower route-local list.
