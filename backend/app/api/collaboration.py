@@ -11535,6 +11535,11 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "record_status": assertion.assertion_status,
                 "related_evidence_ids": list(assertion.evidence_ids or []),
             })
+    # Every record above was obtained through a person-scoped retrieval or
+    # ORM query. Stamp that authenticated scope explicitly before the matcher
+    # enforces it; missing payload metadata must not erase the query boundary.
+    for source_record in claim_source_records:
+        source_record.setdefault("person_id", str(person_id))
     claim_provenance = build_claim_provenance(
         reply,
         claim_source_records,
