@@ -58,6 +58,7 @@ def persist_companion_candidates(
         existing = db.query(AIOutputLCRProposal).filter(
             AIOutputLCRProposal.person_id == person_id,
             AIOutputLCRProposal.caregiver_id == caregiver_id,
+            AIOutputLCRProposal.proposal_type == "companion_care_observation",
             AIOutputLCRProposal.source_message_id == message_id,
             AIOutputLCRProposal.candidate_index == index,
             AIOutputLCRProposal.proposal_version == 1,
