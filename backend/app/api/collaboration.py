@@ -2,6 +2,7 @@ import asyncio
 import time as _time
 import base64
 import hashlib
+import io
 import json
 import logging
 import math
@@ -18,6 +19,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from pypdf import PdfReader
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -80,6 +82,13 @@ from app.services.qwen_gateway import (
     qwen_runtime_status,
 )
 from app.services.unified_lcr_retrieval import MAX_CONVERSATION_CONTEXT_ITEMS, build_unified_lcr_context
+from app.api.document_lifecycle import (
+    MAX_PDF_PAGES,
+    _blocked_page_numbers,
+    _retryable_page_numbers,
+    _unprocessed_page_numbers,
+    _unreadable_page_numbers,
+)
 from app.services.document_binary_storage import (
     store_document_binary,
     read_document_binary,
@@ -2057,10 +2066,42 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
             if hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest() != intelligence.get("source_text_sha256"):
                 return None
             # Candidate overflow is a review-batching state, not an
-            # incomplete page extraction. Compare the complete persisted
-            # candidate collection only when page processing itself is complete.
-            if intelligence.get("unprocessed_page_numbers") or intelligence.get("unreadable_page_numbers"):
+            # incomplete page extraction. Compare only when the immutable source
+            # and every source page prove that extraction is complete.
+            if (
+                intelligence.get("unprocessed_page_numbers")
+                or intelligence.get("unreadable_page_numbers")
+                or metadata.get("unprocessed_page_numbers")
+                or metadata.get("unreadable_page_numbers")
+                or metadata.get("retryable_page_numbers")
+                or metadata.get("retry_exhausted_page_numbers")
+                or metadata.get("blocked_page_numbers")
+            ):
                 return None
+            if (
+                _unprocessed_page_numbers(source_text)
+                or _retryable_page_numbers(source_text)
+                or _blocked_page_numbers(source_text)
+                or _unreadable_page_numbers(source_text)
+            ):
+                return None
+            mime_type = str(metadata.get("mime_type") or "").split(";", 1)[0].strip().casefold()
+            is_pdf = mime_type == "application/pdf" or str(metadata.get("filename") or "").casefold().endswith(".pdf")
+            if is_pdf:
+                try:
+                    original_page_count = len(PdfReader(
+                        io.BytesIO(read_document_binary(upload)), strict=True
+                    ).pages)
+                except Exception:
+                    return None
+                if not 1 <= original_page_count <= MAX_PDF_PAGES:
+                    return None
+                observed_pages = {
+                    int(match.group(1))
+                    for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+                }
+                if observed_pages != set(range(1, original_page_count + 1)):
+                    return None
             observations = intelligence.get("observations")
             if not isinstance(observations, list):
                 return None
