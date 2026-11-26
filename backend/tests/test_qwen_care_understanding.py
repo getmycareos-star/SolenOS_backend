@@ -74,9 +74,9 @@ def test_care_understanding_discards_unverifiable_fragments_and_links(monkeypatc
     result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
 
     assert result["understanding"]["observations"] == []
-    assert result["understanding"]["possible_links"] == [
-        {"text": "Her daughter called the clinic.", "causation_claimed": False}
-    ]
+    assert result["understanding"]["possible_links"][0]["text"] == "Her daughter called the clinic."
+    assert result["understanding"]["possible_links"][0]["candidate_type"] == "possible_links"
+    assert result["understanding"]["possible_links"][0]["epistemic_status"] == "inferred"
 
 
 def test_care_understanding_rejects_unauthorized_request_before_qwen(monkeypatch):
@@ -341,12 +341,21 @@ def test_care_understanding_preserves_positive_claim_after_unrelated_negated_cla
 
     result = collaboration.qwen_care_understanding(payload, request=None, db=None)
 
-    assert result["understanding"]["observations"] == [{
-        "description": "Mom fell",
-        "approximate_time": "yesterday",
-        "confidence": "unavailable",
-        "raw_fragment": source,
-    }]
+    observation = result["understanding"]["observations"][0]
+    assert observation["description"] == "Mom fell"
+    assert observation["approximate_time"] == "yesterday"
+    assert observation["confidence"] == "unavailable"
+    assert observation["candidate_type"] == "observations"
+    assert observation["source_id"] == "evidence-1"
+    assert observation["source_fragment"] == source
+    assert observation["person"] == {"id": None, "resolution_status": "unresolved"}
+    assert observation["care_recipient_id"] == "person-1"
+    assert observation["epistemic_status"] == "reported"
+    assert observation["review_state"] == "pending"
+    assert observation["candidate_id"] == collaboration.uuid.uuid5(
+        collaboration.uuid.NAMESPACE_URL,
+        f"solenos:qwen-candidate:evidence-1:observations:{source}:Mom fell",
+    ).hex
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
 
@@ -660,9 +669,9 @@ def test_care_understanding_preserves_uncertainty_in_observation_descriptions(mo
 
     result = collaboration.qwen_care_understanding(payload, request=None, db=None)
 
-    assert result["understanding"]["observations"] == [{
-        "description": "Mum may have pneumonia",
-        "approximate_time": None,
-        "confidence": "unavailable",
-        "raw_fragment": source,
-    }]
+    observations = result["understanding"]["observations"]
+    assert len(observations) == 1
+    assert observations[0]["description"] == "Mum may have pneumonia"
+    assert observations[0]["confidence"] == "unavailable"
+    assert observations[0]["epistemic_status"] == "reported"
+    assert observations[0]["review_state"] == "pending"
