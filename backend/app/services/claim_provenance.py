@@ -729,7 +729,8 @@ _MATERIAL_CARE_TERMS = re.compile(
 _MATERIAL_ASSERTION_VERBS = re.compile(
     r"\b(?:is|are|was|were|be|been|being|has|have|had|felt|feels|slept|shows?|indicates?|suggests?|"
     r"implies?|points?\s+to|consistent\s+with|caused\s+by|due\s+to|resulted\s+in|"
-    r"increased|decreased|improved|worsened|stopped|started|missed|takes?|taking|"
+    r"increased|decreased|improved|worsened|changed?|declined?|dropped?|rose|fell|"
+    r"stabilized?|stabilised?|recovered?|recurred?|persisted|returned|stopped|started|missed|takes?|taking|"
     r"needs?|requires?|uses?|reported|reports|observed|documented|scheduled|"
     r"confirmed|completed|occurred|happened|experienced|became|remains?|"
     r"continues?|says?|states?|describes?|mentions?|includes?|contains?)\b",
