@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
 from pypdf import PdfReader
 from pydantic import BaseModel, Field, field_validator
@@ -101,7 +101,7 @@ from app.services.document_binary_storage import (
 
 from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
-from app.services.companion_care_updates import proposal_payload
+from app.services.companion_care_updates import proposal_payload, process_companion_care_update_message
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
 from app.services.evidence_lineage import build_evidence_lineage, load_evidence_lineage_scope
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -1241,6 +1241,25 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
         raise HTTPException(status_code=401, detail="The authenticated session changed during this request")
     request.state.anonymous_session_id = str(session.id)
     return str(session.id)
+
+def _release_companion_turn_leases(db: Session, request: Request) -> None:
+    """Release only this request's leases after its committed turn pair is durable."""
+    leases = getattr(request.state, "companion_turn_leases", [])
+    owner_token = getattr(request.state, "companion_turn_lease_owner", None)
+    if not leases or not owner_token or db.get_bind().dialect.name != "postgresql":
+        return
+    db.rollback()
+    for lock_key in reversed(leases):
+        db.execute(
+            text(
+                "DELETE FROM companion_turn_leases "
+                "WHERE lock_key = :lock_key AND owner_token = :owner_token"
+            ),
+            {"lock_key": lock_key, "owner_token": owner_token},
+        )
+    db.commit()
+    request.state.companion_turn_leases = []
+
 
 def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
     """Require a live bearer capability and explicit conversation access."""
@@ -9153,7 +9172,12 @@ def _lcr_missing_context_instruction(coverage: dict, context_truncated: bool) ->
 
 
 @router.post("/conversation/message")
-async def companion_message(payload: CompanionCreate, request: Request, db: Session = Depends(get_db)):
+async def companion_message(
+    payload: CompanionCreate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
     """Generate a context-grounded Companion response; ordinary chat never writes care facts."""
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(getattr(request, "state", None), "request_id", None)
@@ -12392,14 +12416,29 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
-    # Ordinary conversation remains separate from care facts. A caregiver may
-    # explicitly mark this persisted source message as a care report through the
-    # separate review endpoint; that creates a pending proposal, never an assertion.
+    # Identify possible care updates after the turn pair is committed. The
+    # background worker can create review-only proposals from exact source
+    # quotations; it cannot write a CareAssertion or mutate the LCR.
     care_update_candidates = []
+    if not emergency and not social_only and not identity_question:
+        try:
+            background_tasks.add_task(
+                process_companion_care_update_message,
+                db.get_bind(),
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                conversation_id=str(session.id),
+                message_id=str(user_row.id),
+                source_text=user_text,
+                anonymous_session_id=authenticated_session_id,
+            )
+        except Exception:
+            logger.exception("Companion care-update identification could not be queued")
     # The send endpoint returns the newly persisted turn, not an unbounded
     # replay of the complete thread. Older messages are read through the
     # paginated history endpoint.
     history = [user_row, assistant_row]
+    _release_companion_turn_leases(db, request)
     return {
         "session_id": session.id,
         "person_id": person_id,
