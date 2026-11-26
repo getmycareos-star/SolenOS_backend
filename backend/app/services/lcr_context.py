@@ -1994,38 +1994,54 @@ def build_lcr_context(
             if name in fact_link_table.c
         ]
         if fact_ids and {"person_id", "fact_id", "evidence_id"}.issubset(fact_link_table.c.keys()):
-            valid_links = db.execute(
-                select(*link_columns).select_from(
-                    fact_link_table.join(
-                        evidence_table_for_facts,
-                        and_(
-                            fact_link_table.c.evidence_id == evidence_table_for_facts.c.id,
-                            evidence_table_for_facts.c.person_id == str(person_id),
-                        ),
+            try:
+                with db.begin_nested():
+                    valid_links = db.execute(
+                        select(*link_columns).select_from(
+                            fact_link_table.join(
+                                evidence_table_for_facts,
+                                and_(
+                                    fact_link_table.c.evidence_id == evidence_table_for_facts.c.id,
+                                    evidence_table_for_facts.c.person_id == str(person_id),
+                                ),
+                            )
+                        ).where(
+                            fact_link_table.c.person_id == str(person_id),
+                            fact_link_table.c.fact_id.in_(fact_ids),
+                        ).order_by(
+                            fact_link_table.c.fact_id.asc(),
+                            fact_link_table.c.evidence_id.asc(),
+                        )
+                    ).mappings().all()
+                links_by_fact: dict[str, list[dict[str, Any]]] = {}
+                for link in valid_links:
+                    fact_key = str(link["fact_id"])
+                    links_by_fact.setdefault(fact_key, []).append({
+                        "evidence_id": str(link["evidence_id"]),
+                        "evidence_role": link.get("evidence_role"),
+                        "source_span": link.get("source_span"),
+                        "integrity_status": "verified_person_scoped",
+                    })
+                for item in fact_items:
+                    links = links_by_fact.get(str(item.get("id")), [])
+                    item["evidence_links"] = links
+                    item["evidence_ids"] = [link["evidence_id"] for link in links]
+                    item["evidence_link_status"] = (
+                        "verified_person_scoped_links" if links else "no_verified_linked_evidence"
                     )
-                ).where(
-                    fact_link_table.c.person_id == str(person_id),
-                    fact_link_table.c.fact_id.in_(fact_ids),
-                ).order_by(
-                    fact_link_table.c.fact_id.asc(),
-                    fact_link_table.c.evidence_id.asc(),
-                )
-            ).mappings().all()
-            links_by_fact: dict[str, list[dict[str, Any]]] = {}
-            for link in valid_links:
-                fact_key = str(link["fact_id"])
-                links_by_fact.setdefault(fact_key, []).append({
-                    "evidence_id": str(link["evidence_id"]),
-                    "evidence_role": link.get("evidence_role"),
-                    "source_span": link.get("source_span"),
-                    "integrity_status": "verified_person_scoped",
-                })
-            for item in fact_items:
-                links = links_by_fact.get(str(item.get("id")), [])
-                item["evidence_links"] = links
-                item["evidence_ids"] = [link["evidence_id"] for link in links]
-                item["evidence_link_status"] = (
-                    "verified_person_scoped_links" if links else "no_verified_linked_evidence"
+            except SQLAlchemyError:
+                for item in fact_items:
+                    item["evidence_links"] = []
+                    item["evidence_ids"] = []
+                    item["evidence_link_status"] = "lookup_failed"
+                _mark_source_enrichment_partial(
+                    sources,
+                    "facts",
+                    error_code="fact_evidence_lineage_lookup_failed",
+                    interpretation_limit=(
+                        "The care facts were retrieved, but their linked source evidence could not be checked. "
+                        "Do not treat the displayed facts as having verified source links."
+                    ),
                 )
     elif fact_items:
         for item in fact_items:
