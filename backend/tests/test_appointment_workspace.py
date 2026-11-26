@@ -3660,3 +3660,51 @@ def test_appointment_brief_includes_old_event_when_its_correction_is_recent(clie
     assert events[event_id]["corrections"][0]["corrected_text"] == (
         "The caregiver was unsure whether Mum felt unsteady."
     )
+
+
+def test_appointment_preparation_brief_surfaces_person_scoped_follow_up_without_inventing_a_booking(client):
+    test_client, owner, other = client
+    with TestSessionLocal() as db:
+        db.add(OpenLoopRecord(
+            id="appointment-follow-up-without-booking",
+            person_id=owner["person"]["id"],
+            caregiver_id=owner["caregiver"]["id"],
+            loop_type="appointment_follow_up",
+            title="Confirm the clinic follow-up date",
+            description="The care record says a follow-up is needed, but no appointment date is recorded.",
+            status="open",
+            source_type="appointment_workspace_follow_up",
+            source_id="appointment-workspace:follow-up",
+            source_fingerprint="appointment-follow-up-without-booking-fingerprint",
+            evidence=[{
+                "record_type": "appointment_workspace",
+                "record_id": "appointment-workspace:follow-up",
+                "appointment_id": "not-a-booked-appointment",
+            }],
+            priority="high",
+            priority_reasons=["A recorded appointment follow-up remains open."],
+        ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {owner['access_token']}"}
+    response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["next_appointment"] is None
+    assert body["appointment_context_status"]["code"] == "follow_up_needed"
+    follow_ups = body["appointment_related_open_loops"]
+    assert len(follow_ups) == 1
+    assert follow_ups[0]["source_id"] == "appointment-workspace:follow-up"
+    assert follow_ups[0]["title"] == "Confirm the clinic follow-up date"
+
+    other_headers = {"Authorization": f"Bearer {other['access_token']}"}
+    other_response = test_client.get(
+        "/api/v1/appointment-workspaces/preparation-brief",
+        headers=other_headers,
+    )
+    assert other_response.status_code == 200, other_response.text
+    assert other_response.json()["appointment_related_open_loops"] == []
+    assert "Confirm the clinic follow-up date" not in other_response.text
