@@ -2140,6 +2140,21 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         raise HTTPException(status_code=404, detail="Document not found in this care record")
     if evidence.evidence_status == "deleted_by_caregiver":
         return {"evidence_id": evidence_id, "deleted": True, "idempotent_replay": True}
+    clearer_page_copy = next((
+        candidate
+        for candidate in db.query(EvidenceModel).filter(
+            EvidenceModel.person_id == person_id,
+            EvidenceModel.type == "document",
+            EvidenceModel.id != evidence_id,
+            EvidenceModel.evidence_status != "deleted_by_caregiver",
+        ).all()
+        if _document_metadata(candidate).get("capture", {}).get("source_evidence_id") == evidence_id
+    ), None)
+    if clearer_page_copy is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This document is the source for clearer page copies. Remove or relink those copies before deleting the original.",
+        )
     if (evidence.source_text or "").strip():
         raise HTTPException(
             status_code=409,
