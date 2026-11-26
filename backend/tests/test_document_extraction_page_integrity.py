@@ -41,6 +41,17 @@ def test_sparse_page_markers_are_not_reported_as_a_complete_document():
 
 
 
+
+def test_long_document_text_within_expanded_capacity_is_preserved():
+    from app.api.document_lifecycle import MAX_EXTRACTED_CHARS, _bounded_extraction
+
+    long_text = "clinical detail " * 10_000
+    assert 100_000 < len(long_text) <= MAX_EXTRACTED_CHARS
+    persisted, method = _bounded_extraction(long_text, "server_pdf_text")
+    assert persisted == long_text
+    assert method == "server_pdf_text"
+
+
 def test_native_pdf_retry_preserves_saved_pages_and_extracts_only_missing_pages(monkeypatch):
     from types import SimpleNamespace
 
