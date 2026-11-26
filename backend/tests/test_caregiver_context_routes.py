@@ -477,6 +477,13 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
         headers=headers,
     )
     assert current_care.status_code == 200, current_care.text
+    current_body = current_care.json()
+    assert current_body["retrieval_status"] in {"available", "empty", "partial", "failed"}
+    assert current_body["evidence_authorization_status"] in {"checked", "failed", "not_needed"}
+    assert current_body["evidence_lineage_status"] in {
+        "not_assessed", "assessed_bounded_subset", "unavailable_schema", "failed",
+    }
+    assert isinstance(current_body["source_coverage"], dict)
     assert any(
         item.get("id") == observation.json()["id"]
         and item.get("source_collection") == "caregiver_observations"
