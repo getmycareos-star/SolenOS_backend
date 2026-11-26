@@ -5619,7 +5619,13 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 description = bounded_text(item.get("description"), 500)
                 valid_time, approximate_time = optional_text(item.get("approximate_time"), 120)
                 confidence = item.get("confidence")
-                if description is None or not source_bound(description, fragment) or not valid_time or (approximate_time is not None and not source_bound(approximate_time, fragment)) or confidence not in {"low", "medium", "high"}:
+                if (
+                    description is None
+                    or not source_bound(description, fragment)
+                    or not valid_time
+                    or (approximate_time is not None and not source_bound(approximate_time, fragment))
+                    or confidence not in {"low", "medium", "high"}
+                ):
                     continue
                 result[key].append({
                     "description": description,
@@ -5631,7 +5637,14 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 description = bounded_text(item.get("description"), 500)
                 valid_time, event_time = optional_text(item.get("time"), 120)
                 participants = bounded_text_list(item.get("participants"))
-                if description is None or not source_bound(description, fragment) or not valid_time or (event_time is not None and not source_bound(event_time, fragment)) or participants is None or any(not source_bound(name, fragment) for name in participants):
+                if (
+                    description is None
+                    or not source_bound(description, fragment)
+                    or not valid_time
+                    or (event_time is not None and not source_bound(event_time, fragment))
+                    or participants is None
+                    or any(not source_bound(name, fragment) for name in participants)
+                ):
                     continue
                 result[key].append({
                     "description": description,
@@ -5646,7 +5659,12 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 status = item.get("status")
                 reason_unknown = item.get("reason_unknown")
                 if (
-                    description is None or not source_bound(description, fragment) or who is None or any(not source_bound(name, fragment) for name in who) or not valid_why or (why is not None and not source_bound(why, fragment))
+                    description is None
+                    or not source_bound(description, fragment)
+                    or who is None
+                    or any(not source_bound(name, fragment) for name in who)
+                    or not valid_why
+                    or (why is not None and not source_bound(why, fragment))
                     or not isinstance(reason_unknown, bool)
                     or status not in {"active", "completed", "changed", "reversed", "uncertain", "needs_review", "pending"}
                 ):
