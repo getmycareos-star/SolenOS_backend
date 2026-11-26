@@ -441,7 +441,7 @@ def test_care_understanding_does_not_reverse_negation_in_possible_links(monkeypa
 
 def test_care_understanding_does_not_accept_model_status_without_same_clause_source_cue(monkeypatch):
     _allow(monkeypatch)
-    source = "We plan to call the clinic tomorrow. The follow-up call was completed today."
+    source = "We plan to call the clinic tomorrow. The follow-up call might happen later."
     model_output = {
         "observations": [],
         "events": [],
@@ -454,7 +454,7 @@ def test_care_understanding_does_not_accept_model_status_without_same_clause_sou
             "raw_fragment": source,
         }],
         "outcomes": [{
-            "description": "The follow-up call",
+            "description": "The follow-up call might happen later",
             "status": "resolved",
             "raw_fragment": source,
         }],
