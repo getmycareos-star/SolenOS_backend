@@ -16,7 +16,7 @@ from app.models.appointment_workspace import AppointmentWorkspaceRecord, Appoint
 from app.models.caregiver_intelligence import CaregiverHandoff, CaregiverProfile
 from app.core.caregiver_enums import HandoffAcceptanceStatus
 from app.models.care_continuity import CareActionOutcome, CareAssertion, CareRecordRelationship, CareStateRevision, EvidenceObservation
-from app.models.collaboration import ConversationMessage, ConversationSession
+from app.models.collaboration import ConversationMessage, ConversationSession, EvidenceUpload
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.services.lcr_context import _document_extraction_metadata, _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
@@ -709,12 +709,26 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
                 source_text="Sleep claim awaiting review", evidence_ids=[], assertion_status="reported",
                 observed_at=now - timedelta(days=1), created_by_caregiver_id=None,
             )
+            document_evidence = Evidence(
+                id="document-evidence", person_id="person-a", type="document",
+                source_text="Uploaded clinic letter", uploaded_by_caregiver_id="caregiver-a",
+            )
+            failed_document_evidence = Evidence(
+                id="failed-document-evidence", person_id="person-a", type="document",
+                source_text="Uploaded but unreadable clinic letter", uploaded_by_caregiver_id="caregiver-a",
+            )
+            document_source_text = "Clinic letter: sleep disturbance was reported by the family."
+            document_original_bytes = b"original clinic letter"
+            document_binary_sha256 = hashlib.sha256(document_original_bytes).hexdigest()
             extraction = CaptureAnalysis(
                 id="document-extraction", person_id="person-a", caregiver_id="caregiver-a",
-                source_event_id=None, source_evidence_id="document-evidence", source_text=(
-                    "Clinic letter: sleep disturbance was reported by the family."
-                ), extraction_status="available", candidates={
-                    "kind": "document_extraction_v1", "filename": "clinic-letter.txt",
+                source_event_id=None, source_evidence_id="document-evidence", source_text=document_source_text,
+                extraction_status="available", candidates={
+                    "kind": "document_extraction_v1",
+                    "filename": "clinic-letter.txt",
+                    "mime_type": "text/plain",
+                    "binary_sha256": document_binary_sha256,
+                    "source_text_sha256": hashlib.sha256(document_source_text.strip().encode("utf-8")).hexdigest(),
                     "extraction_method": "server_text",
                 }, review_history=[],
             )
@@ -755,11 +769,20 @@ def test_hybrid_retrieval_includes_all_four_persisted_source_pathways():
             )
             db.add_all([
                 event, *longitudinal_events, accepted, pending, rejected, superseded, withdrawn, retracted,
-                caregiver_reviewed, extraction, other_caregiver_extraction,
-                failed_extraction, other_person_event, other_person_assertion,
+                caregiver_reviewed, document_evidence, failed_document_evidence,
+                extraction, other_caregiver_extraction, failed_extraction,
+                other_person_event, other_person_assertion,
                 other_person_extraction, prior_session, other_caregiver_session, other_person_session,
             ])
             db.flush()
+            db.add(EvidenceUpload(
+                evidence_id="document-evidence",
+                filename="clinic-letter.txt",
+                mime_type="text/plain",
+                content=document_original_bytes,
+                size_bytes=len(document_original_bytes),
+                sha256=document_binary_sha256,
+            ))
             db.add_all([
                 ConversationMessage(
                     id="prior-session-message", session_id="prior-session", role="user",
