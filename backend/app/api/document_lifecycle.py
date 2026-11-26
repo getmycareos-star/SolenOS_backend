@@ -823,6 +823,50 @@ def _response(analysis: CaptureAnalysis) -> dict:
         and not unprocessed_pages
         and not unreadable_pages
     )
+    # Expose one durable, caregiver-readable outcome per source page. The
+    # existing number arrays remain for API compatibility; this projection
+    # makes status precedence explicit for clients and prevents a retryable
+    # failure from being displayed as an ordinary unprocessed page.
+    retryable_pages = {
+        page for page in _retryable_page_numbers(analysis.source_text or "")
+        if page not in set(details.get("retry_exhausted_page_numbers") or [])
+    }
+    retry_exhausted_pages = {
+        page for page in (details.get("retry_exhausted_page_numbers") or [])
+        if isinstance(page, int) and not isinstance(page, bool) and page > 0
+    }
+    blocked_pages = set(_blocked_page_numbers(analysis.source_text or ""))
+    if is_paginated_pdf:
+        source_page_numbers = set(range(1, page_count + 1))
+    else:
+        # A clearer replacement scan can retain its original packet page
+        # number even though the uploaded replacement file is a single image.
+        source_page_numbers = observed_pages or {1}
+    source_page_numbers |= (
+        set(unprocessed_pages) | set(unreadable_pages) | retryable_pages
+        | retry_exhausted_pages | blocked_pages
+    )
+    retry_attempts = details.get("page_retry_attempts")
+    retry_attempts = retry_attempts if isinstance(retry_attempts, dict) else {}
+    page_states = []
+    for source_page_number in sorted(source_page_numbers):
+        if source_page_number in blocked_pages:
+            page_status = "blocked"
+        elif source_page_number in unreadable_pages:
+            page_status = "unreadable"
+        elif source_page_number in retry_exhausted_pages:
+            page_status = "retry_exhausted"
+        elif source_page_number in retryable_pages:
+            page_status = "retryable"
+        elif source_page_number in unprocessed_pages:
+            page_status = "unprocessed"
+        else:
+            page_status = "processed"
+        page_states.append({
+            "source_page_number": source_page_number,
+            "status": page_status,
+            "attempt_count": int(retry_attempts.get(str(source_page_number)) or 1),
+        })
     # Match the document-intelligence response contract: candidates from an
     # earlier successful pass are hidden while the current OCR is incomplete.
     observations = stored_observations if extraction_complete else []
@@ -832,6 +876,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
         "page_count": page_count,
+        "page_states": page_states,
         "processed_page_numbers": processed_pages,
         # The persisted extraction text is authoritative for page-level
         # readability. Recompute these lists on every response so a successful
