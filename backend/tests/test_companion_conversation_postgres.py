@@ -1086,6 +1086,7 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
         grant = db.query(CaregiverAccessGrant).filter_by(
             person_id=person_id, caregiver_id=caregiver_id,
         ).one()
+        grant.can_manage_members = False
         grant.permissions = [
             permission for permission in (grant.permissions or [])
             if permission != "view_conversations"
@@ -1263,6 +1264,7 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
         grant = db.query(CaregiverAccessGrant).filter_by(
             person_id=person_id, caregiver_id=caregiver_id,
         ).one()
+        grant.can_manage_members = False
         grant.permissions = [
             permission for permission in (grant.permissions or [])
             if permission != "view_lcr"
