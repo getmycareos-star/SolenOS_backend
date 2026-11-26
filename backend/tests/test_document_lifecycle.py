@@ -268,6 +268,9 @@ def test_scanned_pdf_processes_more_than_25_pages_and_reports_partial_results(cl
     assert payload["unreadable_page_numbers"] == []
     assert payload["unprocessed_page_numbers"] == [2]
     assert payload["processed_page_numbers"] == [1, *range(3, 31)]
+    assert payload["page_states"][1] == {
+        "source_page_number": 2, "status": "retryable", "attempt_count": 1
+    }
     assert calls["count"] == 30
     retrieved = test_client.get(f"/api/v1/documents/analyses/{payload['analysis_id']}", headers=auth)
     assert retrieved.status_code == 200, retrieved.text
@@ -303,6 +306,12 @@ def test_pdf_trailing_pages_missing_from_extraction_are_not_reported_complete(cl
     assert payload["page_count"] == 4
     assert payload["processed_page_numbers"] == [1, 2]
     assert payload["unprocessed_page_numbers"] == [3, 4]
+    assert payload["page_states"] == [
+        {"source_page_number": 1, "status": "processed", "attempt_count": 1},
+        {"source_page_number": 2, "status": "processed", "attempt_count": 1},
+        {"source_page_number": 3, "status": "unprocessed", "attempt_count": 1},
+        {"source_page_number": 4, "status": "unprocessed", "attempt_count": 1},
+    ]
     assert payload["extraction_status"] == "partial"
     assert payload["interpretation_blocked"] is True
 
