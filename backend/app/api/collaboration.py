@@ -12671,6 +12671,13 @@ def conversation_history(
     """
     person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
+    can_view_lcr = True
+    try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        can_view_lcr = False
     session = db.query(ConversationSession).filter_by(
         id=session_id, person_id=person_id, caregiver_id=caregiver_id,
     ).first()
@@ -12698,6 +12705,33 @@ def conversation_history(
     rows = list(reversed(page_descending))
 
     def serialize_history_message(row: ConversationMessage) -> dict:
+        # Conversation permission does not preserve access to historical
+        # assistant answers that were generated from the Living Care Record.
+        # Keep caregiver-authored messages visible, but redact assistant output
+        # and every linked evidence reference when LCR access has been removed.
+        if row.role == "assistant" and not can_view_lcr:
+            return {
+                "id": row.id,
+                "source_message_id": None,
+                "role": "assistant",
+                "text": "This earlier response is unavailable because care-record access has changed.",
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "guard_verdict": "access_restricted",
+                "evidence_ids": [],
+                "source_record_refs": [],
+                "source_event_ids": [],
+                "source_evidence_ids": [],
+                "source_appointment_ids": [],
+                "source_assertion_ids": [],
+                "source_lcr_context_ids": [],
+                "source_freshness_assessment_ids": [],
+                "freshness_source_status": "restricted",
+                "lcr_context_coverage": {"status": "restricted"},
+                "ai_generated": None,
+                "response_mode": "access_restricted",
+                "safety_note": None,
+                "claim_provenance": {"coverage": "restricted", "claims": []},
+            }
         metadata = _stored_response_metadata(row)
         return {
             "id": row.id,
