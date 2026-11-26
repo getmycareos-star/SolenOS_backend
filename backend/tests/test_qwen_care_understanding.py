@@ -226,7 +226,7 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
         {
             "description": "Mom fell",
             "approximate_time": "yesterday",
-            "confidence": "medium",
+            "confidence": "unavailable",
             "raw_fragment": "Mom fell yesterday",
         }
     ]
@@ -347,7 +347,7 @@ def test_care_understanding_preserves_positive_claim_after_unrelated_negated_cla
     assert result["understanding"]["observations"] == [{
         "description": "Mom fell",
         "approximate_time": "yesterday",
-        "confidence": "high",
+        "confidence": "unavailable",
         "raw_fragment": source,
     }]
     assert result["written_to_lcr"] is False
