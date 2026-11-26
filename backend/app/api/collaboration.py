@@ -85,6 +85,7 @@ from app.services.unified_lcr_retrieval import MAX_CONVERSATION_CONTEXT_ITEMS, b
 from app.api.document_lifecycle import (
     MAX_PDF_PAGES,
     _blocked_page_numbers,
+    _page_parsing_text,
     _retryable_page_numbers,
     _unprocessed_page_numbers,
     _unreadable_page_numbers,
@@ -2105,7 +2106,32 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
             observations = intelligence.get("observations")
             if not isinstance(observations, list):
                 return None
-            return [item for item in observations if isinstance(item, dict)]
+            source_page_text = _page_parsing_text(source_text)
+            page_markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_page_text))
+            for item in observations:
+                if not isinstance(item, dict):
+                    return None
+                quote = item.get("source_quote")
+                page_number = item.get("page_number")
+                if (
+                    not isinstance(quote, str)
+                    or not quote.strip()
+                    or isinstance(page_number, bool)
+                    or not isinstance(page_number, int)
+                    or page_number < 1
+                ):
+                    return None
+                if page_markers:
+                    page_match = next((marker for marker in page_markers if int(marker.group(1)) == page_number), None)
+                    if page_match is None:
+                        return None
+                    marker_index = page_markers.index(page_match)
+                    page_end = page_markers[marker_index + 1].start() if marker_index + 1 < len(page_markers) else len(source_page_text)
+                    if quote not in source_page_text[page_match.end():page_end]:
+                        return None
+                elif page_number != 1 or quote not in source_page_text:
+                    return None
+            return observations
         return None
 
     previous_items = latest_candidates(predecessor_id)
