@@ -1048,6 +1048,38 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         )
         db.add(evidence)
         db.flush()
+    linked_evidence_ids = [evidence.id] if evidence is not None else []
+    if event_type in {"structured_daily_capture", "daily_care_entry"}:
+        medications = detail.get("medications")
+        if isinstance(medications, list):
+            for medication in medications:
+                if not isinstance(medication, dict):
+                    continue
+                raw_photo_id = medication.get("photo_evidence_id")
+                if raw_photo_id in (None, ""):
+                    continue
+                try:
+                    photo_evidence_id = str(uuid.UUID(str(raw_photo_id)))
+                except (TypeError, ValueError, AttributeError) as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="A medicine photo reference is invalid. Upload the photo again before saving this entry.",
+                    ) from exc
+                photo_evidence = db.query(EvidenceModel).filter(
+                    EvidenceModel.id == photo_evidence_id,
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.type == "medication_photo",
+                    (EvidenceModel.evidence_status.is_(None))
+                    | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+                ).first()
+                if photo_evidence is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="A medicine photo must be saved to this care record before adding the medication entry.",
+                    )
+                linked_evidence_ids.append(photo_evidence.id)
+    linked_evidence_ids = list(dict.fromkeys(linked_evidence_ids))
+
     event = CareEventModel(
         person_id=person_id,
         event_type=event_type,
@@ -1056,7 +1088,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         occurred_at_timezone=event_timezone,
         title=title,
         description=json.dumps(detail, ensure_ascii=False, default=str),
-        evidence_ids=[evidence.id] if evidence is not None else [],
+        evidence_ids=linked_evidence_ids,
         created_by_caregiver_id=caregiver_id,
         time_provenance=event_time_provenance,
         tags=["daily_capture"],
@@ -1064,7 +1096,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
     db.add(event)
     db.flush()
     if evidence is not None:
-        event.evidence_ids = [evidence.id]
+        event.evidence_ids = linked_evidence_ids
     db.commit()
     db.refresh(event)
     # The event is the primary user-requested write. Learning telemetry is
