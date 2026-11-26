@@ -390,6 +390,79 @@ def test_query_retrieval_scans_beyond_old_250_candidate_ceiling_and_finds_older_
         engine.dispose()
 
 
+
+def test_completed_correction_without_relationship_makes_event_currentness_unknown():
+    _load_source_schema.cache_clear()
+    engine = create_engine("sqlite:///:memory:")
+    events = _care_events_schema(engine)
+    metadata = events.metadata
+    corrections = Table(
+        "corrections", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("target_type", String),
+        Column("target_id", String),
+        Column("original_text", String),
+        Column("corrected_text", String),
+        Column("reason", String),
+        Column("created_at", DateTime),
+        Column("processing_status", String),
+    )
+    relationships = Table(
+        "care_record_relationships", metadata,
+        Column("id", String, primary_key=True),
+        Column("person_id", String, nullable=False),
+        Column("source_type", String),
+        Column("source_id", String),
+        Column("relationship_type", String),
+        Column("target_type", String),
+        Column("target_id", String),
+        Column("provenance", String),
+        Column("created_at", DateTime),
+    )
+    metadata.create_all(engine)
+    now = datetime(2026, 11, 26, 12, 0, tzinfo=timezone.utc).replace(tzinfo=None)
+    try:
+        with engine.begin() as connection:
+            connection.execute(events.insert(), [{
+                "id": "event-with-unlinked-correction",
+                "person_id": "person-a",
+                "event_type": "observation",
+                "status": "recorded",
+                "occurred_at": now,
+                "recorded_at": now,
+                "created_at": now,
+                "title": "Medication report",
+                "description": "Caregiver reported the afternoon dose was missed.",
+            }])
+            connection.execute(corrections.insert(), [{
+                "id": "completed-correction-without-link",
+                "person_id": "person-a",
+                "target_type": "care_event",
+                "target_id": "event-with-unlinked-correction",
+                "original_text": "The afternoon dose was missed.",
+                "corrected_text": "The afternoon dose was taken.",
+                "reason": "Caregiver corrected the earlier report.",
+                "created_at": now + timedelta(minutes=1),
+                "processing_status": "completed",
+            }])
+            # Deliberately omit the required care_record_relationships row.
+
+        with Session(engine) as db:
+            context = build_lcr_context(db, "person-a", limit_per_source=10)
+
+        event_source = context["sources"]["events"]
+        event = next(item for item in event_source["items"] if item["id"] == "event-with-unlinked-correction")
+        assert event["correction_lineage_status"] == "failed"
+        assert event["information_status"] == "event_currentness_unknown"
+        assert event_source["status"] == "partial"
+        assert event_source["error_code"] == "event_correction_lineage_inconsistent"
+        assert "cannot be treated as current" in event_source["interpretation_limit"]
+    finally:
+        _load_source_schema.cache_clear()
+        engine.dispose()
+
+
 def _open_questions_schema(engine):
     metadata = MetaData()
     questions = Table(
