@@ -333,12 +333,12 @@ def test_interrupted_pdf_retry_resumes_only_pages_missing_from_saved_extraction(
     def controlled_extract(upload, content, evidence, *, retry_only_pages=None, previous_source_text=None):
         calls.append((set(retry_only_pages) if retry_only_pages is not None else None, previous_source_text))
         if retry_only_pages is None:
-            return "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.", "test_pdf_text"
+            return "[Page 1]\nFirst page.\n[Page 2]\nSecond page.", "test_pdf_text"
         assert retry_only_pages == {3, 4}
         assert "[Page 1]" in (previous_source_text or "")
         return (
-            "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.\\n"
-            "[Page 3]\\nThird page.\\n[Page 4]\\nFourth page.",
+            "[Page 1]\nFirst page.\n[Page 2]\nSecond page.\n"
+            "[Page 3]\nThird page.\n[Page 4]\nFourth page.",
             "test_pdf_text",
         )
 
