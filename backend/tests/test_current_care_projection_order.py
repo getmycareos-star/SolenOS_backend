@@ -44,7 +44,7 @@ def test_current_care_projection_uses_record_time_only_when_event_time_is_missin
         key=_current_care_projection_sort_key,
     )
 
-    assert [item["id"] for item in ordered] == ["no-event-time", "known-event-time"]
+    assert [item["id"] for item in ordered] == ["missing-event-time", "known-event-time"]
 
 
 def test_current_care_projection_keeps_priority_ahead_of_recency_and_breaks_ties_stably():
