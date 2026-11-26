@@ -1472,6 +1472,7 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
 
     return {
         "person_scope_verified": True,
+        "person_id": person_id,
         "snapshot_at": now.isoformat(),
         "window_days": window_days,
         "read_only": True,
