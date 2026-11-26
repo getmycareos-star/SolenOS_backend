@@ -320,21 +320,21 @@ jobs:
         run: |
           python - <<'PY'
           import os
-          import psycopg2
+          from sqlalchemy import create_engine, text
 
-          conn = psycopg2.connect(os.environ["DATABASE_URL"])
-          with conn.cursor() as cur:
-              cur.execute("""
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              columns = set(connection.execute(text("""
                   SELECT column_name FROM information_schema.columns
                   WHERE table_schema = 'public' AND table_name = 'caregivers'
-              """)
-              columns = {row[0] for row in cur.fetchall()}
+              """)).scalars())
               required = {"id", "email", "name", "relationship", "person_id", "timezone"}
               missing = required - columns
               if missing:
                   raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
-              cur.execute("SELECT version_num FROM alembic_version")
-              revision = cur.fetchone()[0]
+              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              count = connection.execute(text("SELECT COUNT(*) FROM caregivers")).scalar_one()
+          engine.dispose()
           # Derive the expected head from the checked-out migration graph instead
           # of freezing an obsolete revision literal in CI. ScriptDirectory also
           # fails if the migration graph has multiple heads.
@@ -347,12 +347,8 @@ jobs:
               raise SystemExit(
                   f"database migration head {revision!r} does not match code head {expected_revision!r}"
               )
-          with conn.cursor() as cur:
-              cur.execute("SELECT COUNT(*) FROM caregivers")
-              count = cur.fetchone()[0]
-              if count != 0:
-                  raise SystemExit(f"expected empty fixture table, got {count} rows")
-          conn.close()
+          if count != 0:
+              raise SystemExit(f"expected empty fixture table, got {count} rows")
           print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
 
