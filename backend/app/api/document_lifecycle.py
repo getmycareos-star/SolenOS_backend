@@ -1063,7 +1063,23 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         _verify_persisted_extraction(row, upload, db, content)
         exhausted_before_retry = {int(page) for page in (metadata.get("retry_exhausted_page_numbers") or [])}
         failed_pages = set(_retryable_page_numbers(row.source_text or "")) - exhausted_before_retry
-        if row.extraction_status == "partial" and failed_pages:
+        is_paginated_pdf = (
+            (upload.mime_type or "").split(";", 1)[0].strip().casefold() == "application/pdf"
+            or (upload.filename or "").casefold().endswith(".pdf")
+        )
+        if is_paginated_pdf:
+            try:
+                original_page_count = len(PdfReader(io.BytesIO(content), strict=True).pages)
+            except Exception as exc:
+                raise HTTPException(status_code=422, detail="The saved PDF page count could not be verified against the original file.") from exc
+            if original_page_count < 1 or original_page_count > MAX_PDF_PAGES:
+                raise HTTPException(status_code=422, detail="The saved PDF page count is outside the supported range")
+            observed_pages = {
+                int(match.group(1))
+                for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", row.source_text or "")
+            }
+            failed_pages.update(set(range(1, original_page_count + 1)) - observed_pages)
+        if failed_pages:
             # Retry only pages whose processing did not complete. Preserve
             # successful and successfully-processed-but-unreadable page results.
             # Always derive the retry from the immutable original bytes.
