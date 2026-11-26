@@ -844,7 +844,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
                 "caregiver_id": caregiver_id,
                 "ingestion_key": "daily-capture-medication-photo-001",
             },
-            files={"file": ("medication.png", b"\\x89PNG\\r\\n\\x1a\\nmedication-photo", "image/png")},
+            files={"file": ("medication.png", b"\x89PNG\r\n\x1a\nmedication-photo", "image/png")},
         )
         assert photo_upload.status_code == 201, photo_upload.text
         photo_evidence_id = photo_upload.json()["evidence_id"]
