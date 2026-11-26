@@ -317,6 +317,52 @@ def test_pdf_trailing_pages_missing_from_extraction_are_not_reported_complete(cl
 
 
 
+def test_interrupted_pdf_retry_resumes_only_pages_missing_from_saved_extraction(client, monkeypatch):
+    from app.api import document_lifecycle
+
+    writer = __import__("pypdf").PdfWriter()
+    for _ in range(4):
+        writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+
+    test_client, session = client
+    evidence_id = persist_document(session, output.getvalue(), "resume-four-page.pdf", "application/pdf")
+    calls = []
+
+    def controlled_extract(upload, content, evidence, *, retry_only_pages=None, previous_source_text=None):
+        calls.append((set(retry_only_pages) if retry_only_pages is not None else None, previous_source_text))
+        if retry_only_pages is None:
+            return "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.", "test_pdf_text"
+        assert retry_only_pages == {3, 4}
+        assert "[Page 1]" in (previous_source_text or "")
+        return (
+            "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.\\n"
+            "[Page 3]\\nThird page.\\n[Page 4]\\nFourth page.",
+            "test_pdf_text",
+        )
+
+    monkeypatch.setattr(document_lifecycle, "_extract", controlled_extract)
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    first = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert first.status_code == 201, first.text
+    assert first.json()["unprocessed_page_numbers"] == [3, 4]
+
+    resumed = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+    assert resumed.status_code == 201, resumed.text
+    assert calls[1][0] == {3, 4}
+    assert resumed.json()["extraction_status"] == "available"
+    assert resumed.json()["processed_page_numbers"] == [1, 2, 3, 4]
+    assert resumed.json()["unprocessed_page_numbers"] == []
+    assert resumed.json()["page_states"] == [
+        {"source_page_number": 1, "status": "processed", "attempt_count": 1},
+        {"source_page_number": 2, "status": "processed", "attempt_count": 1},
+        {"source_page_number": 3, "status": "processed", "attempt_count": 2},
+        {"source_page_number": 4, "status": "processed", "attempt_count": 2},
+    ]
+
+
+
 def test_document_candidate_source_page_is_inferred_only_when_unambiguous():
     from app.api.document_intelligence import _resolve_candidate_source_page
 
