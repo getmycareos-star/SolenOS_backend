@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.api.collaboration import _companion_scope
 from app.core.database import get_db
@@ -316,6 +317,19 @@ def create_companion_care_update_from_message(
     try:
         db.commit()
         db.refresh(proposal)
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.query(AIOutputLCRProposal).filter(
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+            AIOutputLCRProposal.proposal_type == "companion_care_observation",
+            AIOutputLCRProposal.source_message_id == source_message.id,
+            AIOutputLCRProposal.candidate_index == 0,
+            AIOutputLCRProposal.proposal_version == 1,
+        ).first()
+        if existing is not None:
+            return {"proposal": _proposal_json(existing), "idempotent_replay": True}
+        raise HTTPException(status_code=503, detail="The care report could not be saved for review. Please try again.") from exc
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=503, detail="The care report could not be saved for review. Please try again.") from exc
