@@ -355,3 +355,53 @@ def test_capture_candidates_keep_positive_claim_after_unrelated_negated_clause(m
 
     assert len(result["observations"]) == 1
     assert result["observations"][0]["observation"] == "Mum fell yesterday"
+
+def test_capture_candidates_reject_claim_that_drops_source_uncertainty(monkeypatch):
+    source = "The caregiver said Mum may have pneumonia."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum has pneumonia",
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-uncertain-condition",
+        source_evidence_id="evidence-uncertain-condition",
+    )
+
+    assert result["observations"] == []
+
+
+def test_capture_candidates_preserve_source_uncertainty_wording(monkeypatch):
+    source = "The caregiver said Mum may have pneumonia."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum may have pneumonia",
+            "source_quote": source,
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-uncertain-condition-preserved",
+        source_evidence_id="evidence-uncertain-condition-preserved",
+    )
+
+    assert len(result["observations"]) == 1
+    assert "may have" in result["observations"][0]["observation"]
