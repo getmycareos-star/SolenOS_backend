@@ -5761,7 +5761,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     system = (
         "SOLENOS_WORKFLOW_ID: care_understanding. "
         "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
-        "Match these exact structures: observations [{description,approximate_time:null|string,raw_fragment}]. Confidence is an uncalibrated model hint only; the backend will expose it as unavailable, never as evidence of correctness. "
+        "Match these exact structures: observations [{description,approximate_time:null|string,raw_fragment}]. Do not include confidence scores. "
         "events [{description,time:null|string,participants:string[],raw_fragment}]; "
         "decisions [{description,who:string[],why:null|string,reason_unknown:boolean,status:active|completed|changed|reversed|uncertain|needs_review|pending,raw_fragment}]; "
         "outcomes [{description,status:observed|pending|uncertain|ongoing|resolved|changed,raw_fragment}]; "
@@ -5892,6 +5892,8 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         if claim_clause is None:
             return False
         if _negation_pattern.search(claim_clause) and not _negation_pattern.search(value):
+            return False
+        if _uncertainty_pattern.search(claim_clause) and not _uncertainty_pattern.search(value):
             return False
         return True
 
