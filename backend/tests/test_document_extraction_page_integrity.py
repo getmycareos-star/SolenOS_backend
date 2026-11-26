@@ -1,15 +1,28 @@
 """Unit coverage for page-number integrity in document extraction metadata."""
 
+import hashlib
+import io
 from types import SimpleNamespace
+
+from pypdf import PdfWriter
 
 from app.api.document_lifecycle import _extraction_metadata
 
 
-def _upload():
+def _upload(page_count: int = 3):
+    writer = PdfWriter()
+    for _ in range(page_count):
+        writer.add_blank_page(width=72, height=72)
+    output = io.BytesIO()
+    writer.write(output)
+    content = output.getvalue()
     return SimpleNamespace(
         filename="care-plan.pdf",
         mime_type="application/pdf",
-        sha256="a" * 64,
+        content=content,
+        size_bytes=len(content),
+        sha256=hashlib.sha256(content).hexdigest(),
+        storage_backend="postgres",
     )
 
 
@@ -44,7 +57,7 @@ def test_page_retry_failure_is_not_counted_as_processed():
 
 def test_contiguous_document_pages_remain_complete():
     status, metadata = _extraction_metadata(
-        _upload(),
+        _upload(2),
         "[Page 1 OCR]\nMedication review scheduled.\n"
         "[Page 2 OCR]\nFollow-up requested.",
         "pdf_text",
@@ -91,7 +104,7 @@ def test_document_interpretation_is_blocked_when_persisted_page_metadata_has_a_g
     )
 
     try:
-        _require_complete_extraction(analysis)
+        _require_complete_extraction(analysis, _upload(3))
     except HTTPException as exc:
         assert exc.status_code == 409
         assert "2" in exc.detail
@@ -142,7 +155,7 @@ def test_document_review_response_reports_missing_page_and_hides_old_candidates(
         },
     )
 
-    response = _response(analysis)
+    response = _response(analysis, _upload(3))
 
     assert response["page_count"] == 3
     assert response["extraction_processed_page_numbers"] == [1, 3]
@@ -169,7 +182,7 @@ def test_document_review_response_uses_persisted_page_numbers_for_standalone_sca
         },
     )
 
-    response = _response(analysis)
+    response = _response(analysis, _upload(3))
     assert response["page_count"] == 1
     assert response["extraction_processed_page_count"] == 1
     assert response["extraction_processed_page_numbers"] == [3]
@@ -194,7 +207,7 @@ def test_document_review_response_never_counts_a_failed_page_as_processed():
         },
     )
 
-    response = _response(analysis)
+    response = _response(analysis, _upload(3))
     assert response["extraction_processed_page_numbers"] == [1, 3]
     assert response["extraction_unprocessed_page_numbers"] == [2]
     assert response["interpretation_blocked"] is True
@@ -282,7 +295,7 @@ def test_legacy_pdf_page_gap_blocks_old_candidates_in_review_response():
         },
     )
 
-    response = _response(analysis)
+    response = _response(analysis, _upload(3))
 
     assert response["extraction_processed_page_numbers"] == [1, 3]
     assert response["extraction_processed_page_count"] == 2
