@@ -449,7 +449,7 @@ def test_care_understanding_does_not_accept_model_status_without_same_clause_sou
             "description": "We plan to call the clinic tomorrow",
             "who": ["We"],
             "why": None,
-            "reason_unknown": True,
+            "reason_unknown": False,
             "status": "completed",
             "raw_fragment": source,
         }],
@@ -476,6 +476,7 @@ def test_care_understanding_does_not_accept_model_status_without_same_clause_sou
 
     assert len(result["understanding"]["decisions"]) == 1
     assert result["understanding"]["decisions"][0]["status"] == "uncertain"
+    assert result["understanding"]["decisions"][0]["reason_unknown"] is True
     assert len(result["understanding"]["outcomes"]) == 1
     assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
     assert result["written_to_lcr"] is False
