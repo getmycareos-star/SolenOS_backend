@@ -17,6 +17,12 @@ from sqlalchemy import text, inspect, case, or_
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import get_db
+from app.api.document_intelligence import (
+    _is_paginated_pdf,
+    _persisted_unprocessed_pages,
+    _unreadable_page_numbers,
+    _verified_pdf_page_count,
+)
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.models.anonymous_session import AnonymousSession
 from app.models.time_location import Appointment
@@ -715,6 +721,15 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
         )
         documents_has_more = len(fetched_extraction_rows) > 50
         extraction_rows = fetched_extraction_rows[:50]
+        extraction_evidence_ids = [
+            str(row.source_evidence_id) for row in extraction_rows if row.source_evidence_id
+        ]
+        uploads_by_evidence_id = {
+            str(row.evidence_id): row
+            for row in db.query(EvidenceUpload).filter(
+                EvidenceUpload.evidence_id.in_(extraction_evidence_ids)
+            ).all()
+        } if extraction_evidence_ids else {}
         for extraction in extraction_rows:
             metadata = extraction.candidates if isinstance(extraction.candidates, dict) else {}
             if metadata.get("kind") != "document_extraction_v1":
@@ -728,22 +743,71 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 ).first()
             if source_evidence is None:
                 continue
+            upload = uploads_by_evidence_id.get(str(source_evidence.id))
+            source_text = extraction.source_text or ""
+            source_text_digest = hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest()
+            effective_extraction_status = str(extraction.extraction_status or "unknown")
+            verified_page_count = None
+            unprocessed_pages = []
+            unreadable_pages = _unreadable_page_numbers(source_text)
+            if upload is None:
+                effective_extraction_status = "original_upload_missing"
+            elif metadata.get("kind") != "document_extraction_v1":
+                effective_extraction_status = "unsupported_extraction_record"
+            elif metadata.get("binary_sha256") != upload.sha256:
+                effective_extraction_status = "extraction_binary_checksum_mismatch"
+            elif metadata.get("source_text_sha256") != source_text_digest:
+                effective_extraction_status = "extraction_text_checksum_mismatch"
+            else:
+                verified_page_count = _verified_pdf_page_count(metadata, upload)
+                if _is_paginated_pdf(metadata) and verified_page_count is None:
+                    effective_extraction_status = "pdf_page_count_unverified"
+                else:
+                    unprocessed_pages = _persisted_unprocessed_pages(
+                        extraction, metadata, verified_page_count
+                    )
+                    if unprocessed_pages or unreadable_pages:
+                        effective_extraction_status = "partial"
+            text_is_integrity_checked = upload is not None and (
+                metadata.get("binary_sha256") == upload.sha256
+                and metadata.get("source_text_sha256") == source_text_digest
+            )
+            page_count_verified = not _is_paginated_pdf(metadata) or verified_page_count is not None
+            page_gaps = []
+            if unreadable_pages:
+                page_gaps.append("Unreadable pages: " + ", ".join(str(page) for page in unreadable_pages) + ".")
+            if unprocessed_pages:
+                page_gaps.append("Pages not yet processed: " + ", ".join(str(page) for page in unprocessed_pages) + ".")
+            interpretation_limit = (
+                "Only part of this document could be read. "
+                + " ".join(page_gaps)
+                + " Extracted text is source material, not an accepted Care Record fact."
+                if effective_extraction_status == "partial"
+                else "The original PDF page total could not be verified. Treat this text as incomplete and unreviewed."
+                if effective_extraction_status == "pdf_page_count_unverified"
+                else "Extracted document text is source material, not an accepted Care Record fact or clinical verification."
+            )
             documents.append({
                 "source_table": "capture_analyses",
                 "source_id": str(extraction.id),
                 "source_evidence_id": str(source_evidence.id),
                 "filename": metadata.get("filename"),
                 "extraction_method": metadata.get("extraction_method"),
-                "extraction_status": extraction.extraction_status,
-                "extracted_text": (extraction.source_text or "")[:4000],
-                "source_text_sha256": hashlib.sha256(
-                    (extraction.source_text or "").encode("utf-8")
-                ).hexdigest(),
+                "extraction_status": effective_extraction_status,
+                "page_count": verified_page_count or metadata.get("page_count"),
+                "page_count_verified": page_count_verified,
+                "processed_page_numbers": metadata.get("processed_page_numbers") or [],
+                "unreadable_page_numbers": unreadable_pages,
+                "unprocessed_page_numbers": unprocessed_pages,
+                "retryable_page_numbers": metadata.get("retryable_page_numbers") or [],
+                "retry_exhausted_page_numbers": metadata.get("retry_exhausted_page_numbers") or [],
+                "extracted_text": source_text[:4000] if text_is_integrity_checked else None,
+                "source_text_sha256": source_text_digest,
                 "recorded_at": _iso(extraction.created_at),
                 "uploaded_at": _iso(source_evidence.ingested_at),
                 "uploaded_by_caregiver_id": source_evidence.uploaded_by_caregiver_id,
                 "epistemic_status": source_evidence.epistemic_status or "unknown",
-                "interpretation_limit": "Extracted document text is source material, not an accepted LCR fact or clinical verification.",
+                "interpretation_limit": interpretation_limit,
             })
         # Include original uploaded files even when extraction has not started
         # or failed. Their metadata is useful context, but never substitute it
@@ -790,7 +854,11 @@ def get_appointment_preparation_brief(request: Request, window_days: int = 90, d
                 "interpretation_limit": "The original file is saved, but extracted text is not available. File metadata is not treated as clinical content or a confirmed care fact.",
             })
         documents_has_more = bool(documents_has_more or uploads_has_more)
-        document_source_status = "available" if documents else "empty"
+        document_source_status = (
+            "partial" if any(item.get("extraction_status") != "available" for item in documents)
+            else "available" if documents
+            else "empty"
+        )
     except HTTPException as exc:
         if exc.status_code == 403:
             documents = []
