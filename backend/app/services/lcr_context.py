@@ -1232,6 +1232,7 @@ def build_lcr_context(
 
     source_offsets = source_offsets or {}
     document_upload_hash_cache: dict[str, str | None] = {}
+    document_upload_hash_cache_loaded = False
     for source_name, spec in SOURCE_SPECS.items():
         if only_sources is not None and source_name not in only_sources:
             continue
@@ -1408,12 +1409,55 @@ def build_lcr_context(
         if source_name == "document_extractions":
             if caregiver_id and "caregiver_id" in table.c:
                 statement = statement.where(table.c.caregiver_id == str(caregiver_id))
+            evidence_table = metadata.tables.get("evidence")
+            if evidence_table is not None and {"id", "person_id"}.issubset(evidence_table.c.keys()) and "source_evidence_id" in table.c:
+                statement = statement.join(
+                    evidence_table,
+                    evidence_table.c.id == table.c.source_evidence_id,
+                ).where(evidence_table.c.person_id == str(person_id))
+                if "evidence_status" in evidence_table.c:
+                    statement = statement.where(
+                        or_(
+                            evidence_table.c.evidence_status.is_(None),
+                            func.lower(evidence_table.c.evidence_status) != "deleted_by_caregiver",
+                        )
+                    )
             # Keep failed and still-processing extractions visible. Hiding them
             # makes a saved but unreadable document look like no document exists.
             if "candidates" in table.c:
                 statement = statement.where(
                     table.c.candidates["kind"].as_string() == "document_extraction_v1"
                 )
+            if not document_upload_hash_cache_loaded:
+                upload_table = metadata.tables.get("evidence_uploads")
+                if (
+                    upload_table is not None
+                    and evidence_table is not None
+                    and {"evidence_id", "sha256"}.issubset(upload_table.c.keys())
+                    and {"id", "person_id"}.issubset(evidence_table.c.keys())
+                ):
+                    upload_query = select(
+                        upload_table.c.evidence_id,
+                        upload_table.c.sha256,
+                    ).select_from(
+                        upload_table.join(
+                            evidence_table,
+                            evidence_table.c.id == upload_table.c.evidence_id,
+                        )
+                    ).where(evidence_table.c.person_id == str(person_id))
+                    if "evidence_status" in evidence_table.c:
+                        upload_query = upload_query.where(
+                            or_(
+                                evidence_table.c.evidence_status.is_(None),
+                                func.lower(evidence_table.c.evidence_status) != "deleted_by_caregiver",
+                            )
+                        )
+                    document_upload_hash_cache = {
+                        str(row.evidence_id): str(row.sha256)
+                        for row in db.execute(upload_query).mappings()
+                        if row.sha256
+                    }
+                document_upload_hash_cache_loaded = True
         if temporal_window:
             temporal_fields = {
                 "events": ("occurred_at", "recorded_at", "created_at"),
@@ -1604,16 +1648,6 @@ def build_lcr_context(
                                 row_values["source_text"], terms,
                             )
                         evidence_id = str(item.get("source_evidence_id") or "")
-                        upload_table = metadata.tables.get("evidence_uploads")
-                        if evidence_id and evidence_id not in document_upload_hash_cache:
-                            upload_sha256 = None
-                            if upload_table is not None and {"evidence_id", "sha256"}.issubset(upload_table.c.keys()):
-                                upload_sha256 = db.execute(
-                                    select(upload_table.c.sha256).where(
-                                        upload_table.c.evidence_id == evidence_id
-                                    ).limit(1)
-                                ).scalar_one_or_none()
-                            document_upload_hash_cache[evidence_id] = str(upload_sha256) if upload_sha256 else None
                         item["extraction_metadata"] = _document_extraction_metadata(
                             item.pop("candidates", None),
                             item.get("source_text"),
