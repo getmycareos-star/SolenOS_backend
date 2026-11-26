@@ -5771,13 +5771,22 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "changed": re.compile(r"\b(?:changed|improved|worsened|declined|increased|decreased|stopped|started)\b", re.IGNORECASE),
     }
 
-    def source_status(proposed: str, fragment: str, patterns: dict[str, re.Pattern]) -> str:
-        """Keep a model status only when an unnegated source cue supports it."""
+    def source_status(
+        proposed: str,
+        fragment: str,
+        claim: str,
+        patterns: dict[str, re.Pattern],
+    ) -> str:
+        """Keep a status only when an unnegated cue occurs in the claim's source clause."""
+        clause = next(
+            (part for part in _negation_clause_boundary.split(fragment) if claim in part),
+            None,
+        )
         pattern = patterns.get(proposed)
-        match = pattern.search(fragment) if pattern is not None else None
+        match = pattern.search(clause) if pattern is not None and clause is not None else None
         if match is None:
             return "uncertain"
-        clause_prefix = _negation_clause_boundary.split(fragment[:match.start()])[-1]
+        clause_prefix = clause[:match.start()]
         if _negation_pattern.search(clause_prefix):
             return "uncertain"
         return proposed
@@ -5886,7 +5895,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     "who": who,
                     "why": why,
                     "reason_unknown": reason_unknown,
-                    "status": source_status(status, fragment, _decision_status_evidence),
+                    "status": source_status(status, fragment, description, _decision_status_evidence),
                     "raw_fragment": fragment,
                 })
             elif key == "outcomes":
@@ -5896,7 +5905,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     continue
                 result[key].append({
                     "description": description,
-                    "status": source_status(status, fragment, _outcome_status_evidence),
+                    "status": source_status(status, fragment, description, _outcome_status_evidence),
                     "raw_fragment": fragment,
                 })
             elif key == "unknowns":
