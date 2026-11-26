@@ -11226,24 +11226,6 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         )
     source_record_refs.extend(source_lcr_record_refs)
 
-    _record_companion_output_validation(
-        db,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        request_id=companion_request_id,
-        workflow_id="companion",
-        reply=reply,
-        rejection_reasons=[],
-        ai_generated=ai_generated,
-        source_event_ids=source_event_ids,
-        source_evidence_ids=source_evidence_ids,
-        source_document_analysis_ids=source_document_analysis_ids,
-        source_appointment_ids=source_appointment_ids,
-        source_assertion_ids=source_assertion_ids,
-        source_lcr_context_ids=source_lcr_context_ids,
-        source_freshness_assessment_ids=source_freshness_assessment_ids,
-    )
-
     # Build claim-by-claim references from the exact records Qwen was allowed to
     # use. A sentence is linked only when its wording appears in that source;
     # paraphrases and unmatched statements are explicitly left unsupported.
@@ -11553,7 +11535,59 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 "record_status": assertion.assertion_status,
                 "related_evidence_ids": list(assertion.evidence_ids or []),
             })
-    claim_provenance = build_claim_provenance(reply, claim_source_records, validated_aggregates)
+    claim_provenance = build_claim_provenance(
+        reply,
+        claim_source_records,
+        validated_aggregates,
+        expected_person_id=str(person_id),
+    )
+    # Companion's ordinary chat path must enforce the same claim-level gate
+    # as /assistant/assist. The broad lexical validators above are necessary
+    # but cannot establish that every material care assertion is source-bound.
+    # Reject before creating a passed audit or persisting either conversation turn.
+    unmatched_claims = unmatched_material_claims(claim_provenance)
+    if ai_generated and unmatched_claims:
+        _record_companion_output_validation(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            request_id=companion_request_id,
+            workflow_id="companion",
+            reply=reply,
+            rejection_reasons=["unmatched_material_care_claim"],
+            ai_generated=True,
+            source_event_ids=source_event_ids,
+            source_evidence_ids=source_evidence_ids,
+            source_document_analysis_ids=source_document_analysis_ids,
+            source_appointment_ids=source_appointment_ids,
+            source_assertion_ids=source_assertion_ids,
+            source_lcr_context_ids=source_lcr_context_ids,
+            source_freshness_assessment_ids=source_freshness_assessment_ids,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Companion could not verify every material care detail against the saved record. No reply was saved; please retry or ask a narrower question.",
+        )
+
+    # The success receipt is staged only after claim-level validation. It remains
+    # in the same transaction as the user/assistant turn pair and commits with it.
+    _record_companion_output_validation(
+        db,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        request_id=companion_request_id,
+        workflow_id="companion",
+        reply=reply,
+        rejection_reasons=[],
+        ai_generated=ai_generated,
+        source_event_ids=source_event_ids,
+        source_evidence_ids=source_evidence_ids,
+        source_document_analysis_ids=source_document_analysis_ids,
+        source_appointment_ids=source_appointment_ids,
+        source_assertion_ids=source_assertion_ids,
+        source_lcr_context_ids=source_lcr_context_ids,
+        source_freshness_assessment_ids=source_freshness_assessment_ids,
+    )
 
     response_metadata = {
         "request_sha256": request_sha256,
