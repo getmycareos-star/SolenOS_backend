@@ -5554,8 +5554,10 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "non_care_facts [{layer:contributor_load|disagreement_perspective,text,raw_fragment}]; "
         "possible_links [{text,causation_claimed:false}]. "
         "Limits: 20 observations, 10 per other section. Descriptions and questions max 500 characters. "
-        "Every raw_fragment must be an exact substring of the original source. Preserve who said/observed it, negation, "
-        "uncertainty and time. Never diagnose, advise, infer cause, or invent missing details. Empty arrays when unsupported."
+        "Every raw_fragment must be an exact substring of the original source. Descriptions, participant names, "
+        "decision reasons, non-care text, and any non-null time values must also be exact substrings of that raw_fragment; "
+        "do not paraphrase or normalize them. Preserve who said/observed it, negation, uncertainty and time. "
+        "Never diagnose, advise, infer cause, or invent missing details. Empty arrays when unsupported."
     )
     raw = qwen_chat(
         [{"role": "system", "content": system}, {"role": "user", "content": "Original source text:\\n" + source}],
@@ -5595,6 +5597,10 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         cleaned = [bounded_text(item, max_length) for item in value]
         return cleaned if all(item is not None for item in cleaned) else None
 
+    def source_bound(value: str | None, fragment: str) -> bool:
+        """A source anchor is insufficient if its generated paraphrase is not verbatim."""
+        return value is not None and value in fragment
+
     for key, limit in limits.items():
         for item in parsed.get(key, [])[:limit]:
             if not isinstance(item, dict):
@@ -5613,7 +5619,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 description = bounded_text(item.get("description"), 500)
                 valid_time, approximate_time = optional_text(item.get("approximate_time"), 120)
                 confidence = item.get("confidence")
-                if description is None or not valid_time or confidence not in {"low", "medium", "high"}:
+                if description is None or not source_bound(description, fragment) or not valid_time or (approximate_time is not None and not source_bound(approximate_time, fragment)) or confidence not in {"low", "medium", "high"}:
                     continue
                 result[key].append({
                     "description": description,
@@ -5625,7 +5631,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 description = bounded_text(item.get("description"), 500)
                 valid_time, event_time = optional_text(item.get("time"), 120)
                 participants = bounded_text_list(item.get("participants"))
-                if description is None or not valid_time or participants is None:
+                if description is None or not source_bound(description, fragment) or not valid_time or (event_time is not None and not source_bound(event_time, fragment)) or participants is None or any(not source_bound(name, fragment) for name in participants):
                     continue
                 result[key].append({
                     "description": description,
@@ -5640,7 +5646,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 status = item.get("status")
                 reason_unknown = item.get("reason_unknown")
                 if (
-                    description is None or who is None or not valid_why
+                    description is None or not source_bound(description, fragment) or who is None or any(not source_bound(name, fragment) for name in who) or not valid_why or (why is not None and not source_bound(why, fragment))
                     or not isinstance(reason_unknown, bool)
                     or status not in {"active", "completed", "changed", "reversed", "uncertain", "needs_review", "pending"}
                 ):
@@ -5656,7 +5662,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             elif key == "outcomes":
                 description = bounded_text(item.get("description"), 500)
                 status = item.get("status")
-                if description is None or status not in {"observed", "pending", "uncertain", "ongoing", "resolved", "changed"}:
+                if description is None or not source_bound(description, fragment) or status not in {"observed", "pending", "uncertain", "ongoing", "resolved", "changed"}:
                     continue
                 result[key].append({
                     "description": description,
@@ -5676,7 +5682,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             elif key == "non_care_facts":
                 fact_text = bounded_text(item.get("text"), 500)
                 layer = item.get("layer")
-                if fact_text is None or layer not in {"contributor_load", "disagreement_perspective"}:
+                if fact_text is None or not source_bound(fact_text, fragment) or layer not in {"contributor_load", "disagreement_perspective"}:
                     continue
                 result[key].append({
                     "layer": layer,
