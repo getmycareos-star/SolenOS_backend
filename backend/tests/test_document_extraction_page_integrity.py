@@ -473,7 +473,7 @@ def test_lifecycle_response_trusts_only_page_totals_marked_as_original_binary():
         },
     )
 
-    response = _response(analysis)
+    response = _response(analysis, _upload(2))
 
     assert response["page_count"] == 2
     assert response["page_count_verified"] is True
