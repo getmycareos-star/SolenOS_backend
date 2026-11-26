@@ -164,7 +164,7 @@ def _resolve_candidate_source_page(candidate: dict, source_text: str) -> int:
     if not isinstance(quote, str) or not quote.strip():
         raise HTTPException(status_code=409, detail="This document suggestion has no traceable source quotation")
 
-    page_markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text))
+    page_markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text))
     matching_pages: list[int] = []
     if page_markers:
         for index, marker in enumerate(page_markers):
