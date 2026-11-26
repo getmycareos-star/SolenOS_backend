@@ -2635,6 +2635,20 @@ def current_care_projection(
         "read_only": True,
         "history_coverage": context.get("history_coverage", "bounded_subset"),
         "schema_status": context.get("schema_status", "partial"),
+        "retrieval_status": (
+            "failed"
+            if not any(value.get("status") in {"available", "empty"} for value in sources.values())
+            and any(value.get("status") in {"failed", "partial", "unavailable_schema", "unavailable_scope"} for value in sources.values())
+            else "partial"
+            if context.get("failed_sources")
+            or context.get("missing_required_sources")
+            or context.get("missing_optional_sources")
+            or evidence_authorization_status == "failed"
+            or context.get("evidence_lineage", {}).get("status") == "failed"
+            else "empty" if not ordered else "available"
+        ),
+        "evidence_authorization_status": evidence_authorization_status,
+        "evidence_lineage_status": context.get("evidence_lineage", {}).get("status", "not_assessed"),
         "missing_required_sources": context.get("missing_required_sources", []),
         "missing_optional_sources": context.get("missing_optional_sources", []),
         "items": ordered[:projection_limit],
@@ -2676,6 +2690,8 @@ def current_care_projection(
                 "next_offset": value.get("next_offset"),
                 "returned_history_complete": value.get("returned_history_complete", False),
                 "error_code": value.get("error_code"),
+                "enrichment_status": value.get("enrichment_status"),
+                "interpretation_limit": value.get("interpretation_limit"),
                 "required": SOURCE_SPECS.get(name, {}).get("required", False),
             }
             for name, value in sources.items()
