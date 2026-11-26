@@ -1,4 +1,5 @@
 """PostgreSQL integration tests for unified Companion retrieval scope."""
+import hashlib
 import json
 import os
 import uuid
