@@ -774,6 +774,11 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
         metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
+        if metadata.get("page_count_verified") is False:
+            return (
+                "document_page_count_unverified",
+                "The original PDF page total has not been verified against the saved file. Treat its extracted text as incomplete and unreviewed; do not assume every page was read.",
+            )
         unreadable = metadata.get("unreadable_page_numbers") or []
         unprocessed = metadata.get("unprocessed_page_numbers") or []
         # Older persisted rows may retain an "available" status even though
@@ -990,6 +995,10 @@ def _document_extraction_metadata(value: Any, source_text: str | None = None) ->
     mime_type = str(value.get("mime_type") or "").split(";", 1)[0].strip().casefold()
     filename = str(value.get("filename") or "").casefold()
     is_paginated_pdf = mime_type == "application/pdf" or filename.endswith(".pdf")
+    metadata["page_count_verified"] = (
+        not is_paginated_pdf
+        or value.get("page_count_source") == "original_binary"
+    )
     page_count = value.get("page_count")
     if is_paginated_pdf and isinstance(page_count, int) and not isinstance(page_count, bool) and page_count > 0:
         processed = value.get("processed_page_numbers")
