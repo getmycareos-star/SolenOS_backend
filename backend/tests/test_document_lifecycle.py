@@ -293,7 +293,7 @@ def test_pdf_trailing_pages_missing_from_extraction_are_not_reported_complete(cl
     monkeypatch.setattr(
         document_lifecycle,
         "_extract",
-        lambda upload, content, evidence: ("[Page 1]\\nReadable page one.\\n\\n[Page 2]\\nReadable page two.", "test_interrupted_extraction"),
+        lambda upload, content, evidence: ("[Page 1]\nReadable page one.\n\n[Page 2]\nReadable page two.", "test_interrupted_extraction"),
     )
     auth = {"Authorization": f"Bearer {session['access_token']}"}
     response = test_client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
@@ -614,7 +614,7 @@ def test_multi_column_pdf_uses_layout_preserving_text_extraction(client, monkeyp
     class MultiColumnPage:
         def extract_text(self, extraction_mode=None):
             assert extraction_mode == "layout"
-            return "LEFT COLUMN: Medication 500 mg\\nRIGHT COLUMN: Follow-up in 14 days"
+            return "LEFT COLUMN: Medication 500 mg\nRIGHT COLUMN: Follow-up in 14 days"
 
     class LayoutReader:
         pages = [MultiColumnPage()]
