@@ -18,7 +18,7 @@ from difflib import SequenceMatcher
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import MetaData, Table, select, insert, update, desc, inspect, func, and_, or_, text, cast, DateTime as SQLDateTime, JSON as SQLJSON, Text as SQLText
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.core.database import get_db
 from app.services.document_binary_storage import read_document_binary
