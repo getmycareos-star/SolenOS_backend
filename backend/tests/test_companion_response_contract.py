@@ -5,6 +5,7 @@ import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -4876,3 +4877,37 @@ def test_humanized_companion_context_preserves_caregiver_observation_and_perspec
     assert "Evening routine" in perspective
     assert "private-row-id" not in observation
     assert "private-perspective-id" not in perspective
+
+
+def test_companion_rejection_audit_storage_failure_fails_closed(monkeypatch):
+    setup_client(monkeypatch)
+    db = TestingSessionLocal()
+
+    def fail_commit():
+        raise SQLAlchemyError("simulated audit database failure")
+
+    monkeypatch.setattr(db, "commit", fail_commit)
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            collaboration._record_companion_output_validation(
+                db,
+                person_id="audit-failure-person",
+                caregiver_id="audit-failure-caregiver",
+                request_id="audit-failure-request",
+                workflow_id="companion",
+                reply="A fabricated care claim.",
+                rejection_reasons=["unmatched_material_care_claim"],
+                ai_generated=True,
+                source_event_ids=[],
+                source_evidence_ids=[],
+                source_document_analysis_ids=[],
+                source_appointment_ids=[],
+                source_assertion_ids=[],
+                source_lcr_context_ids=[],
+                source_freshness_assessment_ids=[],
+            )
+        assert exc_info.value.status_code == 503
+        assert exc_info.value.detail["code"] == "output_validation_audit_unavailable"
+    finally:
+        db.close()
+        teardown()

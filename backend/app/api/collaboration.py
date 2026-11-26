@@ -6576,7 +6576,6 @@ def _record_companion_output_validation(
     source_freshness_assessment_ids: list[str],
     source_handoff_ids: list[str] | None = None,
     source_notification_ids: list[str] | None = None,
-    commit_success: bool = False,
 ) -> None:
     """Persist a metadata-only safety decision; never store rejected model text."""
     rejected = bool(rejection_reasons)
@@ -6621,15 +6620,9 @@ def _record_companion_output_validation(
         ))
         try:
             db.commit()
-        except Exception:
-            db.rollback()
-            logger.exception("Qwen output rejection audit could not be persisted")
-    elif commit_success:
-        try:
-            db.commit()
         except Exception as exc:
             db.rollback()
-            logger.exception("Qwen output validation audit could not be persisted")
+            logger.exception("Qwen output rejection audit could not be persisted")
             raise HTTPException(
                 status_code=503,
                 detail={
