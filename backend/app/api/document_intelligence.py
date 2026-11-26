@@ -1866,7 +1866,7 @@ def review_document_candidate(
     if status not in {"pending_review", "corrected_pending_approval"}:
         raise HTTPException(status_code=409, detail="This candidate is not awaiting caregiver review")
 
-    original = dict(candidate)
+    original = copy.deepcopy(candidate)
     assertion_id = None
     follow_up_id = None
     document_observed_at = None
