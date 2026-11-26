@@ -1082,3 +1082,39 @@ def test_event_aggregate_excludes_events_without_an_explicit_eligible_status():
     assert aggregate["count"] == 1
     assert [item["record_id"] for item in aggregate["source_references"]] == ["explicit-recorded"]
 
+def test_event_aggregate_requires_unique_persisted_event_ids():
+    start = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    events = [
+        {
+            "id": "persisted-event-1",
+            "event_type": "mobility",
+            "status": "recorded",
+            "occurred_at": datetime(2026, 11, 2, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the kitchen",
+        },
+        {
+            "id": "persisted-event-1",
+            "event_type": "mobility",
+            "status": "recorded",
+            "occurred_at": datetime(2026, 11, 6, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness near the stairs",
+        },
+        {
+            "event_type": "mobility",
+            "status": "recorded",
+            "occurred_at": datetime(2026, 11, 8, 8, tzinfo=timezone.utc),
+            "title": "Unsteadiness in hallway",
+        },
+    ]
+    aggregate = build_distinct_event_aggregate(
+        events,
+        topic="unsteadiness",
+        start_at=start,
+        end_at=end,
+        window_label="November 1–12",
+    )
+    assert aggregate["status"] == "validated"
+    assert aggregate["count"] == 1
+    assert [item["record_id"] for item in aggregate["source_references"]] == ["persisted-event-1"]
+
