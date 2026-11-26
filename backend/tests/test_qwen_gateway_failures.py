@@ -823,3 +823,23 @@ def test_qwen_gateway_rejects_response_from_unexpected_model(monkeypatch):
     assert error.value.status_code == 502
     assert error.value.detail["code"] == "unexpected_model_response"
     assert error.value.detail["reason"] == "configured_model_mismatch"
+
+def test_qwen_gateway_rejects_non_assistant_upstream_message_role(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setattr(
+        qwen_gateway.urllib.request,
+        "urlopen",
+        lambda *args, **kwargs: FakeResponse(json.dumps({
+            "model": "qwen-test",
+            "message": {"role": "user", "content": "This is not an assistant response."},
+            "done": True,
+            "done_reason": "stop",
+        }).encode()),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}])
+
+    assert error.value.status_code == 502
+    assert error.value.detail["code"] == "invalid_upstream_response"
+    assert error.value.detail["reason"] == "unexpected_message_role"
