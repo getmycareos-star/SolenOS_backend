@@ -518,3 +518,65 @@ def test_capture_candidates_preserve_explicit_person_identity_in_same_quote(monk
 
     assert len(result["observations"]) == 1
     assert result["observations"][0]["subject"] == "Mum"
+
+
+
+def test_capture_candidates_keep_exact_relative_event_time_without_inventing_date(monkeypatch):
+    from app.services.document_candidate_schema import canonical_candidate
+
+    source = "Mum fell yesterday, but the caregiver entered this note today."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum fell yesterday",
+            "source_quote": "Mum fell yesterday",
+            "event_time_quote": "yesterday",
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-relative-time",
+    )
+    assert len(result["observations"]) == 1
+    assert result["observations"][0]["event_time_quote"] == "yesterday"
+
+    canonical = canonical_candidate(
+        result["observations"][0],
+        document_id="document-relative-time",
+        source_text=source,
+    )
+    assert canonical["event_time_quote"] == "yesterday"
+    assert canonical["event_time_kind"] == "relative"
+    assert canonical["event_date"] is None
+    assert canonical["recorded_date"] is None
+
+
+def test_capture_candidates_reject_fabricated_event_time_quote(monkeypatch):
+    source = "Mum fell yesterday."
+    model_output = {
+        "observations": [{
+            "subject": "Mum",
+            "observation": "Mum fell yesterday",
+            "source_quote": source,
+            "event_time_quote": "2026-11-25",
+        }],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-fabricated-date",
+    )
+    assert result["observations"] == []
