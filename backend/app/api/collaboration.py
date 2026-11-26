@@ -5788,7 +5788,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                 if (
                     item.get("causation_claimed") is False
                     and link_text
-                    and link_text in source
+                    and source_bound(link_text, source)
                     and not causal_language
                 ):
                     result[key].append({"text": link_text, "causation_claimed": False})
