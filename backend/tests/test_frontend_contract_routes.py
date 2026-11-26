@@ -852,6 +852,7 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         payload = {
             "person_id": person_id,
             "caregiver_id": caregiver_id,
+            "capture_idempotency_key": "daily-capture-medication-photo-event-001",
             "medications": [{
                 "medication_name": "Caregiver-reported medication",
                 "status": "administered",
@@ -906,6 +907,11 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         assert saved.status_code == 200, saved.text
         assert saved.json()["success"] is True
         assert photo_evidence_id in saved.json()["evidence_ids"], "the uploaded medicine photo must be linked to the saved Daily Care event"
+        replay = client.post("/api/v1/daily/log", headers=auth, json=payload)
+        assert replay.status_code == 200, replay.text
+        assert replay.json()["id"] == saved.json()["id"]
+        assert replay.json()["idempotent_replay"] is True
+        assert replay.json()["evidence_ids"] == saved.json()["evidence_ids"]
 
         events = client.get(f"/api/v1/events/{person_id}", headers=auth)
         assert events.status_code == 200, events.text
