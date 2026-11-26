@@ -774,3 +774,31 @@ def test_qwen_gateway_bounds_caller_supplied_timeout(monkeypatch, requested_time
     ) == "Bounded response."
     assert captured["timeout"] == expected_timeout
     assert 1.0 <= captured["timeout"] <= 2.0
+
+def test_qwen_gateway_retries_share_one_end_to_end_deadline(monkeypatch):
+    configure_gateway(monkeypatch)
+    monkeypatch.setenv("OLLAMA_STARTUP_RETRY_SECONDS", "30")
+    clock = {"now": 100.0}
+    timeouts = []
+
+    monkeypatch.setattr(qwen_gateway.time, "monotonic", lambda: clock["now"])
+
+    def advance_clock(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr(qwen_gateway.time, "sleep", advance_clock)
+
+    def fail_once_then_succeed(_request, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        if len(timeouts) == 1:
+            raise urllib.error.URLError(ConnectionRefusedError(111, "connection refused"))
+        return FakeResponse(json.dumps({
+            "message": {"role": "assistant", "content": "Recovered within deadline."},
+            "done": True,
+            "done_reason": "stop",
+        }).encode())
+
+    monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", fail_once_then_succeed)
+
+    assert qwen_gateway.qwen_chat([{"role": "user", "content": "hi"}]) == "Recovered within deadline."
+    assert timeouts == [2.0, 1.0]
