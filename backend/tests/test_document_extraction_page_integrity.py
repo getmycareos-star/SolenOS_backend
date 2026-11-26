@@ -304,6 +304,69 @@ def test_legacy_pdf_page_gap_blocks_old_candidates_in_review_response():
     assert response["observations"] == []
 
 
+
+def test_legacy_pdf_page_count_is_reconciled_to_the_preserved_original():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="legacy-wrong-page-total",
+        source_evidence_id="legacy-wrong-page-total-source",
+        source_text="[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\nSecond page.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 2,
+            "unprocessed_page_numbers": [],
+            "document_intelligence": {
+                "status": "available",
+                "observations": [{"subject": "Care", "observation": "Old candidate"}],
+            },
+        },
+    )
+
+    response = _response(analysis, _upload(3))
+
+    assert response["page_count"] == 3
+    assert response["total_page_count"] == 3
+    assert response["page_count_verified"] is True
+    assert response["extraction_unprocessed_page_numbers"] == [3]
+    assert response["interpretation_blocked"] is True
+    assert response["observations"] == []
+
+
+def test_legacy_pdf_without_source_bytes_is_not_assumed_complete():
+    from types import SimpleNamespace
+
+    from app.api.document_intelligence import _response
+
+    analysis = SimpleNamespace(
+        id="legacy-pdf-without-binary",
+        source_evidence_id="legacy-pdf-without-binary-source",
+        source_text="[Page 1 OCR]\nOnly extracted page.",
+        extraction_status="available",
+        candidates={
+            "kind": "document_extraction_v1",
+            "filename": "legacy-care-plan.pdf",
+            "mime_type": "application/pdf",
+            "page_count": 1,
+            "document_intelligence": {
+                "status": "available",
+                "observations": [{"subject": "Care", "observation": "Old candidate"}],
+            },
+        },
+    )
+
+    response = _response(analysis)
+
+    assert response["page_count_verified"] is False
+    assert response["interpretation_blocked"] is True
+    assert response["observations"] == []
+
+
 def test_lifecycle_response_blocks_legacy_pdf_page_gaps_and_hides_old_candidates():
     from types import SimpleNamespace
 
