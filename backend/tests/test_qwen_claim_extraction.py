@@ -137,3 +137,34 @@ def test_claim_extraction_drops_claims_without_exact_source_spans(monkeypatch):
     assert result["run_b"]["claims"] == result["run_a"]["claims"]
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
+
+
+def test_claim_extraction_uses_unicode_codepoint_offsets(monkeypatch):
+    _allow_source(monkeypatch)
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text="💛 Mom fell yesterday",
+    )
+    model_output = {
+        "claims": [{
+            "claim_text": "Mom fell yesterday",
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": 2,
+                "end_offset": 20,
+                "text": "Mom fell yesterday",
+            },
+        }]
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"][0]["source_span"] == {
+        "start_offset": 2,
+        "end_offset": 20,
+        "text": "Mom fell yesterday",
+    }
+    assert result["run_b"]["claims"] == result["run_a"]["claims"]
