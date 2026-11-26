@@ -1247,6 +1247,9 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
         assert proposal.proposed_change_json["source_quote"] == exact_quote
         assert proposal.proposed_change_json["asserted_value"] == exact_quote
         assert proposal.proposed_change_json["event_time_text"] == "last night"
+        assert proposal.uncertainty_json["event_time"] == "exact_quoted_phrase"
+        assert proposal.uncertainty_json["clinical_status"] == "not_assessed"
+        assert proposal.uncertainty_json["caregiver_review"] == "required"
         assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
 
