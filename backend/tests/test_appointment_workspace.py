@@ -3693,6 +3693,7 @@ def test_appointment_preparation_brief_surfaces_person_scoped_follow_up_without_
     )
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["person_id"] == owner["person"]["id"]
     assert body["next_appointment"] is None
     assert body["appointment_context_status"]["code"] == "follow_up_needed"
     follow_ups = body["appointment_related_open_loops"]
@@ -3706,5 +3707,6 @@ def test_appointment_preparation_brief_surfaces_person_scoped_follow_up_without_
         headers=other_headers,
     )
     assert other_response.status_code == 200, other_response.text
+    assert other_response.json()["person_id"] == other["person"]["id"]
     assert other_response.json()["appointment_related_open_loops"] == []
     assert "Confirm the clinic follow-up date" not in other_response.text
