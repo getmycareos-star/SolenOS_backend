@@ -2793,12 +2793,17 @@ def _companion_replay_response(
         raise HTTPException(status_code=503, detail="The saved Companion response cannot be replayed safely")
     if metadata.get("request_sha256") != request_sha256:
         raise HTTPException(status_code=409, detail="This turn ID was already used for different message text")
-    history = (
-        db.query(ConversationMessage)
-        .filter_by(session_id=saved_session.id)
-        .order_by(ConversationMessage.created_at.asc(), ConversationMessage.id.asc())
-        .all()
-    )
+    # Replay only needs the persisted turn pair. Loading the entire thread on
+    # every retry makes response size and database work grow with conversation age.
+    source_message_id = metadata.get("source_message_id")
+    user_message = None
+    if isinstance(source_message_id, str) and source_message_id:
+        user_message = db.query(ConversationMessage).filter(
+            ConversationMessage.id == source_message_id,
+            ConversationMessage.session_id == saved_session.id,
+            ConversationMessage.role == "user",
+        ).first()
+    history = [row for row in (user_message, assistant) if row is not None]
     # Replay is a conversation transport guarantee, not a route back into the
     # legacy Companion-to-LCR proposal workflow. Old pending proposals must stay
     # in their own review surface and never be surfaced by Companion replay.
@@ -11710,12 +11715,10 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     # explicitly mark this persisted source message as a care report through the
     # separate review endpoint; that creates a pending proposal, never an assertion.
     care_update_candidates = []
-    history = (
-        db.query(ConversationMessage)
-        .filter_by(session_id=session.id)
-        .order_by(ConversationMessage.created_at.asc())
-        .all()
-    )
+    # The send endpoint returns the newly persisted turn, not an unbounded
+    # replay of the complete thread. Older messages are read through the
+    # paginated history endpoint.
+    history = [user_row, assistant_row]
     return {
         "session_id": session.id,
         "person_id": person_id,
