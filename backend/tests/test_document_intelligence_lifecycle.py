@@ -734,6 +734,64 @@ def test_incomplete_document_blocks_interpretation_and_candidate_acceptance(monk
         client.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+
+
+def test_untraceable_document_candidate_cannot_be_accepted_but_can_be_rejected(monkeypatch):
+    Base.metadata.create_all(bind=engine)
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", Session)
+    client = TestClient(app)
+    quote = "Patient has a follow-up appointment."
+    source = f"[Page 1 OCR]\\n{quote}\\n[Page 2 OCR]\\n{quote}"
+
+    def fake_extract(page_text, *, source_event_id, source_evidence_id=None, workflow_id=None, audit_context=None):
+        return {
+            "observations": [{
+                "subject": "Patient",
+                "observation": quote,
+                "source_quote": quote,
+                "extraction_method": "test_verbatim",
+            }],
+            "open_questions": [],
+        }
+
+    monkeypatch.setattr(intelligence_module, "extract_review_candidates", fake_extract)
+    try:
+        caregiver = create_record(client, "Untraceable source page caregiver")
+        auth = {"Authorization": "Bearer " + caregiver["access_token"]}
+        evidence_id = save_original(caregiver, source)
+        extracted = client.post(f"/api/v1/documents/{evidence_id}/extract", headers=auth)
+        assert extracted.status_code == 201, extracted.text
+        understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
+        assert understood.status_code == 201, understood.text
+        analysis_id = understood.json()["analysis_id"]
+        assert understood.json()["observations"][0]["page_number"] is None
+
+        accepted = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json=review_payload(analysis_id, 0, "accept"),
+        )
+        assert accepted.status_code == 409, accepted.text
+        assert "more than one page" in accepted.json()["detail"]
+
+        rejected = client.post(
+            f"/api/v1/documents/intelligence/{analysis_id}/review",
+            headers=auth,
+            json=review_payload(analysis_id, 0, "reject"),
+        )
+        assert rejected.status_code == 200, rejected.text
+        assert rejected.json()["written_to_lcr"] is False
+        assert rejected.json()["candidate"]["review_status"] == "rejected_by_caregiver"
+        assert rejected.json()["candidate"]["page_number"] is None
+        with Session() as db:
+            assert db.query(CareAssertion).filter_by(person_id=caregiver["person"]["id"]).count() == 0
+    finally:
+        client.close()
+        app.dependency_overrides.clear()
+        Base.metadata.drop_all(bind=engine)
+
+
 def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeypatch):
     Base.metadata.create_all(bind=engine)
     app.dependency_overrides[get_db] = override_db
