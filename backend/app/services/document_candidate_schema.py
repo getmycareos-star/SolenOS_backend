@@ -301,15 +301,15 @@ def _event_time_kind(value: str | None) -> str:
     phrase = (value or "").strip().casefold()
     if not phrase:
         return "not_stated"
-    if re.search(r"\\b(?:about|around|approximately|roughly|early|mid|late|sometime|between)\\b", phrase):
+    if re.search(r"\b(?:about|around|approximately|roughly|early|mid|late|sometime|between)\b", phrase):
         return "approximate"
     if re.search(
-        r"\\b(?:yesterday|today|tomorrow|last night|tonight|this morning|this afternoon|"
-        r"this evening|last week|last month|last year|\\d+\\s+(?:minutes?|hours?|days?|weeks?|months?|years?)\\s+ago)\\b",
+        r"\b(?:yesterday|today|tomorrow|last night|tonight|this morning|this afternoon|"
+        r"this evening|last week|last month|last year|\d+\s+(?:minutes?|hours?|days?|weeks?|months?|years?)\s+ago)\b",
         phrase,
     ):
         return "relative"
-    if _date_tokens(phrase) or re.search(r"\\b\\d{1,2}:\\d{2}\\b", phrase):
+    if _date_tokens(phrase) or re.search(r"\b\d{1,2}:\d{2}\b", phrase):
         return "explicit"
     return "source_quoted_unresolved"
 
