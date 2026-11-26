@@ -818,6 +818,7 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
         understood = client.post(f"/api/v1/documents/{evidence_id}/intelligence", headers=auth)
         assert understood.status_code == 201, understood.text
         analysis_id = understood.json()["analysis_id"]
+        original_canonical_status = understood.json()["observations"][0]["canonical_candidate"]["review_status"]
 
         unsupported_correction = client.post(
             f"/api/v1/documents/intelligence/{analysis_id}/review",
@@ -874,6 +875,8 @@ def test_corrected_medication_candidate_writes_corrected_typed_lcr_value(monkeyp
             assert review_events[0].after_state["source_quote"] == quote
             assert review_events[0].before_state["page_number"] == 1
             assert review_events[0].after_state["page_number"] == 1
+            assert review_events[0].before_state["canonical_candidate"]["review_status"] == original_canonical_status
+            assert review_events[0].after_state["canonical_candidate"]["review_status"] == "Corrected"
             assert review_events[1].before_state["page_number"] == 1
             assert review_events[1].after_state["page_number"] == 1
             assert review_events[1].before_state["observation"] == quote
