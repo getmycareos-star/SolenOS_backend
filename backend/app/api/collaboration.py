@@ -9358,6 +9358,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             # idempotency lease, not an open transaction, protects first-turn retries.
             db.commit()
             db.refresh(session)
+            request.state.companion_new_session_id = str(session.id)
         except Exception as exc:
             db.rollback()
             logger.exception("Companion conversation session failed to persist")
