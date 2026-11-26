@@ -1116,6 +1116,60 @@ def test_companion_saved_conversation_list_paginates_with_recipient_scope():
     assert isolated.json()["items"] == []
 
 
+
+def test_companion_conversation_list_cursor_is_stable_when_new_conversation_arrives():
+    """A newly inserted latest session must not shift an already-issued page cursor."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Conversation cursor recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    base_time = datetime.now(timezone.utc) - timedelta(days=1)
+
+    with Session() as db:
+        for index in range(3):
+            session_id = f"cursor-page-{index}-{suffix}"
+            stamp = base_time + timedelta(minutes=index)
+            db.add(ConversationSession(
+                id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+                title=f"Cursor conversation {index}", status="active", created_at=stamp,
+            ))
+            db.flush()
+            db.add(ConversationMessage(
+                id=f"cursor-page-message-{index}-{suffix}", session_id=session_id,
+                role="user", content=f"Cursor question {index}", created_at=stamp,
+            ))
+        db.commit()
+
+    first = client.get("/api/v1/conversations?limit=2", headers=headers)
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert len(body["items"]) == 2
+    assert body["has_more"] is True
+    cursor = body["next_cursor"]
+    assert cursor and cursor["before_session_id"] == body["items"][-1]["session_id"]
+
+    with Session() as db:
+        newest = ConversationSession(
+            id=f"cursor-newest-{suffix}", person_id=person_id, caregiver_id=caregiver_id,
+            title="Arrived between pages", status="active", created_at=base_time + timedelta(days=1),
+        )
+        db.add(newest)
+        db.flush()
+        db.add(ConversationMessage(
+            id=f"cursor-newest-message-{suffix}", session_id=newest.id,
+            role="user", content="New conversation", created_at=base_time + timedelta(days=1),
+        ))
+        db.commit()
+
+    second = client.get("/api/v1/conversations", params={"limit": 2, **cursor}, headers=headers)
+    assert second.status_code == 200, second.text
+    second_body = second.json()
+    assert [item["session_id"] for item in second_body["items"]] == [f"cursor-page-0-{suffix}"]
+    assert f"cursor-newest-{suffix}" not in [item["session_id"] for item in second_body["items"]]
+
+
 def test_companion_conversation_list_has_deterministic_order_when_timestamps_collide():
     suffix = uuid.uuid4().hex[:10]
     client = TestClient(app)
