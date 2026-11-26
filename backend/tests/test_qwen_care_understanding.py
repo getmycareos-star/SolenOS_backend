@@ -479,3 +479,41 @@ def test_care_understanding_does_not_accept_model_status_without_same_clause_sou
     assert len(result["understanding"]["outcomes"]) == 1
     assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
     assert result["written_to_lcr"] is False
+
+def test_care_understanding_does_not_accept_negated_completion_status(monkeypatch):
+    _allow(monkeypatch)
+    source = "The caregiver said the follow-up is not completed."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [{
+            "description": "the follow-up is not completed",
+            "who": ["caregiver"],
+            "why": None,
+            "reason_unknown": True,
+            "status": "completed",
+            "raw_fragment": source,
+        }],
+        "outcomes": [{
+            "description": "the follow-up is not completed",
+            "status": "resolved",
+            "raw_fragment": source,
+        }],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["decisions"][0]["status"] == "uncertain"
+    assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
