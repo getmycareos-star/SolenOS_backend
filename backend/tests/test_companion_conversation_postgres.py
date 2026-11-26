@@ -1100,6 +1100,19 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
             id=source_message_id, session_id=session_id, role="user",
             content="I noticed a change in sleep last night.",
         ))
+        db.add(ConversationMessage(
+            id=f"conversation-only-assistant-{suffix}",
+            session_id=session_id,
+            role="assistant",
+            content="The care record says the medication dose changed yesterday.",
+            evidence_ids_json='["restricted-evidence-id"]',
+            source_record_refs_json='[{"record_type":"evidence","record_id":"restricted-evidence-id"}]',
+            response_metadata_json=json.dumps({
+                "source_evidence_ids": ["restricted-evidence-id"],
+                "source_record_refs": [{"record_type": "evidence", "record_id": "restricted-evidence-id"}],
+                "claim_provenance": {"coverage": "complete", "claims": [{"text": "restricted care claim"}]},
+            }),
+        ))
         db.commit()
 
     listed = client.get("/api/v1/conversations", headers=headers)
@@ -1275,6 +1288,13 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
     )
     assert listed.status_code == 200, listed.text
     assert history.status_code == 200, history.text
+    history_messages = history.json()["messages"]
+    assert any(item["role"] == "user" and item["text"] == "I noticed a change in sleep last night." for item in history_messages)
+    restricted_assistant = next(item for item in history_messages if item["role"] == "assistant")
+    assert "unavailable because care-record access has changed" in restricted_assistant["text"]
+    assert restricted_assistant["source_record_refs"] == []
+    assert restricted_assistant["evidence_ids"] == []
+    assert restricted_assistant["claim_provenance"] == {"coverage": "restricted", "claims": []}
     assert updates.status_code == 200, updates.text
     assert proposal_response.status_code == 200 or proposal_response.status_code == 201, proposal_response.text
     proposal_id = proposal_response.json()["proposal"]["id"]
