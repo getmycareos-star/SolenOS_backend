@@ -774,6 +774,21 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
     if source_name == "document_extractions":
         extraction_status = str(item.get("extraction_status") or "unknown").casefold()
         metadata = item.get("extraction_metadata") if isinstance(item.get("extraction_metadata"), dict) else {}
+        if extraction_status == "failed":
+            return (
+                "document_extraction_failed",
+                "The document is saved, but text extraction failed. No care details can be established from this extraction.",
+            )
+        if extraction_status in {"pending", "processing", "queued", "running"}:
+            return (
+                "document_extraction_pending",
+                "The document is saved, but text extraction has not finished. Its care details are not yet available; do not treat the missing text as an empty document.",
+            )
+        if extraction_status in {"unavailable", "unknown", "not_started"}:
+            return (
+                "document_extraction_unavailable",
+                "The document is saved, but an extraction result is not available. Do not treat the missing text as evidence that the document contains no care information.",
+            )
         if metadata.get("binary_integrity_verified") is False:
             return (
                 "document_source_integrity_unverified",
@@ -799,21 +814,6 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
             if page_gaps:
                 detail += " " + " ".join(page_gaps)
             return ("document_extraction_partial", detail)
-        if extraction_status == "failed":
-            return (
-                "document_extraction_failed",
-                "The original document is saved, but text extraction failed. No care details can be established from this extraction.",
-            )
-        if extraction_status in {"pending", "processing", "queued", "running"}:
-            return (
-                "document_extraction_pending",
-                "The original document is saved, but text extraction has not finished. Its care details are not yet available; do not treat the missing text as an empty document.",
-            )
-        if extraction_status in {"unavailable", "unknown", "not_started"}:
-            return (
-                "document_extraction_unavailable",
-                "The original document is saved, but an extraction result is not available. Do not treat the missing text as evidence that the document contains no care information.",
-            )
         interpretation_status = str(metadata.get("interpretation_status") or "").casefold()
         if interpretation_status == "partial":
             return (
