@@ -2,6 +2,9 @@
 import os
 import uuid
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -933,3 +936,53 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
             "Current caregiver question",
             "Current grounded response",
         ]
+
+
+def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monkeypatch):
+    """A same-turn retry waits for the original commit instead of duplicating inference."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Concurrent Companion recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    turn_id = str(uuid.uuid4())
+    calls = []
+    calls_lock = threading.Lock()
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        with calls_lock:
+            calls.append(messages)
+        time.sleep(0.25)
+        return "The saved care information does not establish an additional conclusion."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+
+    def submit():
+        return client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": "What does the saved care information establish?",
+                "client_turn_id": turn_id,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: submit(), range(2)))
+
+    assert [response.status_code for response in responses] == [200, 200], [r.text for r in responses]
+    bodies = [response.json() for response in responses]
+    assert bodies[0]["session_id"] == bodies[1]["session_id"]
+    assert sorted(body["idempotent_replay"] for body in bodies) == [False, True]
+    assert len(calls) == 1
+
+    with Session() as db:
+        assert db.query(ConversationSession).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).count() == 1
+        assert db.query(ConversationMessage).filter_by(
+            session_id=bodies[0]["session_id"],
+        ).count() == 2
