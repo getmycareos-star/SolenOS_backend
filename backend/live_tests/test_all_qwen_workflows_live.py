@@ -100,7 +100,7 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
     from app.services.qwen_system_prompt import apply_solenos_system_contract
 
     cases = _production_qwen_evaluation_cases()
-    assert len(cases) == 10
+    assert len(cases) == 15
     results = []
     original_urlopen = qwen_gateway.urllib.request.urlopen
 
