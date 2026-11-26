@@ -2339,7 +2339,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_question or linked_open_question_answer or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event or linked_conversation_message:
         raise HTTPException(
             status_code=409,
-            detail="This document supports other care-history, follow-up or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
+            detail="This document is referenced by care-history, follow-up, assessment or Companion conversation records. Resolve those source links before deletion. The original file has not been removed.",
         )
     child_version = db.query(EvidenceModel.id).filter(EvidenceModel.parent_evidence_id == evidence_id).first()
     if child_version:
