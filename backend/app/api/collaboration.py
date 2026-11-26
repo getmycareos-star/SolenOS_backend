@@ -5605,12 +5605,22 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
             parsed = json.loads(raw)
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=503, detail="Qwen returned invalid claim data. No claims were accepted.") from exc
-        if not isinstance(parsed, dict) or not isinstance(parsed.get("claims"), list):
-            raise HTTPException(status_code=503, detail="Qwen returned an invalid claim structure.")
+        if (
+            not isinstance(parsed, dict)
+            or set(parsed) != {"claims"}
+            or not isinstance(parsed.get("claims"), list)
+            or len(parsed["claims"]) > 20
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail="Qwen returned an invalid or over-limit claim structure. No claims were accepted.",
+            )
         claims = []
         seen_source_spans: set[tuple[int, int, str]] = set()
-        for item in parsed["claims"][:20]:
-            if not isinstance(item, dict):
+        for item in parsed["claims"]:
+            if not isinstance(item, dict) or set(item) != {
+                "claim_text", "entity_type", "event_type", "confidence_tag", "source_span"
+            }:
                 continue
             text_value, entity, event, confidence = (item.get("claim_text"), item.get("entity_type"), item.get("event_type"), item.get("confidence_tag"))
             if not isinstance(text_value, str) or not text_value.strip() or len(text_value) > 1000:
