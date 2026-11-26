@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import json
 import logging
 import hashlib
+import uuid
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.services.daily_capture_status import daily_capture_extraction_status
