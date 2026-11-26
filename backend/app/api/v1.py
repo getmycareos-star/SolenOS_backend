@@ -1073,7 +1073,10 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     (EvidenceModel.evidence_status.is_(None))
                     | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
                 ).first()
-                if photo_evidence is None:
+                photo_blob = db.query(EvidenceUpload.evidence_id).filter(
+                    EvidenceUpload.evidence_id == photo_evidence_id,
+                ).first()
+                if photo_evidence is None or photo_blob is None:
                     raise HTTPException(
                         status_code=422,
                         detail="A medicine photo must be saved to this care record before adding the medication entry.",
