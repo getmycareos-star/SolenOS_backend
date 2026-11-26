@@ -59,6 +59,7 @@ from app.models.collaboration import (
     ConsentRecord,
     ConversationMessage,
     ConversationSession,
+    CompanionTurnLease,
     EvidenceUpload,
     ShareIntake,
 )
@@ -12266,6 +12267,26 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ),
         "claim_provenance": claim_provenance,
     }
+    # Lease ownership is a fencing token: a request whose lease expired
+    # or was replaced must never commit a late response over a newer turn.
+    owned_lease_keys = getattr(request.state, "companion_turn_leases", [])
+    lease_owner_token = getattr(request.state, "companion_turn_lease_owner", None)
+    if owned_lease_keys:
+        still_owned = [
+            key for key in owned_lease_keys
+            if db.query(CompanionTurnLease.lock_key).filter(
+                CompanionTurnLease.lock_key == key,
+                CompanionTurnLease.owner_token == lease_owner_token,
+                CompanionTurnLease.expires_at > datetime.now(timezone.utc),
+            ).first() is not None
+        ]
+        if len(still_owned) != len(owned_lease_keys):
+            db.rollback()
+            raise HTTPException(
+                status_code=409,
+                detail="This Companion turn took too long to reserve safely. Please retry.",
+            )
+
     # Inference and retrieval can take long enough for a caregiver grant, bearer
     # session, or conversation to be revoked/closed while this request is running.
     # Re-check all three immediately before persisting or returning the generated
