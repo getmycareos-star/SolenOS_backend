@@ -230,7 +230,11 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
             "raw_fragment": "Mom fell yesterday",
         }
     ]
-    assert result["understanding"]["unknowns"] == []
+    assert result["understanding"]["unknowns"] == [{
+        "question": "What happened to her after she fell?",
+        "status": "open",
+        "raw_fragment": "Mom fell yesterday",
+    }]
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
 
