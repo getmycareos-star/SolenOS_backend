@@ -671,3 +671,59 @@ def test_handoff_draft_generation_uses_real_qwen_and_exact_saved_sources(live_qw
         for evidence_id in (item.get("evidence_ids") or [])
     }
     assert set(evidence_ids).intersection(referenced_evidence), data
+
+def test_real_qwen_care_understanding_preserves_negation_and_uncertainty(live_qwen_context):
+    client = live_qwen_context["client"]
+    session = live_qwen_context["session"]
+    headers = {"Authorization": f"Bearer {session['access_token']}"}
+    person_id = session["person"]["id"]
+    source_note = (
+        "Caregiver report: Mum did not fall yesterday. "
+        "The caregiver is worried she may have an infection. "
+        "She ate very little breakfast this morning."
+    )
+    _event_id, evidence_ids = _record_fixture(client, session, source_note)
+    assert evidence_ids, "Daily Care did not persist source evidence for live Qwen evaluation"
+
+    evidence_response = client.get(
+        f"/api/v1/evidence/{person_id}",
+        headers=headers,
+        params={"ids": evidence_ids[0]},
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence_rows = evidence_response.json()
+    assert len(evidence_rows) == 1, evidence_rows
+    source = evidence_rows[0]["source_text"]
+
+    response = client.post(
+        "/api/v1/assistant/care-understanding",
+        headers=headers,
+        json={"evidence_id": evidence_ids[0], "raw_text": source},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["written_to_lcr"] is False
+    assert data["review_required"] is True
+    observations = data["understanding"]["observations"]
+    assert observations, data
+
+    fall_observations = [
+        item for item in observations
+        if "fall" in item["description"].casefold()
+    ]
+    assert fall_observations, data
+    assert all(
+        re.search(r"\\b(?:no|not|never|neither|nor|without|did not|didn't)\\b", item["description"], re.IGNORECASE)
+        for item in fall_observations
+    ), f"Qwen reversed or dropped the source's no-fall statement: {fall_observations!r}"
+
+    infection_observations = [
+        item for item in observations
+        if "infection" in item["description"].casefold()
+    ]
+    assert all(
+        re.search(r"\\b(?:may|might|could|possibly|possible|suspected|suspects|uncertain|unclear)\\b", item["description"], re.IGNORECASE)
+        for item in infection_observations
+    ), f"Qwen promoted an uncertain infection concern into a confirmed fact: {infection_observations!r}"
+    assert all(item["confidence"] == "unavailable" for item in observations)
+    assert all(item["raw_fragment"] in source for item in observations)
