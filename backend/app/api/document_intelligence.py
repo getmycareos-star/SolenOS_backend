@@ -1632,7 +1632,8 @@ def list_document_review_history(
             for row in rows
         ],
         "count": len(rows),
-        "history_authority": "append_only_document_review_events_across_extraction_retries",
+        "history_authority": "append_only_document_review_events",
+        "history_scope": "current_and_prior_extraction_passes",
     }
 
 
