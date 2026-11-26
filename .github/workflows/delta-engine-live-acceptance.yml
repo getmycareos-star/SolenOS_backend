@@ -1,19 +1,6 @@
 name: Delta Engine live Qwen acceptance
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "backend/app/services/delta_engine.py"
-      - "backend/app/services/qwen_gateway.py"
-      - "backend/app/services/qwen_system_prompt.py"
-      - "backend/app/services/solenos_personality.py"
-      - "backend/app/services/care_continuity.py"
-      - "backend/app/services/lcr_context.py"
-      - "backend/app/api/care_delta.py"
-      - "backend/live_tests/test_delta_engine_live.py"
-      - ".github/workflows/delta-engine-live-acceptance.yml"
   workflow_run:
     workflows: ["Backend tests — main validation"]
     types: [completed]
@@ -29,7 +16,7 @@ concurrency:
 
 jobs:
   delta-engine-live-qwen:
-    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_sha == github.sha }}
+    if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     services:
