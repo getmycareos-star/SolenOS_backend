@@ -484,11 +484,14 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
         "not_assessed", "assessed_bounded_subset", "unavailable_schema", "failed",
     }
     assert isinstance(current_body["source_coverage"], dict)
-    assert any(
-        item.get("id") == observation.json()["id"]
+    current_observation = next(
+        item for item in current_body["items"]
+        if item.get("id") == observation.json()["id"]
         and item.get("source_collection") == "caregiver_observations"
-        for item in current_care.json()["items"]
-    ), "the caregiver's own session-attributed private observation must appear in the LCR"
+    )
+    assert current_observation["description"] == "Caregiver directly observed the transfer.", (
+        "the LCR projection must preserve the caregiver's actual observation text, not an empty description"
+    )
 
     context = client.post(
         "/api/v1/care-continuity/caregiver-contexts",

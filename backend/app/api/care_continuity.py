@@ -2295,8 +2295,10 @@ def current_care_projection(
 
         title_fields = ("title", "topic", "question", "conflict_type", "fact_type", "field", "attribute", "subject_label", "follow_up_kind", "target_type",
                         "observation_category", "decision_text", "description", "event_type")
-        description_fields = ("description", "question", "notes", "fact_value", "asserted_value",
-                              "perspective_text", "observed_value", "normalized_value", "value_text", "source_passage", "ambiguity_note", "decision_text", "summary", "resolution", "decision_notes")
+        description_fields = ("description", "question", "notes", "observation_content", "claim_content",
+                              "availability_notes", "context", "fact_value", "asserted_value", "perspective_text",
+                              "observed_value", "normalized_value", "value_text", "source_passage",
+                              "ambiguity_note", "decision_text", "summary", "resolution", "decision_notes")
         title = next((str(row[k]).strip() for k in title_fields if isinstance(row.get(k), str) and row[k].strip()), kind)
         description = next((str(row[k]).strip() for k in description_fields if isinstance(row.get(k), str) and row[k].strip()), "")
         if source_name == "events" and str(row.get("event_type") or "").strip().lower() in {
