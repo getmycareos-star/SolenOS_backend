@@ -410,7 +410,7 @@ def test_lifecycle_response_trusts_only_page_totals_marked_as_original_binary():
     analysis = SimpleNamespace(
         id="verified-pdf-page-total",
         source_evidence_id="verified-pdf-source",
-        source_text="[Page 1 OCR]\\nFirst page.\\n[Page 2 OCR]\\nSecond page.",
+        source_text="[Page 1 OCR]\nFirst page.\n[Page 2 OCR]\nSecond page.",
         extraction_status="available",
         candidates={
             "filename": "care-plan.pdf",
