@@ -857,7 +857,7 @@ def test_handoff_withholds_legacy_pdf_text_when_original_has_unprocessed_pages(c
     writer.write(output)
     original = output.getvalue()
     digest = hashlib.sha256(original).hexdigest()
-    source_text = "[Page 1 OCR]\\nFirst page was read."
+    source_text = "[Page 1 OCR]\nFirst page was read."
     db = TestSessionLocal()
     try:
         document = Evidence(
