@@ -2098,7 +2098,7 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
                     return None
                 observed_pages = {
                     int(match.group(1))
-                    for match in re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_text)
+                    for match in re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_text)
                 }
                 if observed_pages != set(range(1, original_page_count + 1)):
                     return None
