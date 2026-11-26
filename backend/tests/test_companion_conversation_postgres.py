@@ -1131,6 +1131,67 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
         assert "view_conversations" not in (grant.permissions or [])
 
 
+def test_companion_history_permission_does_not_grant_lcr_read_or_write():
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Conversation-only recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    session_id = f"conversation-only-{suffix}"
+    source_message_id = f"conversation-only-source-{suffix}"
+
+    with Session() as db:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).one()
+        grant.permissions = [
+            permission for permission in (grant.permissions or [])
+            if permission != "view_lcr"
+        ]
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Conversation-only access", status="active",
+        ))
+        db.add(ConversationMessage(
+            id=source_message_id, session_id=session_id, role="user",
+            content="I noticed a change in sleep last night.",
+        ))
+        db.commit()
+
+    listed = client.get("/api/v1/conversations", headers=headers)
+    history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+    updates = client.get("/api/v1/companion/care-updates", headers=headers)
+    proposal_response = client.post(
+        f"/api/v1/companion/care-updates/from-message/{source_message_id}",
+        headers=headers,
+        json={"confirm_care_report": True},
+    )
+    assert listed.status_code == 200, listed.text
+    assert history.status_code == 200, history.text
+    assert updates.status_code == 200, updates.text
+    assert proposal_response.status_code == 200 or proposal_response.status_code == 201, proposal_response.text
+    proposal_id = proposal_response.json()["proposal"]["id"]
+
+    accepted = client.post(
+        f"/api/v1/companion/care-updates/{proposal_id}/review",
+        headers=headers,
+        json={"decision": "accept"},
+    )
+    sent = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "text": "What is saved in the care record?",
+            "session_id": session_id,
+            "client_turn_id": str(uuid.uuid4()),
+        },
+    )
+    assert accepted.status_code == 403, accepted.text
+    assert sent.status_code == 403, sent.text
+
+
 def test_companion_saved_conversation_list_paginates_with_recipient_scope():
     """Saved conversation navigation can reach older sessions without crossing records."""
     suffix = uuid.uuid4().hex[:10]
