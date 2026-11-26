@@ -35,7 +35,7 @@ from app.models.collaboration import EvidenceUpload
 from app.services.document_candidate_schema import classify_document
 
 router = APIRouter(prefix="/documents", tags=["document lifecycle"])
-MAX_EXTRACTED_CHARS = 100_000
+MAX_EXTRACTED_CHARS = 1_000_000
 MAX_PDF_PAGES = 100
 MIN_NATIVE_PDF_TEXT_CHARS = 40
 MAX_IMAGE_PIXELS = 20_000_000
