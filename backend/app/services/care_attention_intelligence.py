@@ -55,6 +55,7 @@ def _record_ref(item: dict[str, Any]) -> dict[str, Any]:
         "title": str(item.get("title") or item.get("observation_category") or item.get("attribute") or item.get("source") or "Care record")[:240],
         "occurred_at": item.get("occurred_at") or item.get("observed_at") or item.get("effective_at"),
         "recorded_at": item.get("recorded_at") or item.get("created_at") or item.get("uploaded_at"),
+        "time_provenance": item.get("time_provenance"),
         "evidence_ids": _evidence_ids(item),
     }
 
