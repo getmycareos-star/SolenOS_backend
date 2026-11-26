@@ -1192,8 +1192,8 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
     person_id = created["person"]["id"]
     caregiver_id = created["caregiver"]["id"]
     headers = {"Authorization": f"Bearer {created['access_token']}"}
-    original_text = "Mum woke three times last night. What should I watch for today?"
-    exact_quote = "Mum woke three times last night."
+    original_text = "Mum woke three times during sleep. What should I watch for?"
+    exact_quote = "Mum woke three times during sleep."
 
     extraction_calls = []
     turn_id = str(uuid.uuid4())
@@ -1205,7 +1205,7 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
         return {
             "observations": [{
                 "source_quote": exact_quote,
-                "event_time_quote": "last night",
+                "event_time_quote": "",
             }]
         }
 
@@ -1246,8 +1246,8 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
         assert proposal.status == "pending_authorization"
         assert proposal.proposed_change_json["source_quote"] == exact_quote
         assert proposal.proposed_change_json["asserted_value"] == exact_quote
-        assert proposal.proposed_change_json["event_time_text"] == "last night"
-        assert proposal.uncertainty_json["event_time"] == "exact_quoted_phrase"
+        assert proposal.proposed_change_json["event_time_text"] is None
+        assert proposal.uncertainty_json["event_time"] == "not_supplied"
         assert proposal.uncertainty_json["clinical_status"] == "not_assessed"
         assert proposal.uncertainty_json["caregiver_review"] == "required"
         assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
@@ -1280,6 +1280,20 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
             content="I noticed a change in sleep last night.",
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=f"conversation-only-assistant-{suffix}",
+            session_id=session_id,
+            role="assistant",
+            content="The care record says the medication dose changed yesterday.",
+            evidence_ids_json='["restricted-evidence-id"]',
+            source_record_refs_json='[{"record_type":"evidence","record_id":"restricted-evidence-id"}]',
+            response_metadata_json=json.dumps({
+                "source_evidence_ids": ["restricted-evidence-id"],
+                "source_record_refs": [{"record_type": "evidence", "record_id": "restricted-evidence-id"}],
+                "claim_provenance": {"coverage": "complete", "claims": [{"text": "restricted care claim"}]},
+            }),
         ))
         db.commit()
 
