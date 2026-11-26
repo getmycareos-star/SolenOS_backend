@@ -876,3 +876,60 @@ def test_companion_history_uses_stable_scoped_cursor_pages():
         headers={"Authorization": f"Bearer {other['access_token']}"},
     )
     assert denied.status_code == 404
+
+
+def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
+    """Retry payload size must not grow with unrelated older conversation history."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Replay bounded recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    session_id = f"companion-replay-{suffix}"
+    turn_id = str(uuid.uuid4())
+    source_message_id = f"source-{suffix}"
+    assistant_message_id = f"assistant-{suffix}"
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Replay bounded history", status="active", created_at=now,
+        ))
+        db.flush()
+        for index in range(25):
+            db.add(ConversationMessage(
+                id=f"older-{index}-{suffix}", session_id=session_id,
+                role="user" if index % 2 == 0 else "assistant",
+                content=f"older history {index}", created_at=now + timedelta(seconds=index),
+            ))
+        db.add(ConversationMessage(
+            id=source_message_id, session_id=session_id, role="user",
+            content="Current caregiver question", created_at=now + timedelta(seconds=26),
+        ))
+        db.add(ConversationMessage(
+            id=assistant_message_id, session_id=session_id, role="assistant",
+            content="Current grounded response", client_turn_id=turn_id,
+            response_metadata_json=json.dumps({
+                "request_sha256": "stable-request-fingerprint",
+                "source_message_id": source_message_id,
+                "ai_generated": True,
+            }),
+            created_at=now + timedelta(seconds=26, microseconds=1),
+        ))
+        db.commit()
+
+        replay = collaboration._companion_replay_response(
+            db,
+            client_turn_id=turn_id,
+            request_sha256="stable-request-fingerprint",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=session_id,
+        )
+        assert replay is not None
+        assert replay["idempotent_replay"] is True
+        assert [item["text"] for item in replay["messages"]] == [
+            "Current caregiver question",
+            "Current grounded response",
+        ]
