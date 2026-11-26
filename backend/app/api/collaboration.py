@@ -11780,12 +11780,45 @@ def list_conversations(
 
 
 @router.get("/conversation/{session_id}")
-def conversation_history(session_id: str, request: Request, db: Session = Depends(get_db)):
+def conversation_history(
+    session_id: str,
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+    before: datetime | None = Query(default=None),
+    before_id: str | None = Query(default=None, min_length=1, max_length=64),
+    db: Session = Depends(get_db),
+):
+    """Return a stable, recipient-scoped page of persisted conversation history.
+
+    The cursor is the timestamp and ID of the oldest item in the previous page.
+    Ordering by both fields prevents ties from duplicating or dropping messages.
+    """
     person_id, caregiver_id = _scope(request, db)
-    session = db.query(ConversationSession).filter_by(id=session_id, person_id=person_id, caregiver_id=caregiver_id).first()
+    session = db.query(ConversationSession).filter_by(
+        id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+    ).first()
     if not session:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    rows = db.query(ConversationMessage).filter_by(session_id=session.id).order_by(ConversationMessage.created_at.asc()).all()
+    if (before is None) != (before_id is None):
+        raise HTTPException(status_code=422, detail="Both before and before_id are required for history pagination")
+
+    query = db.query(ConversationMessage).filter_by(session_id=session.id)
+    if before is not None and before_id is not None:
+        query = query.filter(or_(
+            ConversationMessage.created_at < before,
+            and_(
+                ConversationMessage.created_at == before,
+                ConversationMessage.id < before_id,
+            ),
+        ))
+    descending_rows = query.order_by(
+        ConversationMessage.created_at.desc(),
+        ConversationMessage.id.desc(),
+    ).limit(limit + 1).all()
+    has_more = len(descending_rows) > limit
+    page_descending = descending_rows[:limit]
+    oldest_in_page = page_descending[-1] if page_descending else None
+    rows = list(reversed(page_descending))
 
     def serialize_history_message(row: ConversationMessage) -> dict:
         metadata = _stored_response_metadata(row)
@@ -11816,6 +11849,10 @@ def conversation_history(session_id: str, request: Request, db: Session = Depend
         "session_id": session.id,
         "person_id": person_id,
         "messages": [serialize_history_message(row) for row in rows],
+        "has_more": has_more,
+        "next_before": oldest_in_page.created_at.isoformat() if has_more and oldest_in_page and oldest_in_page.created_at else None,
+        "next_before_id": oldest_in_page.id if has_more and oldest_in_page else None,
+        "limit": limit,
     }
 
 
