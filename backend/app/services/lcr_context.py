@@ -1872,7 +1872,7 @@ def build_lcr_context(
                     ))
                     correction_rows_by_id = {}
                     corrections_table = metadata.tables.get("corrections")
-                    if correction_ids and corrections_table is not None:
+                    if corrections_table is not None:
                         correction_columns = [
                             corrections_table.c[name]
                             for name in (
