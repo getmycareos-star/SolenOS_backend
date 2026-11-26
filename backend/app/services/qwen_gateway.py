@@ -479,37 +479,38 @@ def qwen_chat(
         retry_seconds = max(0.0, min(float(os.getenv("OLLAMA_STARTUP_RETRY_SECONDS", str(effective_timeout))), 180.0))
     except (TypeError, ValueError):
         retry_seconds = 45.0
-    retry_deadline = None
+    # One monotonic deadline bounds the complete invocation, including cold-start
+    # retries and transient HTTP retries. Socket timeouts are per-attempt only.
+    retry_budget = min(retry_seconds, effective_timeout)
+    retry_deadline = time.monotonic() + retry_budget
     last_startup_error = None
-    first_attempt = True
+    last_retry_error = None
     transient_http_retry_used = False
     attempt_count = 0
     result = None
     try:
         while True:
+            remaining = retry_deadline - time.monotonic()
+            if attempt_count > 0 and remaining <= 0:
+                if last_startup_error is not None:
+                    raise last_startup_error
+                if last_retry_error is not None:
+                    raise last_retry_error
+                raise TimeoutError("Qwen invocation deadline exhausted")
             attempt_count += 1
             audit_metadata["attempt_count"] = attempt_count
             audit_metadata["transient_http_retry_used"] = transient_http_retry_used
-            if first_attempt:
-                attempt_timeout = effective_timeout
-            else:
-                remaining = retry_deadline - time.monotonic()
-                if remaining <= 0:
-                    raise last_startup_error
-                # urlopen's socket timeout applies to each request, not to the
-                # retry loop as a whole. Cap each retry by the remaining startup
-                # budget so a final connection attempt cannot overrun it.
-                attempt_timeout = min(effective_timeout, remaining)
+            attempt_timeout = effective_timeout if attempt_count == 1 else min(effective_timeout, remaining)
             try:
                 with urllib.request.urlopen(request, timeout=attempt_timeout) as response:
                     result = json.loads(response.read().decode("utf-8"))
                 break
             except urllib.error.HTTPError as exc:
-                # A short, single retry covers transient Ollama startup/overload
-                # responses without creating an unbounded inference retry loop.
-                # Missing models and request errors remain immediate failures.
+                # One bounded retry covers transient startup/overload responses.
+                # Missing-model and request errors remain immediate failures.
                 if exc.code in {429, 500, 502, 503, 504} and not transient_http_retry_used:
                     transient_http_retry_used = True
+                    last_retry_error = exc
                     retry_after = None
                     try:
                         retry_after = float(exc.headers.get("Retry-After", "0.5"))
@@ -517,8 +518,11 @@ def qwen_chat(
                         retry_after = 0.5
                     retry_delay = max(0.0, min(retry_after, 2.0))
                     exc.close()
+                    remaining = retry_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise
                     if retry_delay:
-                        time.sleep(retry_delay)
+                        time.sleep(min(retry_delay, remaining))
                     continue
                 raise
             except urllib.error.URLError as exc:
@@ -533,13 +537,10 @@ def qwen_chat(
                         http.client.RemoteDisconnected,
                     ),
                 )
-                if first_attempt:
-                    retry_deadline = time.monotonic() + retry_seconds
                 remaining = retry_deadline - time.monotonic()
                 if not retryable_startup_failure or remaining <= 0:
                     raise
                 last_startup_error = exc
-                first_attempt = False
                 logger.info("Local Qwen runtime is still starting; retrying inference connection")
                 time.sleep(min(1.0, remaining))
             except (
@@ -549,16 +550,11 @@ def qwen_chat(
                 BrokenPipeError,
                 http.client.RemoteDisconnected,
             ) as exc:
-                # urllib may surface a connection-establishment failure
-                # directly instead of wrapping it in URLError. Treat both
-                # forms identically during the bounded model cold-start window.
-                if first_attempt:
-                    retry_deadline = time.monotonic() + retry_seconds
+                # urllib may surface connection-establishment failures directly.
                 remaining = retry_deadline - time.monotonic()
                 if remaining <= 0:
                     raise
                 last_startup_error = exc
-                first_attempt = False
                 logger.info("Local Qwen runtime is still starting; retrying inference connection")
                 time.sleep(min(1.0, remaining))
     except urllib.error.HTTPError as exc:
