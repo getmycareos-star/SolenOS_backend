@@ -182,7 +182,7 @@ jobs:
         continue-on-error: true
         if: ${{ always() && steps.ollama.outcome == 'success' && steps.qwen_model.outcome == 'success' }}
         run: python -m pytest backend/live_tests/test_all_qwen_workflows_live.py -q -s
-      - name: Upload ten-area live-Qwen input and response evidence
+      - name: Upload fifteen-case live-Qwen input and response evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
