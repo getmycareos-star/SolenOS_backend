@@ -856,7 +856,13 @@ def extract_review_candidates(
         )
 
     observations = []
+    unresolved_subjects: list[str] = []
     seen_candidate_keys: set[tuple[str, str, str]] = set()
+    pronoun_only_subject = re.compile(
+        r"^(?:i|we|you|he|she|they|it|me|us|him|her|them|myself|ourselves|"
+        r"yourself|yourselves|himself|herself|itself|themselves)$",
+        re.IGNORECASE,
+    )
     for item in parsed["observations"][:12]:
         if not isinstance(item, dict):
             continue
@@ -864,6 +870,15 @@ def extract_review_candidates(
         observation = item.get("observation")
         quote = item.get("source_quote")
         if not all(isinstance(value, str) and value.strip() for value in (subject, observation, quote)):
+            continue
+        # A pronoun is not a stable care-recipient identity. This extraction
+        # boundary has no authenticated entity map or conversation antecedent,
+        # so retain it as an unresolved clarification rather than attributing
+        # the event to the wrong person.
+        if pronoun_only_subject.fullmatch(subject.strip()):
+            pronoun = subject.strip()
+            if pronoun.casefold() not in {value.casefold() for value in unresolved_subjects}:
+                unresolved_subjects.append(pronoun)
             continue
         if quote not in bounded_source:
             continue
@@ -949,6 +964,10 @@ def extract_review_candidates(
         for question in questions[:3]
         if isinstance(question, str) and question.strip()
     ]
+    for pronoun in unresolved_subjects:
+        clarification = f"Who does “{pronoun}” refer to in this care update?"
+        if clarification not in clean_questions and len(clean_questions) < 3:
+            clean_questions.append(clarification)
     return {"observations": observations, "open_questions": clean_questions}
 
 
