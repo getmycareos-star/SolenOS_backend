@@ -152,7 +152,7 @@ def process_companion_care_update_message(
     try:
         if db.get_bind().dialect.name == "postgresql":
             acquired = db.execute(
-                """
+                text("""
                 INSERT INTO companion_turn_leases
                     (lock_key, owner_token, expires_at, updated_at)
                 VALUES
@@ -163,7 +163,7 @@ def process_companion_care_update_message(
                     updated_at = EXCLUDED.updated_at
                 WHERE companion_turn_leases.expires_at <= now()
                 RETURNING lock_key
-                """,
+                """),
                 {"lock_key": lock_key, "owner_token": owner_token},
             ).first()
             db.commit()
@@ -260,10 +260,10 @@ def process_companion_care_update_message(
             try:
                 db.rollback()
                 db.execute(
-                    """
+                    text("""
                     DELETE FROM companion_turn_leases
                     WHERE lock_key = :lock_key AND owner_token = :owner_token
-                    """,
+                    """),
                     {"lock_key": lock_key, "owner_token": owner_token},
                 )
                 db.commit()
