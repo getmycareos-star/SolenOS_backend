@@ -1,5 +1,6 @@
 """Persistence helpers for Companion proposals using the shared AI-output governance records."""
 import json
+import hashlib
 import logging
 import uuid
 
@@ -126,15 +127,40 @@ def process_companion_care_update_message(
     source_text: str,
     anonymous_session_id: str,
 ) -> None:
-    """Run candidate extraction after the chat response has been sent.
+    """Extract exact-quote proposals after persistence, under a durable message lease.
 
-    A separate session is created from the request's database bind. Model
-    latency and failures therefore cannot hold the Companion request open or
-    roll back the already-committed conversation pair.
+    A separate session is used so model latency cannot hold the Companion
+    request's PostgreSQL connection or conversation lease. The expiring
+    extraction lease makes retries safe if a response was lost or a worker
+    restarted while the model was running.
     """
     session_factory = sessionmaker(bind=bind, expire_on_commit=False)
     db = session_factory()
+    owner_token = str(uuid.uuid4())
+    lock_key = "care-update:" + hashlib.sha256(str(message_id).encode("utf-8")).hexdigest()
+    leased = False
     try:
+        if db.get_bind().dialect.name == "postgresql":
+            acquired = db.execute(
+                """
+                INSERT INTO companion_turn_leases
+                    (lock_key, owner_token, expires_at, updated_at)
+                VALUES
+                    (:lock_key, :owner_token, now() + interval '360 seconds', now())
+                ON CONFLICT (lock_key) DO UPDATE SET
+                    owner_token = EXCLUDED.owner_token,
+                    expires_at = EXCLUDED.expires_at,
+                    updated_at = EXCLUDED.updated_at
+                WHERE companion_turn_leases.expires_at <= now()
+                RETURNING lock_key
+                """,
+                {"lock_key": lock_key, "owner_token": owner_token},
+            ).first()
+            db.commit()
+            if acquired is None:
+                return
+            leased = True
+
         auth_session = db.query(AnonymousSession).filter(
             AnonymousSession.id == anonymous_session_id,
             AnonymousSession.person_id == person_id,
@@ -144,12 +170,33 @@ def process_companion_care_update_message(
         ).first()
         conversation = db.query(ConversationSession).filter_by(
             id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
+            status="active",
         ).first()
         original_message = db.query(ConversationMessage).filter_by(
             id=message_id, session_id=conversation_id, role="user",
         ).first()
-        if auth_session is None or conversation is None or original_message is None or original_message.content != source_text:
+        if (
+            auth_session is None
+            or conversation is None
+            or original_message is None
+            or original_message.content != source_text
+        ):
+            db.rollback()
             return
+
+        existing = db.query(AIOutputLCRProposal.id).filter(
+            AIOutputLCRProposal.person_id == person_id,
+            AIOutputLCRProposal.caregiver_id == caregiver_id,
+            AIOutputLCRProposal.proposal_type == "companion_care_observation",
+            AIOutputLCRProposal.source_message_id == message_id,
+            AIOutputLCRProposal.proposal_version == 1,
+        ).first()
+        if existing is not None:
+            db.rollback()
+            return
+
+        # Release the read transaction and its connection before model inference.
+        db.rollback()
         extraction = extract_companion_care_candidates(
             source_text,
             audit_context={
@@ -172,4 +219,18 @@ def process_companion_care_update_message(
         db.rollback()
         logger.exception("Companion care-update identification failed after message persistence")
     finally:
+        if leased:
+            try:
+                db.rollback()
+                db.execute(
+                    """
+                    DELETE FROM companion_turn_leases
+                    WHERE lock_key = :lock_key AND owner_token = :owner_token
+                    """,
+                    {"lock_key": lock_key, "owner_token": owner_token},
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Companion care-update lease cleanup failed; expiry will recover it")
         db.close()
