@@ -379,6 +379,78 @@ def test_postgres_interrupted_pdf_tail_is_persisted_as_unprocessed(monkeypatch):
         engine.dispose()
 
 
+
+def test_postgres_interrupted_pdf_retry_resumes_only_missing_pages(monkeypatch):
+    """The PostgreSQL lifecycle resumes omitted pages without reprocessing saved pages."""
+    from pypdf import PdfWriter
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-pg-resume-person-{suffix}"
+    caregiver_id = f"doc-pg-resume-caregiver-{suffix}"
+    writer = PdfWriter()
+    for _ in range(4):
+        writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    calls = []
+
+    def controlled_extract(upload, content, evidence, *, retry_only_pages=None, previous_source_text=None):
+        calls.append((set(retry_only_pages) if retry_only_pages is not None else None, previous_source_text))
+        if retry_only_pages is None:
+            return "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.", "test_pdf_text"
+        assert retry_only_pages == {3, 4}
+        return (
+            "[Page 1]\\nFirst page.\\n[Page 2]\\nSecond page.\\n"
+            "[Page 3]\\nThird page.\\n[Page 4]\\nFourth page.",
+            "test_pdf_text",
+        )
+
+    monkeypatch.setattr(lifecycle_module, "_extract", controlled_extract)
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="PostgreSQL interrupted PDF resume fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Document caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            uploaded = asyncio.run(upload_evidence(
+                _request(person_id, caregiver_id),
+                UploadFile(
+                    filename="resume-four-page.pdf",
+                    file=io.BytesIO(original),
+                    headers=Headers({"content-type": "application/pdf"}),
+                ),
+                person_id, caregiver_id, "document", "", "not_provided", "0", "{}", "false", db,
+            ))
+            evidence_id = uploaded["evidence_id"]
+            db.commit()
+
+        with Session() as db:
+            first = extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert first["unprocessed_page_numbers"] == [3, 4]
+
+        with Session() as db:
+            resumed = extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
+            assert calls[1][0] == {3, 4}
+            assert resumed["extraction_status"] == "available"
+            assert resumed["processed_page_numbers"] == [1, 2, 3, 4]
+            assert resumed["unprocessed_page_numbers"] == []
+            assert resumed["page_states"] == [
+                {"source_page_number": 1, "status": "processed", "attempt_count": 1},
+                {"source_page_number": 2, "status": "processed", "attempt_count": 1},
+                {"source_page_number": 3, "status": "processed", "attempt_count": 2},
+                {"source_page_number": 4, "status": "processed", "attempt_count": 2},
+            ]
+    finally:
+        engine.dispose()
+
+
 def _ensure_test_caregiver_access(db, person_id: str, caregiver_id: str) -> None:
     """Give direct-route PostgreSQL fixtures the same explicit grant as a real session."""
     grant = db.query(CaregiverAccessGrant).filter_by(
