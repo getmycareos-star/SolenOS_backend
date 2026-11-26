@@ -5661,7 +5661,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     system = (
         "SOLENOS_WORKFLOW_ID: care_understanding. "
         "Return JSON only with keys observations, events, decisions, outcomes, unknowns, non_care_facts, possible_links. "
-        "Match these exact structures: observations [{description,approximate_time:null|string,confidence:low|medium|high,raw_fragment}]. Confidence is an uncalibrated model hint only; the backend will expose it as unavailable, never as evidence of correctness. "
+        "Match these exact structures: observations [{description,approximate_time:null|string,raw_fragment}]. Confidence is an uncalibrated model hint only; the backend will expose it as unavailable, never as evidence of correctness. "
         "events [{description,time:null|string,participants:string[],raw_fragment}]; "
         "decisions [{description,who:string[],why:null|string,reason_unknown:boolean,status:active|completed|changed|reversed|uncertain|needs_review|pending,raw_fragment}]; "
         "outcomes [{description,status:observed|pending|uncertain|ongoing|resolved|changed,raw_fragment}]; "
@@ -5765,13 +5765,11 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             if key == "observations":
                 description = bounded_text(item.get("description"), 500)
                 valid_time, approximate_time = optional_text(item.get("approximate_time"), 120)
-                confidence = item.get("confidence")
                 if (
                     description is None
                     or not source_bound(description, fragment)
                     or not valid_time
                     or (approximate_time is not None and not source_bound(approximate_time, fragment))
-                    or confidence not in {"low", "medium", "high"}
                 ):
                     continue
                 result[key].append({
