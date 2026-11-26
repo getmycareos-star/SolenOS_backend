@@ -330,7 +330,6 @@ def test_care_understanding_preserves_positive_claim_after_unrelated_negated_cla
         "observations": [{
             "description": "Mom fell",
             "approximate_time": "yesterday",
-            "confidence": "high",
             "raw_fragment": source,
         }],
         "events": [],
