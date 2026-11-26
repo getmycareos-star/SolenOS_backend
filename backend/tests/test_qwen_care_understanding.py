@@ -189,3 +189,43 @@ def test_care_understanding_rejects_invalid_field_types_enums_and_oversized_valu
     }
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
+
+def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(monkeypatch):
+    _allow(monkeypatch)
+    model_output = {
+        "observations": [
+            {
+                "description": "She experienced a fall yesterday",
+                "approximate_time": "yesterday",
+                "confidence": "high",
+                "raw_fragment": "Mom fell yesterday",
+            },
+            {
+                "description": "Mom fell",
+                "approximate_time": "yesterday",
+                "confidence": "medium",
+                "raw_fragment": "Mom fell yesterday",
+            },
+        ],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
+
+    assert result["understanding"]["observations"] == [
+        {
+            "description": "Mom fell",
+            "approximate_time": "yesterday",
+            "confidence": "medium",
+            "raw_fragment": "Mom fell yesterday",
+        }
+    ]
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
+
