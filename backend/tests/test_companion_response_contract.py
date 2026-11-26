@@ -4958,6 +4958,11 @@ def test_companion_rejects_material_paraphrase_without_exact_source_match(monkey
             ).first()
             assert rejected is not None
             assert "unmatched_material_care_claim" in rejected.details_json["rejection_reasons"]
+            assert db.query(AISafetyCheck).filter_by(
+                person_id=person_id,
+                check_name="companion_response_grounding",
+                result="passed",
+            ).count() == 0
         finally:
             db.close()
     finally:
