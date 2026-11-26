@@ -2300,6 +2300,9 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         if isinstance(value, dict):
             if any(str(value.get(key) or "") == evidence_id for key in ("evidence_id", "source_evidence_id")):
                 return True
+            record_type = str(value.get("record_type") or "").strip().casefold()
+            if record_type in {"evidence", "document", "evidence_upload"} and str(value.get("record_id") or "") == evidence_id:
+                return True
             return any(_contains_evidence_reference(item) for item in value.values())
         if isinstance(value, list):
             return any(_contains_evidence_reference(item) for item in value)
