@@ -13,6 +13,7 @@ from app.services.lcr_context import (
     _exact_source_passages,
     build_lcr_context,
     format_lcr_context_for_prompt,
+    _information_status,
 )
 
 
@@ -457,10 +458,37 @@ def test_completed_correction_without_relationship_makes_event_currentness_unkno
         assert event["information_status"] == "event_currentness_unknown"
         assert event_source["status"] == "partial"
         assert event_source["error_code"] == "event_correction_lineage_inconsistent"
+        assert [row["id"] for row in event["unverified_corrections"]] == ["completed-correction-without-link"]
         assert "cannot be treated as current" in event_source["interpretation_limit"]
     finally:
         _load_source_schema.cache_clear()
         engine.dispose()
+
+
+
+def test_pending_linked_correction_is_not_mislabelled_as_an_applied_historical_correction():
+    status, explanation = _information_status("events", {
+        "status": "recorded",
+        "correction_lineage_status": "checked",
+        "pending_corrections": [{"id": "pending-1", "processing_status": "processing"}],
+        "superseded_by_corrections": [{"id": "pending-1", "processing_status": "processing"}],
+    })
+    assert status == "event_correction_pending"
+    assert "has not finished processing" in explanation
+
+
+def test_new_pending_correction_does_not_erase_verified_older_correction_context():
+    status, explanation = _information_status("events", {
+        "status": "recorded",
+        "correction_lineage_status": "checked",
+        "pending_corrections": [{"id": "pending-2", "processing_status": "processing"}],
+        "superseded_by_corrections": [
+            {"id": "completed-1", "processing_status": "completed"},
+            {"id": "pending-2", "processing_status": "processing"},
+        ],
+    })
+    assert status == "historical_event"
+    assert "newer correction is still being processed" in explanation
 
 
 def _open_questions_schema(engine):

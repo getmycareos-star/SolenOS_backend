@@ -644,15 +644,26 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "event_currentness_unknown",
                 "The correction history for this event could not be checked. Preserve the original report, but do not assume it is the latest account.",
             )
-        if item.get("superseded_by_corrections"):
+        pending_corrections = item.get("pending_corrections") or []
+        linked_corrections = item.get("superseded_by_corrections") or []
+        if pending_corrections:
+            has_completed_linked_correction = any(
+                str(correction.get("processing_status") or "").casefold() == "completed"
+                for correction in linked_corrections if isinstance(correction, dict)
+            )
+            if has_completed_linked_correction:
+                return (
+                    "historical_event",
+                    "A completed correction is linked to this earlier report, and a newer correction is still being processed. Keep the original and both corrections together as history; the latest account is not yet confirmed.",
+                )
+            return (
+                "event_correction_pending",
+                "A correction is linked to this report but has not finished processing. The original report remains available; do not treat the correction as the final account yet.",
+            )
+        if linked_corrections:
             return (
                 "historical_event",
                 "A caregiver correction is linked to this original event. Keep the original report and correction together as history; do not present the original wording as the current account.",
-            )
-        if item.get("pending_corrections"):
-            return (
-                "event_correction_pending",
-                "A caregiver correction has been saved but has not finished processing. The original report remains in history; do not present it as the final current account until the correction is applied.",
             )
         if event_status in {"invalidated", "superseded", "retracted", "withdrawn", "deleted"}:
             return (
@@ -1936,15 +1947,15 @@ def build_lcr_context(
                         if str(correction.get("processing_status") or "legacy_unverified").casefold()
                         not in active_correction_statuses | {"completed"}
                     ]
-                    completed_without_relationship = [
+                    unlinked_corrections = [
                         correction for correction in all_corrections
-                        if str(correction.get("processing_status") or "").casefold() == "completed"
+                        if str(correction.get("processing_status") or "legacy_unverified").casefold()
+                        in active_correction_statuses | {"completed"}
                         and str(correction.get("id")) not in linked_ids
                     ]
-                    if completed_without_relationship or unknown_corrections:
+                    if unlinked_corrections or unknown_corrections:
                         item["correction_lineage_status"] = "failed"
-                        if unknown_corrections:
-                            item["unverified_corrections"] = unknown_corrections
+                        item["unverified_corrections"] = [*unlinked_corrections, *unknown_corrections]
                     item["information_status"], item["interpretation_limit"] = _information_status("events", item)
                 correction_lineage_failed = any(
                     item.get("correction_lineage_status") == "failed"

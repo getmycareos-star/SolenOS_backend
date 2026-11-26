@@ -2163,6 +2163,22 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
 
 
 @router.get("/current-care")
+def _verified_event_correction_statuses(event_rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Return correction states only for links checked in this care-record scope."""
+    verified: dict[str, str] = {}
+    for event_row in event_rows:
+        if not isinstance(event_row, dict) or event_row.get("correction_lineage_status") != "checked":
+            continue
+        linked = event_row.get("superseded_by_corrections")
+        if not isinstance(linked, list):
+            continue
+        for correction in linked:
+            if not isinstance(correction, dict) or not correction.get("id"):
+                continue
+            verified[str(correction["id"])] = str(correction.get("processing_status") or "unknown").casefold()
+    return verified
+
+
 def current_care_projection(
     request: Request,
     limit_per_source: int = Query(default=10, ge=1, le=50),
@@ -2242,13 +2258,13 @@ def current_care_projection(
     # A correction can replace an event in the current projection only when
     # the event's person-scoped source relationship was independently checked.
     # A completed status by itself is not proof that the correction was linked.
+    verified_correction_statuses = _verified_event_correction_statuses(
+        (sources.get("events") or {}).get("items", [])
+    )
+    verified_linked_correction_ids = set(verified_correction_statuses)
     verified_completed_correction_ids = {
-        str(correction.get("id"))
-        for event_row in (sources.get("events") or {}).get("items", [])
-        if event_row.get("correction_lineage_status") == "checked"
-        for correction in (event_row.get("superseded_by_corrections") or [])
-        if str(correction.get("processing_status") or "").casefold() == "completed"
-        and correction.get("id")
+        correction_id for correction_id, status in verified_correction_statuses.items()
+        if status == "completed"
     }
     for correction_row in (sources.get("corrections") or {}).get("items", []):
         if correction_row.get("target_type") != "care_event" or not correction_row.get("target_id"):
@@ -2363,9 +2379,9 @@ def current_care_projection(
             "source_event_type": row.get("event_type") if source_name == "events" else None,
             "source_type": str(origin_type)[:80],
             "source_label": str(source_label)[:160] if source_label else "Source label not recorded",
-            "information_status": row.get("information_status") if source_name == "events" else None,
-            "correction_lineage_status": row.get("correction_lineage_status") if source_name == "events" else None,
-            "interpretation_limit": row.get("interpretation_limit") if source_name == "events" else None,
+            "information_status": row.get("information_status") if source_name in {"events", "corrections"} else None,
+            "correction_lineage_status": row.get("correction_lineage_status") if source_name in {"events", "corrections"} else None,
+            "interpretation_limit": row.get("interpretation_limit") if source_name in {"events", "corrections"} else None,
             "original_author": row.get("original_author") or (primary_source.original_author if primary_source else None),
             "reported_by_label": row.get("reported_by_label") or (primary_source.reported_by_label if primary_source else None),
             "reported_by_caregiver_id": row.get("reported_by_caregiver_id") or row.get("created_by_caregiver_id") or row.get("caregiver_id") or row.get("uploaded_by_caregiver_id") or (primary_source.reported_by_caregiver_id if primary_source else None),
@@ -2446,36 +2462,70 @@ def current_care_projection(
             # caregiver-recorded event, not a verified clinical fact.
             add("events", row, "Daily care entry", 6)
 
-    def add_correction_projection(target_id: str, correction_row: dict[str, Any], *, completed: bool) -> None:
-        processing_status = str(correction_row.get("processing_status") or "legacy_unverified")
+    def add_correction_projection(
+        target_id: str,
+        correction_row: dict[str, Any],
+        *,
+        completed: bool,
+        lineage_verified: bool,
+    ) -> None:
+        processing_status = str(correction_row.get("processing_status") or "legacy_unverified").casefold()
+        active_statuses = {"pending", "processing", "queued", "retrying", "retry_scheduled"}
+        is_applied = completed and lineage_verified
+        is_pending = processing_status in active_statuses and lineage_verified
         title = (
-            "Corrected care report" if completed
-            else "Correction awaiting update" if processing_status in {"pending", "processing"}
+            "Corrected care report" if is_applied
+            else "Correction awaiting update" if is_pending
             else "Earlier correction needs review"
         )
+        if not lineage_verified:
+            interpretation_limit = (
+                "This correction is saved, but its link to the original report could not be verified. "
+                "It has not replaced the original report."
+            )
+            information_status = "correction_lineage_unverified"
+        elif is_pending:
+            interpretation_limit = (
+                "This correction is linked to the original report but has not finished processing. "
+                "The original report remains available until the correction is applied."
+            )
+            information_status = "correction_pending"
+        else:
+            interpretation_limit = None
+            information_status = "correction_applied" if is_applied else "correction_status_unverified"
         correction_projection = {
             **correction_row,
             "id": correction_row.get("id"),
             "title": title,
             "description": str(correction_row.get("corrected_text") or ""),
-            "status": "current" if completed else processing_status,
-            "epistemic_status": "caregiver_reported" if completed else "uncertain",
+            "status": "current" if is_applied else processing_status if is_pending else "unverified",
+            "epistemic_status": "caregiver_reported" if is_applied else "uncertain",
             "source_type": "caregiver_correction",
             "source_label": "Caregiver correction",
             "recorded_at": correction_row.get("created_at"),
             "target_type": "care_event",
             "target_id": target_id,
+            "information_status": information_status,
+            "correction_lineage_status": "checked" if lineage_verified else "unverified",
+            "interpretation_limit": interpretation_limit,
         }
         add("corrections", correction_projection, title, 5)
 
-    # Keep the last successfully processed correction as current even if a
-    # newer correction is waiting to be reconciled. Never roll the projection
-    # back to the uncorrected event while downstream work is pending.
+    # Keep the last verified completed correction as current even if a newer
+    # linked correction is still processing. An unlinked completed row is never
+    # allowed to replace its source event or disappear from the caregiver view.
     for target_id, correction_row in latest_completed_event_corrections.items():
-        add_correction_projection(target_id, correction_row, completed=True)
+        add_correction_projection(target_id, correction_row, completed=True, lineage_verified=True)
     for target_id, correction_row in latest_event_corrections.items():
-        if correction_row.get("processing_status") != "completed":
-            add_correction_projection(target_id, correction_row, completed=False)
+        correction_id = str(correction_row.get("id") or "")
+        if correction_row.get("processing_status") == "completed" and correction_id in verified_completed_correction_ids:
+            continue
+        add_correction_projection(
+            target_id,
+            correction_row,
+            completed=False,
+            lineage_verified=correction_id in verified_linked_correction_ids,
+        )
 
     for row in (sources.get("caregiver_observations") or {}).get("items", []):
         add("caregiver_observations", row, "Caregiver observation", 6)
