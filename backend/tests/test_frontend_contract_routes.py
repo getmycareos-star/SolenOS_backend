@@ -865,6 +865,16 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
             "scales": [{"axis": "mood", "score": 3}],
             "notes": "Daily capture contract test",
         }
+        invalid_photo_payload = {
+            **payload,
+            "medications": [{
+                **payload["medications"][0],
+                "photo_evidence_id": "00000000-0000-4000-8000-000000000000",
+            }],
+        }
+        invalid_photo = client.post("/api/v1/daily/log", headers=auth, json=invalid_photo_payload)
+        assert invalid_photo.status_code == 422, invalid_photo.text
+
         saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
         assert saved.status_code == 200, saved.text
         assert saved.json()["success"] is True
