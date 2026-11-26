@@ -834,6 +834,7 @@ def extract_review_candidates(
         )
 
     observations = []
+    seen_candidate_keys: set[tuple[str, str, str]] = set()
     for item in parsed["observations"][:12]:
         if not isinstance(item, dict):
             continue
@@ -865,6 +866,14 @@ def extract_review_candidates(
         }
         if source_evidence_id:
             candidate["source_evidence_id"] = source_evidence_id
+        candidate_key = (
+            candidate["subject"].casefold(),
+            candidate["observation"].casefold(),
+            candidate["source_quote"],
+        )
+        if candidate_key in seen_candidate_keys:
+            continue
+        seen_candidate_keys.add(candidate_key)
         observations.append(candidate)
 
     # Small deterministic recovery for explicit tentative condition statements.
@@ -879,6 +888,8 @@ def extract_review_candidates(
         re.IGNORECASE,
     )
     for match in tentative_condition_pattern.finditer(bounded_source):
+        if len(observations) >= 12:
+            break
         subject = match.group("subject").strip(" .,:;")
         observation = match.group(0).strip(" .,:;")
         if not subject or not re.search(
