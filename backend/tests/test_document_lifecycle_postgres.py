@@ -405,6 +405,16 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
             assert first_receipt["processing_status"] == "not_applicable"
             evidence_id = first_receipt["evidence_id"]
 
+            invalid_rotation = {**form, "ingestion_key": f"{retry_key}-invalid", "photo_rotation_degrees": "45"}
+            invalid = client.post(
+                "/api/v1/upload",
+                headers=owner_headers,
+                data=invalid_rotation,
+                files={"file": ("care-photo.png", original, "image/png")},
+            )
+            assert invalid.status_code == 422
+            assert "0, 90, 180 or 270" in invalid.text
+
             replay = client.post(
                 "/api/v1/upload",
                 headers=owner_headers,
