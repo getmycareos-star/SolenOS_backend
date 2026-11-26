@@ -924,6 +924,9 @@ def test_handoff_withholds_legacy_pdf_text_when_original_has_unprocessed_pages(c
         if row["source_id"] == "handoff-legacy-pdf-evidence"
     )
     assert original_ref["details"]["extraction_status"] == "extraction_incomplete"
+    assert original_ref["details"]["page_count"] == 2
+    assert original_ref["details"]["page_count_verified"] is True
+    assert original_ref["details"]["unprocessed_page_numbers"] == [2]
 
 
 def test_handoff_withholds_extraction_when_persisted_text_checksum_is_invalid(client):
