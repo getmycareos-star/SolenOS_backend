@@ -1071,7 +1071,13 @@ def _require_owned_qwen_source(db: Session, person_id: str, caregiver_id: str, e
     return evidence
 
 
-def _scope(request: Request, db: Session, *, allow_documents_only: bool = False) -> tuple[str, str]:
+def _scope(
+    request: Request,
+    db: Session,
+    *,
+    allow_documents_only: bool = False,
+    required_permission: str = "view_lcr",
+) -> tuple[str, str]:
     # Resolve the bearer capability and re-check the current membership grant
     # on every request, including when middleware has already populated identity.
     person_id = getattr(request.state, "scoped_person_id", None)
@@ -1100,7 +1106,7 @@ def _scope(request: Request, db: Session, *, allow_documents_only: bool = False)
         raise HTTPException(status_code=403, detail="An active caregiver membership is required")
     if grant.access_scope == "documents_only" and not allow_documents_only:
         raise HTTPException(status_code=403, detail="This caregiver's access is limited to documents.")
-    required = "view_documents" if grant.access_scope == "documents_only" else "view_lcr"
+    required = "view_documents" if grant.access_scope == "documents_only" else required_permission
     require_caregiver_permission(db, str(person_id), str(caregiver_id), required)
     request.state.scoped_person_id = str(person_id)
     request.state.scoped_caregiver_id = str(caregiver_id)
@@ -1237,8 +1243,10 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     return str(session.id)
 
 def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
-    """Require a live bearer capability for every Companion read and write."""
-    person_id, caregiver_id = _scope(request, db)
+    """Require a live bearer capability and explicit conversation access."""
+    person_id, caregiver_id = _scope(
+        request, db, required_permission="view_conversations",
+    )
     _resolve_anonymous_session_id(request, db, person_id, caregiver_id)
     return person_id, caregiver_id
 
@@ -9150,6 +9158,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
     companion_request_started = _time.perf_counter()
     companion_request_id = getattr(getattr(request, "state", None), "request_id", None)
     person_id, caregiver_id = _companion_scope(request, db)
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     can_view_documents = True
     try:
         require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
