@@ -981,6 +981,7 @@ def _extraction_metadata(upload: EvidenceUpload, source_text: str, method: str) 
         "extraction_method": method,
         **classify_document(upload.filename or "", source_text),
         "page_count": total_pages,
+        "page_count_source": "original_binary" if is_paginated_pdf else "extracted_page_markers",
         "processed_page_numbers": processed_pages,
         "unreadable_page_numbers": unreadable_pages,
         "unprocessed_page_numbers": unprocessed_pages,
