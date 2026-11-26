@@ -5717,6 +5717,15 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             detail="Qwen exceeded the care-understanding output limits. No result was accepted.",
         )
     result = {k: [] for k in limits}
+    allowed_item_fields = {
+        "observations": {"description", "approximate_time", "raw_fragment"},
+        "events": {"description", "time", "participants", "raw_fragment"},
+        "decisions": {"description", "who", "why", "reason_unknown", "status", "raw_fragment"},
+        "outcomes": {"description", "status", "raw_fragment"},
+        "unknowns": {"question", "status", "raw_fragment"},
+        "non_care_facts": {"layer", "text", "raw_fragment"},
+        "possible_links": {"text", "causation_claimed"},
+    }
 
     def bounded_text(value, maximum: int) -> str | None:
         if not isinstance(value, str):
@@ -5763,8 +5772,11 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
 
 
     for key, limit in limits.items():
-        for item in parsed.get(key, [])[:limit]:
-            if not isinstance(item, dict):
+        for item in parsed.get(key, []):
+            if (
+                not isinstance(item, dict)
+                or set(item) - allowed_item_fields[key]
+            ):
                 continue
             if key == "possible_links":
                 link_text = bounded_text(item.get("text"), 500)
