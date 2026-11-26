@@ -150,6 +150,10 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
             "status": "given",
             "dose": "500 mg",
             "administered_at": "2026-11-11T08:00:00.000Z",
+        }, {
+            "medication_name": "Vitamin D",
+            "status": "refused",
+            "dose": None,
         }],
         "scales": [{
             "axis": "mood",
@@ -169,7 +173,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert saved.status_code == 200, saved.text
     body = saved.json()
-    assert body["structured_detail_count"] == 5
+    assert body["structured_detail_count"] == 6
     assert body["execution_status"]["structured_details"] == "verified"
 
     db = TestSessionLocal()
@@ -215,6 +219,11 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
         assert medication.observed_at.isoformat().startswith("2026-11-11T08:00:00")
         assert medication.occurred_at.isoformat().startswith("2026-11-11T08:00:00")
         assert medication.recorded_at.isoformat() != medication.occurred_at.isoformat()
+        refused_medication = [item for item in details if item.attribute == "medication" and item.value_text == "Vitamin D"][0]
+        assert refused_medication.observed_at is None
+        assert refused_medication.occurred_at is None
+        assert refused_medication.recorded_at is not None
+        assert "Status: refused" in refused_medication.context
         assert next(item for item in details if item.attribute == "blood_pressure_systolic").observed_at is not None
         assert all(evidence.source_text[item.source_span_start:item.source_span_end] == item.source_passage for item in details)
         assert next(item for item in details if item.attribute == "mood").value_text == "5"
@@ -264,7 +273,7 @@ def test_structured_daily_capture_persists_source_linked_details_without_model_e
     replay = client.post("/api/v1/daily/log", headers=auth, json=payload)
     assert replay.status_code == 200, replay.text
     assert replay.json()["idempotent_replay"] is True
-    assert replay.json()["structured_detail_count"] == 5
+    assert replay.json()["structured_detail_count"] == 6
 
     db = TestSessionLocal()
     try:
