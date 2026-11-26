@@ -293,14 +293,16 @@ def test_care_understanding_does_not_drop_source_negation(monkeypatch):
     _allow(monkeypatch)
     payload = collaboration.QwenCareUnderstandingRequest(
         evidence_id="evidence-1",
-        raw_text="Mom did not fall yesterday.",
+        raw_text="No fall occurred yesterday.",
     )
     model_output = {
         "observations": [{
-            "description": "Mom fell",
+            # This is an exact positive substring of the source. The validator
+            # must reject it because it drops the source's leading negation.
+            "description": "fall occurred yesterday",
             "approximate_time": "yesterday",
             "confidence": "high",
-            "raw_fragment": "Mom did not fall yesterday",
+            "raw_fragment": "No fall occurred yesterday",
         }],
         "events": [],
         "decisions": [],
