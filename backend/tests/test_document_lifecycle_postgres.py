@@ -389,6 +389,7 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
                 "caregiver_id": caregiver_id,
                 "evidence_type": "care_photo",
                 "capture_method": "snap",
+                "photo_rotation_degrees": "90",
                 "ingestion_key": retry_key,
             }
 
@@ -414,11 +415,12 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
             assert replay.json()["evidence_id"] == evidence_id
             assert replay.json()["idempotent_replay"] is True
 
+            changed_rotation = {**form, "photo_rotation_degrees": "180"}
             changed = client.post(
                 "/api/v1/upload",
                 headers=owner_headers,
-                data=form,
-                files={"file": ("care-photo.png", original + b"changed", "image/png")},
+                data=changed_rotation,
+                files={"file": ("care-photo.png", original, "image/png")},
             )
             assert changed.status_code == 409, changed.text
 
@@ -438,6 +440,7 @@ def test_postgres_care_photo_upload_retry_preserves_original_and_capture_provena
             metadata = json.loads(evidence.extra_metadata or "{}")
             assert evidence.type == "care_photo"
             assert metadata["capture"]["method"] == "snap"
+            assert metadata["capture"]["photo_rotation_degrees"] == 90
             assert evidence.ingestion_key == retry_key
             upload = db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).one()
             assert upload.sha256 == hashlib.sha256(original).hexdigest()
