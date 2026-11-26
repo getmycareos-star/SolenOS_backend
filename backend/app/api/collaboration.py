@@ -5009,7 +5009,7 @@ def _production_qwen_answer_checks(case: dict, answer: str) -> dict[str, bool]:
 
 
 def _production_qwen_evaluation_cases() -> list[dict]:
-    """Ten synthetic acceptance cases, each routed through its production specialist."""
+    """Fifteen synthetic acceptance cases, each routed through its production specialist."""
     return [
         {
             "criterion": "incomplete_history",
