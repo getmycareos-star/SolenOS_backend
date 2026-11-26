@@ -2317,7 +2317,26 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
         _contains_evidence_reference(row.evidence)
         for row in db.query(OpenLoopEvent).filter(OpenLoopEvent.person_id == person_id).all()
     )
-    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_question or linked_open_question_answer or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event:
+    linked_conversation_message = False
+    conversation_messages = db.query(ConversationMessage).join(
+        ConversationSession, ConversationSession.id == ConversationMessage.session_id
+    ).filter(ConversationSession.person_id == person_id).all()
+    for message in conversation_messages:
+        for raw_reference in (
+            message.evidence_ids_json,
+            message.source_record_refs_json,
+            message.response_metadata_json,
+        ):
+            try:
+                parsed_reference = json.loads(raw_reference or "[]")
+            except (TypeError, ValueError):
+                parsed_reference = []
+            if _contains_evidence_reference(parsed_reference):
+                linked_conversation_message = True
+                break
+        if linked_conversation_message:
+            break
+    if linked_event or linked_insight or linked_outcome or linked_delta or linked_completeness or linked_freshness or linked_open_question or linked_open_question_answer or linked_open_loop or linked_open_loop_occurrence or linked_open_loop_event or linked_conversation_message:
         raise HTTPException(
             status_code=409,
             detail="This document supports other care-history, follow-up or assessment records. Resolve those source dependencies before deletion. The original file has not been removed.",
