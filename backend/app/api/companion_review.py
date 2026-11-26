@@ -74,6 +74,7 @@ def review_qwen_assistance_proposal(
     if decision not in {"accept", "reject"}:
         raise HTTPException(status_code=422, detail="Decision must be accept or reject")
     if decision == "accept":
+        require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
         require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
@@ -404,6 +405,7 @@ def review_companion_care_update(
         raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
 
     if decision == "accept":
+        require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
         require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
