@@ -1188,6 +1188,32 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     return available_tables, metadata
 
 
+def _mark_source_enrichment_partial(
+    sources: dict[str, dict[str, Any]],
+    source_name: str,
+    *,
+    error_code: str,
+    interpretation_limit: str,
+) -> None:
+    """Downgrade a source when a required projection join could not be checked.
+
+    A successful base-table read is not a complete LCR projection when a
+    required correction/provenance join fails. Keep already retrieved rows for
+    review, but never advertise their enriched projection as complete.
+    """
+    source = sources.get(source_name)
+    if not isinstance(source, dict):
+        return
+    source.update({
+        "status": "partial",
+        "candidate_scan_complete": False,
+        "returned_history_complete": False,
+        "enrichment_status": "failed",
+        "error_code": error_code,
+        "interpretation_limit": interpretation_limit,
+    })
+
+
 def build_lcr_context(
     db: Session,
     person_id: str,
