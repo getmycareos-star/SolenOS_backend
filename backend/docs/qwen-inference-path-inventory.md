@@ -51,7 +51,7 @@ The live Delta acceptance workflow now invokes that opt-in service path directly
 - The current runtime specialist cap is **two** specialists per request, not four. The cap is enforced by `MAX_SPECIALISTS_PER_REQUEST`; the enabled-workflow map currently assigns no workflow more than two.
 - Workflow routing is checked at module initialization: every enabled classifier workflow must have exactly one routing decision; specialist-free workflows must be enabled; internal-only API workflow IDs may exist in the specialist map without being classifier options. Overlap, undefined specialists, empty mappings, and over-cap mappings fail application initialization.
 - Repeated explicit workflow markers are rejected as ambiguous, even when the repeated ID is identical. Unknown explicit IDs fail closed.
-- `_estimate_prompt_tokens` is the gateway's preflight estimator. It is a conservative UTF-8 byte heuristic (approximately 3.5 bytes/token plus message framing), **not a model-specific tokenizer**. Budget tests exercise this exact estimator; do not report its output as an exact Qwen token count.
+- `_estimate_prompt_tokens` is the gateway's preflight estimator. It is a conservative UTF-8 byte heuristic (UTF-8 bytes divided by 3, plus fixed message-framing allowance), **not a model-specific tokenizer**. It must not be reported as an exact Qwen token count. Budget tests exercise this exact estimator; do not report its output as an exact Qwen token count.
 
 ## Durable invocation audit
 
