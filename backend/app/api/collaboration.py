@@ -5827,6 +5827,10 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         r"\b(?:no|not|never|neither|nor|without|denies|denied|doesn't|didn't|isn't|wasn't|weren't|haven't|hasn't|hadn't|cannot|can't|couldn't|wouldn't|won't)\b",
         flags=re.IGNORECASE,
     )
+    _uncertainty_pattern = re.compile(
+        r"\b(?:may|might|could|possibly|possible|suspected|suspects|seems|seemed|appears|appeared|perhaps|likely|unlikely|unclear|uncertain|not sure)\b",
+        flags=re.IGNORECASE,
+    )
     _negation_clause_boundary = re.compile(
         r"(?<=[.!?;])\s+|,\s+|\b(?:but|however|yet)\b",
         flags=re.IGNORECASE,
@@ -5864,7 +5868,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         if match is None:
             return "uncertain"
         clause_prefix = clause[:match.start()]
-        if _negation_pattern.search(clause_prefix):
+        if _negation_pattern.search(clause_prefix) or _uncertainty_pattern.search(clause_prefix):
             return "uncertain"
         return proposed
 
