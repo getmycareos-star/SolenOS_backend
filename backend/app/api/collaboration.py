@@ -1232,6 +1232,7 @@ async def upload_evidence(
     *,
     capture_method: str = Form("upload"),
     capture_timestamp: str = Form(""),
+    photo_rotation_degrees: str = Form("0"),
     capture_page_number: Optional[int] = Form(None),
     capture_source_evidence_id: str = Form(""),
     ingestion_key: str = Form(""),
@@ -1393,6 +1394,14 @@ async def upload_evidence(
     evidence_type = evidence_type.strip().lower()
     if evidence_type not in {"document", "medication_photo", "care_photo"}:
         raise HTTPException(status_code=422, detail="Unsupported evidence type")
+    try:
+        photo_rotation = int(photo_rotation_degrees or "0")
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="Photo rotation must be a quarter turn") from exc
+    if photo_rotation not in {0, 90, 180, 270}:
+        raise HTTPException(status_code=422, detail="Photo rotation must be 0, 90, 180 or 270 degrees")
+    if evidence_type == "document" and photo_rotation != 0:
+        raise HTTPException(status_code=422, detail="Photo rotation is only valid for photo evidence")
     if evidence_type == "document":
         require_caregiver_permission(db, scoped_person_id, scoped_caregiver_id, "view_documents")
         if getattr(request.state, "caregiver_access_scope", "full_record") != "documents_only":
@@ -1425,6 +1434,7 @@ async def upload_evidence(
         "capture_page_number": capture_page_number,
         "capture_source_evidence_id": capture_source_evidence_id or None,
         "rotation_degrees": rotation_degrees,
+        "photo_rotation_degrees": photo_rotation,
         "crop_insets_percent": crop_insets,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     if ingestion_key and db.get_bind().dialect.name == "postgresql":
@@ -1584,6 +1594,7 @@ async def upload_evidence(
                 "page_number": capture_page_number,
                 "source_evidence_id": capture_source_evidence_id or None,
                 "source_page_number": capture_page_number if capture_source_evidence_id else None,
+                "photo_rotation_degrees": photo_rotation,
             },
             "scan_processing": {
                 "client_declared_review_status": review_status,
