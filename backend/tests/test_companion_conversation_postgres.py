@@ -824,7 +824,7 @@ def test_companion_history_uses_stable_scoped_cursor_pages():
             db.add(ConversationMessage(
                 id=f"message-{index}-{suffix}", session_id=session_id,
                 role="user" if index % 2 == 0 else "assistant",
-                content=f"history item {index}", created_at=now + timedelta(seconds=index),
+                content=f"history item {index}", created_at=now + timedelta(seconds=min(index, 3)),
                 evidence_ids_json="[]", source_record_refs_json="[]",
             ))
         db.commit()
