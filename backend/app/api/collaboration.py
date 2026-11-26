@@ -5608,6 +5608,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
         if not isinstance(parsed, dict) or not isinstance(parsed.get("claims"), list):
             raise HTTPException(status_code=503, detail="Qwen returned an invalid claim structure.")
         claims = []
+        seen_source_spans: set[tuple[int, int, str]] = set()
         for item in parsed["claims"][:20]:
             if not isinstance(item, dict):
                 continue
@@ -5641,6 +5642,10 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
                 or not _source_claim_preserves_negation(text_value.strip(), source)
             ):
                 continue
+            span_identity = (span["start_offset"], span["end_offset"], span["text"])
+            if span_identity in seen_source_spans:
+                continue
+            seen_source_spans.add(span_identity)
             claims.append({"claim_text": text_value.strip(), "entity_type": entity, "event_type": event.strip(),
                            "confidence_tag": confidence, "source_span": span})
         return {"claims": claims}
@@ -5856,6 +5861,18 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     "text": fact_text,
                     "raw_fragment": fragment,
                 })
+    # Model retries or repeated list items must not create duplicate review
+    # candidates from the same source passage within one response.
+    for key, candidates in result.items():
+        unique_candidates = []
+        seen_candidates = set()
+        for candidate in candidates:
+            fingerprint = json.dumps(candidate, sort_keys=True, ensure_ascii=False)
+            if fingerprint in seen_candidates:
+                continue
+            seen_candidates.add(fingerprint)
+            unique_candidates.append(candidate)
+        result[key] = unique_candidates
     return {"evidence_id": payload.evidence_id, "understanding": result, "provider": "private_ollama_qwen",
             "written_to_lcr": False, "review_required": True}
 
