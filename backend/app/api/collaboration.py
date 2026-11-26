@@ -11579,7 +11579,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         CaregiverAccessGrant.caregiver_id == caregiver_id,
         CaregiverAccessGrant.status == "active",
         CaregiverAccessGrant.revoked_at.is_(None),
-    ).first()
+    ).with_for_update().first()
     if current_grant is None:
         db.rollback()
         raise HTTPException(status_code=403, detail="Caregiver access changed before this response could be saved")
@@ -11590,7 +11590,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         AnonymousSession.caregiver_id == caregiver_id,
         AnonymousSession.revoked_at.is_(None),
         AnonymousSession.expires_at > datetime.now(timezone.utc),
-    ).first()
+    ).with_for_update().first()
     if current_bearer_session is None:
         db.rollback()
         raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before this response could be saved")
@@ -11599,7 +11599,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         ConversationSession.person_id == person_id,
         ConversationSession.caregiver_id == caregiver_id,
         ConversationSession.status == "active",
-    ).first()
+    ).with_for_update().first()
     if current_conversation is None:
         db.rollback()
         raise HTTPException(status_code=409, detail="This conversation is no longer active. Start a new conversation to continue")
