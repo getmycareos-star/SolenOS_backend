@@ -76,6 +76,7 @@ def test_qwen_inference_audit_metadata_hashes_content_without_persisting_it():
 
     assert metadata["workflow_id"] == "companion"
     assert metadata["operating_contract_version"] == qwen_gateway.SOLENOS_OPERATING_CONTRACT_VERSION
+    assert metadata["prompt_token_estimate_method"] == "utf8_bytes_div_3_plus_message_framing"
     assert len(metadata["system_prompt_sha256"]) == 64
     assert len(metadata["request_context_sha256"]) == 64
     assert source_text not in json.dumps(metadata)
