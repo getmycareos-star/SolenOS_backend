@@ -668,7 +668,7 @@ def persist_structured_daily_capture_observations(
                 str(raw.get("note")).strip() if isinstance(raw.get("note"), str) and raw.get("note").strip() else "",
             ) if part
         ) or "Medication information entered by a caregiver.",
-        lambda raw: raw.get("administered_at") or raw.get("observed_at") or detail.get("occurred_at") or raw.get("recorded_at"),
+        lambda raw: raw.get("administered_at") or raw.get("observed_at") or detail.get("occurred_at"),
     )
 
     for candidate in candidates:
