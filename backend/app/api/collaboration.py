@@ -1265,6 +1265,45 @@ def _release_companion_turn_leases(db: Session, request: Request) -> None:
         logger.exception("Companion turn lease release deferred to request teardown")
 
 
+def _queue_companion_care_update_extraction(
+    db: Session,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    conversation_id: str,
+    message_id: str,
+    source_text: str,
+) -> None:
+    """Queue exact-source proposal extraction for a persisted caregiver message."""
+    text_value = (source_text or "").strip()
+    if (
+        not text_value
+        or is_critical_safety_message(text_value)
+        or _is_casual_greeting(text_value)
+        or _is_companion_identity_question(text_value)
+        or resolve_response_length_policy(text_value).intent == "simple_acknowledgement"
+    ):
+        return
+    anonymous_session_id = getattr(request.state, "anonymous_session_id", None)
+    if not anonymous_session_id:
+        return
+    try:
+        background_tasks.add_task(
+            process_companion_care_update_message,
+            db.get_bind(),
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            source_text=text_value,
+            anonymous_session_id=str(anonymous_session_id),
+        )
+    except Exception:
+        logger.exception("Companion care-update identification could not be queued")
+
+
 def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
     """Require a live bearer capability and explicit conversation access."""
     person_id, caregiver_id = _scope(
@@ -9366,6 +9405,21 @@ async def companion_message(
             requested_session_id=payload.session_id,
         )
         if replay is not None:
+            replay_message = db.query(ConversationMessage).filter(
+                ConversationMessage.id == replay.get("source_message_id"),
+                ConversationMessage.session_id == replay.get("session_id"),
+                ConversationMessage.role == "user",
+            ).first()
+            if replay_message is not None:
+                _queue_companion_care_update_extraction(
+                    db, background_tasks, request,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    conversation_id=str(replay.get("session_id")),
+                    message_id=str(replay_message.id),
+                    source_text=replay_message.content,
+                )
+            _release_companion_turn_leases(db, request)
             return replay
         # Access may have changed while this request waited behind another turn.
         require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
@@ -12407,6 +12461,21 @@ async def companion_message(
             requested_session_id=payload.session_id,
         )
         if replay is not None:
+            replay_message = db.query(ConversationMessage).filter(
+                ConversationMessage.id == replay.get("source_message_id"),
+                ConversationMessage.session_id == replay.get("session_id"),
+                ConversationMessage.role == "user",
+            ).first()
+            if replay_message is not None:
+                _queue_companion_care_update_extraction(
+                    db, background_tasks, request,
+                    person_id=person_id,
+                    caregiver_id=caregiver_id,
+                    conversation_id=str(replay.get("session_id")),
+                    message_id=str(replay_message.id),
+                    source_text=replay_message.content,
+                )
+            _release_companion_turn_leases(db, request)
             return replay
         raise HTTPException(
             status_code=409 if client_turn_id else 503,
@@ -12424,20 +12493,14 @@ async def companion_message(
     # background worker can create review-only proposals from exact source
     # quotations; it cannot write a CareAssertion or mutate the LCR.
     care_update_candidates = []
-    if not emergency and not social_only and not identity_question:
-        try:
-            background_tasks.add_task(
-                process_companion_care_update_message,
-                db.get_bind(),
-                person_id=person_id,
-                caregiver_id=caregiver_id,
-                conversation_id=str(session.id),
-                message_id=str(user_row.id),
-                source_text=user_text,
-                anonymous_session_id=authenticated_session_id,
-            )
-        except Exception:
-            logger.exception("Companion care-update identification could not be queued")
+    _queue_companion_care_update_extraction(
+        db, background_tasks, request,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        conversation_id=str(session.id),
+        message_id=str(user_row.id),
+        source_text=user_text,
+    )
     # The send endpoint returns the newly persisted turn, not an unbounded
     # replay of the complete thread. Older messages are read through the
     # paginated history endpoint.
