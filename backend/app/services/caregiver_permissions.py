@@ -5,12 +5,12 @@ from sqlalchemy.orm import Session
 from app.models.caregiver_access import CaregiverAccessGrant
 
 CAREGIVER_PERMISSION_KEYS = frozenset({
-    "view_lcr", "add_evidence", "correct_records", "manage_responsibilities",
+    "view_lcr", "view_conversations", "add_evidence", "correct_records", "manage_responsibilities",
     "manage_reminders", "complete_assigned_reminders", "manage_handoffs",
     "share_summaries", "share_observations", "view_documents", "view_communications",
 })
 DEFAULT_FAMILY_PERMISSIONS = frozenset({
-    "view_lcr", "add_evidence", "manage_responsibilities", "manage_reminders",
+    "view_lcr", "view_conversations", "add_evidence", "manage_responsibilities", "manage_reminders",
     "complete_assigned_reminders", "manage_handoffs", "share_summaries",
     "share_observations", "view_documents", "view_communications",
 })
