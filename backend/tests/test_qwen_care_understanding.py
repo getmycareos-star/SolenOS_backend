@@ -518,3 +518,35 @@ def test_care_understanding_does_not_accept_negated_completion_status(monkeypatc
 
     assert result["understanding"]["decisions"][0]["status"] == "uncertain"
     assert result["understanding"]["outcomes"][0]["status"] == "uncertain"
+
+def test_care_understanding_cannot_close_unknowns_from_model_status_alone(monkeypatch):
+    _allow(monkeypatch)
+    source = "We still do not know when the fall happened."
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [{
+            "question": "When did the fall happen?",
+            "status": "answered",
+            "raw_fragment": source,
+        }],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["unknowns"][0]["status"] == "open"
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
