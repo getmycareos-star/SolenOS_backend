@@ -313,6 +313,66 @@ def test_postgres_document_upload_extraction_retry_persistence_and_person_isolat
         engine.dispose()
 
 
+
+def test_postgres_interrupted_pdf_tail_is_persisted_as_unprocessed(monkeypatch):
+    """Page completeness is checked against the original PDF, not extracted markers."""
+    from pypdf import PdfWriter
+
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-pg-tail-person-{suffix}"
+    caregiver_id = f"doc-pg-tail-caregiver-{suffix}"
+    writer = PdfWriter()
+    for _ in range(4):
+        writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+
+    monkeypatch.setattr(
+        lifecycle_module,
+        "_extract",
+        lambda upload, content, evidence: (
+            "[Page 1]\\nReadable page one.\\n\\n[Page 2]\\nReadable page two.",
+            "test_interrupted_extraction",
+        ),
+    )
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="PostgreSQL interrupted PDF fixture"))
+            db.flush()
+            db.add(Caregiver(
+                id=caregiver_id, name="Document caregiver",
+                relationship="family", person_id=person_id,
+            ))
+            db.flush()
+            _ensure_test_caregiver_access(db, person_id, caregiver_id)
+            uploaded = asyncio.run(upload_evidence(
+                _request(person_id, caregiver_id),
+                UploadFile(
+                    filename="interrupted-four-page.pdf",
+                    file=io.BytesIO(original),
+                    headers=Headers({"content-type": "application/pdf"}),
+                ),
+                person_id, caregiver_id, "document", "", "not_provided", "0", "{}", "false", db,
+            ))
+            evidence_id = uploaded["evidence_id"]
+            db.commit()
+
+        with Session() as db:
+            result = extract_saved_document(
+                evidence_id, _request(person_id, caregiver_id), db
+            )
+            assert result["page_count"] == 4
+            assert result["processed_page_numbers"] == [1, 2]
+            assert result["unprocessed_page_numbers"] == [3, 4]
+            assert result["extraction_status"] == "partial"
+            assert result["interpretation_blocked"] is True
+    finally:
+        engine.dispose()
+
+
 def _ensure_test_caregiver_access(db, person_id: str, caregiver_id: str) -> None:
     """Give direct-route PostgreSQL fixtures the same explicit grant as a real session."""
     grant = db.query(CaregiverAccessGrant).filter_by(
