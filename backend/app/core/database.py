@@ -1,7 +1,10 @@
 import re
+import logging
 from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from fastapi import Request
 
 from app.core.config import get_settings
 from app.core.database_config import configure_database_url, is_railway_runtime
@@ -43,11 +46,33 @@ import app.models.privacy_request  # noqa: E402, F401
 import app.models.privacy_export  # noqa: E402, F401
 
 
-def get_db():
+def get_db(request: Request):
     db = SessionLocal()
     try:
         yield db
     finally:
+        # Companion's distributed turn leases are committed independently of
+        # the request transaction so inference does not pin a PostgreSQL
+        # connection. Release only leases owned by this request; if cleanup
+        # cannot reach PostgreSQL, the bounded expiry is the crash-recovery path.
+        leases = getattr(request.state, "companion_turn_leases", [])
+        owner_token = getattr(request.state, "companion_turn_lease_owner", None)
+        if leases and owner_token and db.get_bind().dialect.name == "postgresql":
+            try:
+                for lock_key in reversed(leases):
+                    db.execute(
+                        text(
+                            "DELETE FROM companion_turn_leases "
+                            "WHERE lock_key = :lock_key AND owner_token = :owner_token"
+                        ),
+                        {"lock_key": lock_key, "owner_token": owner_token},
+                    )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logging.getLogger(__name__).exception(
+                    "Companion turn lease cleanup failed; lease expiry will recover it"
+                )
         db.close()
 
 
