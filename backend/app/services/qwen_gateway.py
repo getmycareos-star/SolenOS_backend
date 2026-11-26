@@ -736,8 +736,14 @@ _NEGATION_CLAUSE_BOUNDARY = re.compile(
 )
 
 
-def _claim_preserves_source_negation(claim: str, source_quote: str) -> bool:
-    """Reject an extractive claim that drops negation from its source clause."""
+_UNCERTAINTY_PATTERN = re.compile(
+    r"\b(?:may|might|could|possibly|possible|suspected|suspects|seems|seemed|appears|appeared|perhaps|likely|unlikely|unclear|uncertain|reportedly)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _claim_preserves_source_qualifiers(claim: str, source_quote: str) -> bool:
+    """Reject extractive claims that drop negation or uncertainty in their clause."""
     if not claim or claim not in source_quote:
         return False
     clause = next(
@@ -746,7 +752,11 @@ def _claim_preserves_source_negation(claim: str, source_quote: str) -> bool:
     )
     if clause is None:
         return False
-    return not _NEGATION_PATTERN.search(clause) or bool(_NEGATION_PATTERN.search(claim))
+    if _NEGATION_PATTERN.search(clause) and not _NEGATION_PATTERN.search(claim):
+        return False
+    if _UNCERTAINTY_PATTERN.search(clause) and not _UNCERTAINTY_PATTERN.search(claim):
+        return False
+    return True
 
 
 def extract_review_candidates(
@@ -838,7 +848,7 @@ def extract_review_candidates(
         if (
             observation.strip() not in quote
             or subject.strip().casefold() not in quote.casefold()
-            or not _claim_preserves_source_negation(observation.strip(), quote)
+            or not _claim_preserves_source_qualifiers(observation.strip(), quote)
         ):
             continue
         # Preserve explicit source statements (including diagnoses and stated causes)
