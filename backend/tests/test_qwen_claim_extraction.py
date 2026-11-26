@@ -168,3 +168,73 @@ def test_claim_extraction_uses_unicode_codepoint_offsets(monkeypatch):
         "text": "Mom fell yesterday",
     }
     assert result["run_b"]["claims"] == result["run_a"]["claims"]
+
+def test_claim_extraction_rejects_exact_positive_substring_that_omits_negation(monkeypatch):
+    _allow_source(monkeypatch)
+    source = "No fall occurred yesterday."
+    start = source.index("fall occurred yesterday")
+    end = start + len("fall occurred yesterday")
+    model_output = {
+        "claims": [{
+            "claim_text": "fall occurred yesterday",
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": start,
+                "end_offset": end,
+                "text": "fall occurred yesterday",
+            },
+        }]
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"] == []
+    assert result["run_b"]["claims"] == []
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
+
+
+def test_claim_extraction_keeps_positive_claim_after_unrelated_negated_clause(monkeypatch):
+    _allow_source(monkeypatch)
+    source = "No fever was reported, but Mum fell yesterday."
+    claim = "Mum fell yesterday"
+    start = source.index(claim)
+    end = start + len(claim)
+    model_output = {
+        "claims": [{
+            "claim_text": claim,
+            "entity_type": "event",
+            "event_type": "fall_reported",
+            "confidence_tag": "reported",
+            "source_span": {
+                "start_offset": start,
+                "end_offset": end,
+                "text": claim,
+            },
+        }]
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+    payload = collaboration.QwenClaimExtractionRequest(
+        evidence_id="evidence-1",
+        raw_text=source,
+    )
+
+    result = collaboration.qwen_claim_extraction(payload, request=None, db=None)
+
+    assert result["run_a"]["claims"][0]["claim_text"] == claim
+    assert result["run_b"]["claims"][0]["claim_text"] == claim
