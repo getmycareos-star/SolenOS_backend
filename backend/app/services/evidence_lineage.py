@@ -185,13 +185,15 @@ def assess_corroboration(
         if kind in failed_types:
             failed_pairs.add(pair)
             continue
-        if source_status in INDEPENDENT_STATUSES:
+        is_independent = source_status in INDEPENDENT_STATUSES
+        is_shared_origin = source_status in shared_origin_statuses or kind in shared_origin_types
+        if is_independent:
             independent_relationship_pairs.add(pair)
             if kind in corroboration_types:
                 corroborating_pairs.add(pair)
-        elif source_status in shared_origin_statuses or kind in shared_origin_types:
+        if is_shared_origin:
             shared_relationship_pairs.add(pair)
-        else:
+        if not is_independent and not is_shared_origin:
             unassessed_pairs.add(pair)
 
     # Conflicting reviewed declarations about the same pair cannot be resolved
