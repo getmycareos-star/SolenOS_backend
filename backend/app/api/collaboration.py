@@ -12101,6 +12101,10 @@ def list_conversations(
         .order_by(
             func.max(ConversationMessage.created_at).desc(),
             ConversationSession.created_at.desc(),
+            # Session timestamps can collide (including imported/restored
+            # conversations). A unique final key makes page boundaries
+            # deterministic instead of relying on PostgreSQL row order.
+            ConversationSession.id.asc(),
         )
         .offset(offset)
         .limit(limit + 1)
