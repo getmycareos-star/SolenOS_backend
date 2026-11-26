@@ -289,3 +289,31 @@ def test_causal_wording_is_rejected_even_when_model_denies_causation(monkeypatch
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
 
+def test_care_understanding_does_not_drop_source_negation(monkeypatch):
+    _allow(monkeypatch)
+    payload = collaboration.QwenCareUnderstandingRequest(
+        evidence_id="evidence-1",
+        raw_text="Mom did not fall yesterday.",
+    )
+    model_output = {
+        "observations": [{
+            "description": "Mom fell",
+            "approximate_time": "yesterday",
+            "confidence": "high",
+            "raw_fragment": "Mom did not fall yesterday",
+        }],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(payload, request=None, db=None)
+
+    assert result["understanding"]["observations"] == []
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
+
