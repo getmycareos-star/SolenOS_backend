@@ -2168,7 +2168,7 @@ def delete_uploaded_document(evidence_id: str, request: Request, db: Session = D
     if clearer_page_copy is not None:
         raise HTTPException(
             status_code=409,
-            detail="This document is the source for clearer page copies. Remove or relink those copies before deleting the original.",
+            detail="This document is the source for clearer page copies. Delete those copies before deleting the original.",
         )
     if (evidence.source_text or "").strip():
         raise HTTPException(
