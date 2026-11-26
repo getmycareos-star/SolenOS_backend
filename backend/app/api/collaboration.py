@@ -11056,6 +11056,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
                 source_assertion_ids=source_assertion_ids,
                 source_lcr_context_ids=source_lcr_context_ids,
                 source_freshness_assessment_ids=source_freshness_assessment_ids,
+                source_handoff_ids=list(dict.fromkeys(selected_ids_by_type.get("handoffs", []))),
             )
             logger.warning(
                 "Companion response rejected after bounded repairs: rules=%s",
@@ -11573,6 +11574,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
             source_assertion_ids=source_assertion_ids,
             source_lcr_context_ids=source_lcr_context_ids,
             source_freshness_assessment_ids=source_freshness_assessment_ids,
+            source_handoff_ids=list(dict.fromkeys(selected_ids_by_type.get("handoffs", []))),
         )
         raise HTTPException(
             status_code=503,
@@ -11597,6 +11599,7 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
         source_assertion_ids=source_assertion_ids,
         source_lcr_context_ids=source_lcr_context_ids,
         source_freshness_assessment_ids=source_freshness_assessment_ids,
+        source_handoff_ids=list(dict.fromkeys(selected_ids_by_type.get("handoffs", []))),
     )
 
     response_metadata = {
