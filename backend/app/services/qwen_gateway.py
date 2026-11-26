@@ -960,14 +960,16 @@ def extract_review_candidates(
     if not isinstance(questions, list):
         questions = []
     clean_questions = [
-        question.strip()[:300]
-        for question in questions[:3]
-        if isinstance(question, str) and question.strip()
+        f"Who does “{pronoun}” refer to in this care update?"
+        for pronoun in unresolved_subjects[:3]
     ]
-    for pronoun in unresolved_subjects:
-        clarification = f"Who does “{pronoun}” refer to in this care update?"
-        if clarification not in clean_questions and len(clean_questions) < 3:
-            clean_questions.append(clarification)
+    for question in questions:
+        if len(clean_questions) >= 3:
+            break
+        if isinstance(question, str) and question.strip():
+            normalized_question = question.strip()[:300]
+            if normalized_question not in clean_questions:
+                clean_questions.append(normalized_question)
     return {"observations": observations, "open_questions": clean_questions}
 
 
