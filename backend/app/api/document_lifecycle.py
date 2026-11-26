@@ -862,10 +862,16 @@ def _response(analysis: CaptureAnalysis) -> dict:
             page_status = "unprocessed"
         else:
             page_status = "processed"
+        raw_attempt_count = retry_attempts.get(str(source_page_number))
+        attempt_count = (
+            raw_attempt_count
+            if isinstance(raw_attempt_count, int) and not isinstance(raw_attempt_count, bool) and raw_attempt_count > 0
+            else 1
+        )
         page_states.append({
             "source_page_number": source_page_number,
             "status": page_status,
-            "attempt_count": int(retry_attempts.get(str(source_page_number)) or 1),
+            "attempt_count": attempt_count,
         })
     # Match the document-intelligence response contract: candidates from an
     # earlier successful pass are hidden while the current OCR is incomplete.
