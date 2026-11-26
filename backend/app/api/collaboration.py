@@ -5690,7 +5690,9 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
             elif key == "unknowns":
                 question = bounded_text(item.get("question"), 500)
                 status = item.get("status")
-                if question is None or not source_bound(question, fragment) or status not in {"open", "answered", "declined", "no_longer_relevant"}:
+                # Clarification questions may be newly phrased to resolve missing
+                # information; the raw fragment, not the question, is the source anchor.
+                if question is None or status not in {"open", "answered", "declined", "no_longer_relevant"}:
                     continue
                 result[key].append({
                     "question": question,
