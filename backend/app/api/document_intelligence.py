@@ -139,14 +139,16 @@ def _verified_pdf_page_count(metadata: dict, upload: EvidenceUpload | None = Non
     """Use the preserved PDF bytes as the authority when available."""
     if not _is_paginated_pdf(metadata):
         return None
+    stored_count = metadata.get("page_count")
+    stored_count_is_valid = (
+        isinstance(stored_count, int)
+        and not isinstance(stored_count, bool)
+        and 1 <= stored_count <= MAX_PDF_PAGES
+    )
+    if metadata.get("page_count_source") == "original_binary" and stored_count_is_valid:
+        return stored_count
     if upload is None:
-        stored_count = metadata.get("page_count")
-        return (
-            stored_count
-            if isinstance(stored_count, int) and not isinstance(stored_count, bool)
-            and 1 <= stored_count <= MAX_PDF_PAGES
-            else None
-        )
+        return None
     try:
         reader = PdfReader(io.BytesIO(read_document_binary(upload)), strict=True)
         actual_count = len(reader.pages)
@@ -820,7 +822,11 @@ def _response(analysis: CaptureAnalysis, upload: EvidenceUpload | None = None) -
         "page_count_verified": page_count_verified,
         "intelligence_status": intelligence.get("status") or "not_run",
         "processed_page_count": intelligence.get("processed_page_count"),
-        "total_page_count": intelligence.get("total_page_count") or metadata.get("page_count") or page_count,
+        "total_page_count": (
+            page_count
+            if _is_paginated_pdf(metadata)
+            else intelligence.get("total_page_count") or page_count
+        ),
         "processed_page_numbers": intelligence.get("processed_page_numbers", []),
         "unprocessed_page_numbers": intelligence.get("unprocessed_page_numbers", []),
         "extraction_processed_page_count": len(processed_pages),
