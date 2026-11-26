@@ -698,6 +698,29 @@ def _expand_quote_to_source_sentence(source: str, quote: str) -> str:
     return quote
 
 
+_NEGATION_PATTERN = re.compile(
+    r"\b(?:no|not|never|neither|nor|without|denies|denied|doesn't|didn't|isn't|wasn't|weren't|haven't|hasn't|hadn't|cannot|can't|couldn't|wouldn't|won't)\b",
+    flags=re.IGNORECASE,
+)
+_NEGATION_CLAUSE_BOUNDARY = re.compile(
+    r"(?<=[.!?;])\s+|,\s+|\b(?:but|however|yet)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _claim_preserves_source_negation(claim: str, source_quote: str) -> bool:
+    """Reject an extractive claim that drops negation from its source clause."""
+    if not claim or claim not in source_quote:
+        return False
+    clause = next(
+        (part for part in _NEGATION_CLAUSE_BOUNDARY.split(source_quote) if claim in part),
+        None,
+    )
+    if clause is None:
+        return False
+    return not _NEGATION_PATTERN.search(clause) or bool(_NEGATION_PATTERN.search(claim))
+
+
 def extract_review_candidates(
     source_text: str,
     *,
@@ -784,7 +807,11 @@ def extract_review_candidates(
         if quote not in bounded_source:
             continue
         quote = _expand_quote_to_source_sentence(bounded_source, quote)
-        if observation.strip() not in quote or subject.strip().casefold() not in quote.casefold():
+        if (
+            observation.strip() not in quote
+            or subject.strip().casefold() not in quote.casefold()
+            or not _claim_preserves_source_negation(observation.strip(), quote)
+        ):
             continue
         # Preserve explicit source statements (including diagnoses and stated causes)
         # as review-only candidates. The exact-quote and substring checks above are
