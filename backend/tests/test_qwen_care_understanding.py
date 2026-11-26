@@ -527,6 +527,7 @@ def test_care_understanding_cannot_close_unknowns_from_model_status_alone(monkey
         "outcomes": [],
         "unknowns": [{
             "question": "When did the fall happen?",
+            "status": "answered",
             "raw_fragment": source,
         }],
         "non_care_facts": [],
