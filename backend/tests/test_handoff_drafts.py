@@ -841,6 +841,91 @@ def test_document_adapter_separates_verified_original_upload_from_extracted_text
     assert original_ref["details"]["extraction_status"] == "available"
 
 
+
+def test_handoff_withholds_legacy_pdf_text_when_original_has_unprocessed_pages(client):
+    import hashlib
+    import io
+    from pypdf import PdfWriter
+
+    test_client, session = client
+    person_id = session["person"]["id"]
+    caregiver_id = session["caregiver"]["id"]
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    output = io.BytesIO()
+    writer.write(output)
+    original = output.getvalue()
+    digest = hashlib.sha256(original).hexdigest()
+    source_text = "[Page 1 OCR]\\nFirst page was read."
+    db = TestSessionLocal()
+    try:
+        document = Evidence(
+            id="handoff-legacy-pdf-evidence",
+            person_id=person_id,
+            type="document",
+            source_text="Uploaded PDF record",
+            uploaded_by_caregiver_id=caregiver_id,
+            original_source_reference="clinic/legacy-two-page",
+        )
+        db.add(document)
+        db.flush()
+        document_id = str(document.id)
+        db.add(EvidenceUpload(
+            evidence_id=document_id,
+            filename="legacy-discharge.pdf",
+            mime_type="application/pdf",
+            content=original,
+            size_bytes=len(original),
+            sha256=digest,
+        ))
+        db.add(Appointment(
+            id="handoff-legacy-pdf-appointment",
+            person_id=person_id,
+            title="Legacy PDF follow-up",
+            scheduled_at=datetime.now(timezone.utc) + timedelta(days=5),
+            status="scheduled",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.add(CaptureAnalysis(
+            id="handoff-legacy-pdf-extraction",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_evidence_id=document_id,
+            source_text=source_text,
+            extraction_status="available",
+            candidates={
+                "kind": "document_extraction_v1",
+                "filename": "legacy-discharge.pdf",
+                "mime_type": "application/pdf",
+                "page_count": 1,
+                "binary_sha256": digest,
+                "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
+                "extraction_method": "server_pdf_text",
+                "document_intelligence": {"status": "available", "observations": []},
+            },
+            review_history=[],
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    response = test_client.post(
+        "/api/v1/handoff-drafts/prepare",
+        headers={"Authorization": f"Bearer {session['access_token']}"},
+        json={"purpose": "professional_appointment", "audience": "professional", "window_days": 30, "appointment_id": "handoff-legacy-pdf-appointment"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source_statuses"]["documents"]["status"] == "partial"
+    assert not any(row["source_id"] == "handoff-legacy-pdf-extraction" for row in body["source_references"])
+    original_ref = next(
+        row for row in body["source_references"]
+        if row["source_id"] == "handoff-legacy-pdf-evidence"
+    )
+    assert original_ref["details"]["extraction_status"] == "extraction_incomplete"
+
+
 def test_handoff_withholds_extraction_when_persisted_text_checksum_is_invalid(client):
     import hashlib
 
