@@ -462,6 +462,67 @@ def test_duplicate_upload_is_preserved_and_linked_to_original(client):
 
 
 
+
+def test_clearer_page_copy_retains_source_document_and_page_number_and_rejects_cross_person_source(client):
+    test_client, session = client
+    auth = {"Authorization": f"Bearer {session['access_token']}"}
+    original = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+        },
+        files={"file": ("original-discharge.txt", b"Original discharge document.", "text/plain")},
+    )
+    assert original.status_code == 201, original.text
+    original_id = original.json()["evidence_id"]
+
+    recaptured = test_client.post(
+        "/api/v1/upload",
+        headers=auth,
+        data={
+            "person_id": session["person"]["id"],
+            "caregiver_id": session["caregiver"]["id"],
+            "evidence_type": "document",
+            "capture_method": "scan",
+            "capture_page_number": "3",
+            "capture_source_evidence_id": original_id,
+        },
+        files={"file": ("clearer-page-3.png", _scanned_text_image(), "image/png")},
+    )
+    assert recaptured.status_code == 201, recaptured.text
+    with TestSessionLocal() as db:
+        clearer_copy = db.query(Evidence).filter_by(id=recaptured.json()["evidence_id"]).one()
+        metadata = __import__("json").loads(clearer_copy.extra_metadata or "{}")
+        assert metadata["capture"]["source_evidence_id"] == original_id
+        assert metadata["capture"]["source_page_number"] == 3
+        assert metadata["capture"]["page_number"] == 3
+
+    other_session = test_client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Separate document owner", "caregiver_name": "Other caregiver"},
+    )
+    assert other_session.status_code == 201, other_session.text
+    other = other_session.json()
+    other_auth = {"Authorization": f"Bearer {other['access_token']}"}
+    cross_person = test_client.post(
+        "/api/v1/upload",
+        headers=other_auth,
+        data={
+            "person_id": other["person"]["id"],
+            "caregiver_id": other["caregiver"]["id"],
+            "evidence_type": "document",
+            "capture_method": "scan",
+            "capture_page_number": "3",
+            "capture_source_evidence_id": original_id,
+        },
+        files={"file": ("clearer-page-3.png", _scanned_text_image(), "image/png")},
+    )
+    assert cross_person.status_code == 404, cross_person.text
+
+
 def test_poor_quality_photo_with_unreadable_ocr_is_preserved_without_inferred_text(client, monkeypatch):
     from app.api import document_lifecycle
     from app.models.capture_analysis import CaptureAnalysis
