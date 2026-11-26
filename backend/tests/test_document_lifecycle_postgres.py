@@ -334,7 +334,7 @@ def test_postgres_interrupted_pdf_tail_is_persisted_as_unprocessed(monkeypatch):
         lifecycle_module,
         "_extract",
         lambda upload, content, evidence: (
-            "[Page 1]\\nReadable page one.\\n\\n[Page 2]\\nReadable page two.",
+            "[Page 1]\nReadable page one.\n\n[Page 2]\nReadable page two.",
             "test_interrupted_extraction",
         ),
     )
