@@ -5577,23 +5577,113 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
     if not isinstance(parsed, dict) or any(not isinstance(parsed.get(k, []), list) for k in limits):
         raise HTTPException(status_code=503, detail="Qwen returned an invalid care-understanding structure.")
     result = {k: [] for k in limits}
+
+    def bounded_text(value, maximum: int) -> str | None:
+        if not isinstance(value, str):
+            return None
+        cleaned = value.strip()
+        return cleaned if cleaned and len(cleaned) <= maximum else None
+
+    def optional_text(value, maximum: int) -> tuple[bool, str | None]:
+        if value is None:
+            return True, None
+        cleaned = bounded_text(value, maximum)
+        return cleaned is not None, cleaned
+
+    def bounded_text_list(value, *, max_items: int = 10, max_length: int = 120) -> list[str] | None:
+        if not isinstance(value, list) or len(value) > max_items:
+            return None
+        cleaned = [bounded_text(item, max_length) for item in value]
+        return cleaned if all(item is not None for item in cleaned) else None
+
     for key, limit in limits.items():
         for item in parsed.get(key, [])[:limit]:
             if not isinstance(item, dict):
                 continue
             if key == "possible_links":
-                # A possible relationship is still a claim. Keep it only when
-                # the model points to wording that appears verbatim in source.
-                link_text = item.get("text")
-                if isinstance(link_text, str) and link_text.strip() and link_text in source:
-                    result[key].append({"text": link_text[:500], "causation_claimed": False})
+                link_text = bounded_text(item.get("text"), 500)
+                if item.get("causation_claimed") is False and link_text and link_text in source:
+                    result[key].append({"text": link_text, "causation_claimed": False})
                 continue
-            fragment = item.get("raw_fragment")
-            if not isinstance(fragment, str) or not fragment or fragment not in source:
+
+            fragment = bounded_text(item.get("raw_fragment"), 1000)
+            if fragment is None or fragment not in source:
                 continue
-            cleaned = dict(item)
-            cleaned["raw_fragment"] = fragment
-            result[key].append(cleaned)
+
+            if key == "observations":
+                description = bounded_text(item.get("description"), 500)
+                valid_time, approximate_time = optional_text(item.get("approximate_time"), 120)
+                confidence = item.get("confidence")
+                if description is None or not valid_time or confidence not in {"low", "medium", "high"}:
+                    continue
+                result[key].append({
+                    "description": description,
+                    "approximate_time": approximate_time,
+                    "confidence": confidence,
+                    "raw_fragment": fragment,
+                })
+            elif key == "events":
+                description = bounded_text(item.get("description"), 500)
+                valid_time, event_time = optional_text(item.get("time"), 120)
+                participants = bounded_text_list(item.get("participants"))
+                if description is None or not valid_time or participants is None:
+                    continue
+                result[key].append({
+                    "description": description,
+                    "time": event_time,
+                    "participants": participants,
+                    "raw_fragment": fragment,
+                })
+            elif key == "decisions":
+                description = bounded_text(item.get("description"), 500)
+                who = bounded_text_list(item.get("who"))
+                valid_why, why = optional_text(item.get("why"), 500)
+                status = item.get("status")
+                reason_unknown = item.get("reason_unknown")
+                if (
+                    description is None or who is None or not valid_why
+                    or not isinstance(reason_unknown, bool)
+                    or status not in {"active", "completed", "changed", "reversed", "uncertain", "needs_review", "pending"}
+                ):
+                    continue
+                result[key].append({
+                    "description": description,
+                    "who": who,
+                    "why": why,
+                    "reason_unknown": reason_unknown,
+                    "status": status,
+                    "raw_fragment": fragment,
+                })
+            elif key == "outcomes":
+                description = bounded_text(item.get("description"), 500)
+                status = item.get("status")
+                if description is None or status not in {"observed", "pending", "uncertain", "ongoing", "resolved", "changed"}:
+                    continue
+                result[key].append({
+                    "description": description,
+                    "status": status,
+                    "raw_fragment": fragment,
+                })
+            elif key == "unknowns":
+                question = bounded_text(item.get("question"), 500)
+                status = item.get("status")
+                if question is None or status not in {"open", "answered", "declined", "no_longer_relevant"}:
+                    continue
+                result[key].append({
+                    "question": question,
+                    "status": status,
+                    "raw_fragment": fragment,
+                })
+            elif key == "non_care_facts":
+                fact_text = bounded_text(item.get("text"), 500)
+                layer = item.get("layer")
+                if fact_text is None or layer not in {"contributor_load", "disagreement_perspective"}:
+                    continue
+                result[key].append({
+                    "layer": layer,
+                    "text": fact_text,
+                    "raw_fragment": fragment,
+                })
     return {"evidence_id": payload.evidence_id, "understanding": result, "provider": "private_ollama_qwen",
             "written_to_lcr": False, "review_required": True}
 

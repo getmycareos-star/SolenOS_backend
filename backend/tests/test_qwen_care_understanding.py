@@ -129,3 +129,63 @@ def test_care_understanding_does_not_accept_unverifiable_fragments(monkeypatch):
     result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
 
     assert result["understanding"]["observations"] == []
+
+
+def test_care_understanding_rejects_invalid_field_types_enums_and_oversized_values(monkeypatch):
+    _allow(monkeypatch)
+    model_output = {
+        "observations": [{
+            "description": "Mom fell yesterday",
+            "approximate_time": "yesterday",
+            "confidence": "certain",
+            "raw_fragment": "Mom fell yesterday",
+        }],
+        "events": [{
+            "description": "Mom fell yesterday",
+            "time": None,
+            "participants": "daughter",
+            "raw_fragment": "Mom fell yesterday",
+        }],
+        "decisions": [{
+            "description": "The family decided to call the clinic",
+            "who": ["daughter"],
+            "why": None,
+            "reason_unknown": False,
+            "status": "verified",
+            "raw_fragment": "Her daughter called the clinic.",
+        }],
+        "outcomes": [{
+            "description": "The call was successful",
+            "status": "confirmed",
+            "raw_fragment": "Her daughter called the clinic.",
+        }],
+        "unknowns": [{
+            "question": "What time did the fall happen?",
+            "status": "unknown",
+            "raw_fragment": "Mom fell yesterday",
+        }],
+        "non_care_facts": [{
+            "layer": "diagnosis",
+            "text": "The caregiver is overwhelmed",
+            "raw_fragment": "Her daughter called the clinic.",
+        }],
+        "possible_links": [{
+            "text": "Her daughter called the clinic.",
+            "causation_claimed": True,
+        }],
+    }
+    monkeypatch.setattr(collaboration, "qwen_chat", lambda *_args, **_kwargs: json.dumps(model_output))
+
+    result = collaboration.qwen_care_understanding(_request(), request=None, db=None)
+
+    assert result["understanding"] == {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    assert result["written_to_lcr"] is False
+    assert result["review_required"] is True
