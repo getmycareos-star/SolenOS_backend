@@ -156,8 +156,7 @@ def test_care_understanding_rejects_invalid_field_types_enums_and_oversized_valu
             "raw_fragment": "Her daughter called the clinic.",
         }],
         "unknowns": [{
-            "question": "What time did the fall happen?",
-            "status": "unknown",
+            "question": 42,
             "raw_fragment": "Mom fell yesterday",
         }],
         "non_care_facts": [{
@@ -206,7 +205,6 @@ def test_care_understanding_rejects_paraphrases_even_with_a_valid_raw_fragment(m
         "outcomes": [],
         "unknowns": [{
             "question": "What happened to her after she fell?",
-            "status": "open",
             "raw_fragment": "Mom fell yesterday",
         }],
         "non_care_facts": [],
@@ -529,7 +527,6 @@ def test_care_understanding_cannot_close_unknowns_from_model_status_alone(monkey
         "outcomes": [],
         "unknowns": [{
             "question": "When did the fall happen?",
-            "status": "answered",
             "raw_fragment": source,
         }],
         "non_care_facts": [],
