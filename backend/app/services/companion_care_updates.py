@@ -4,6 +4,7 @@ import hashlib
 import logging
 import uuid
 
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from sqlalchemy.orm import Session
