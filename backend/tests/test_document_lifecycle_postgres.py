@@ -174,7 +174,7 @@ from app.models.care import Caregiver, Evidence, Person
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import EvidenceUpload
-from app.models.qwen_background_job import QwenBackgroundJob
+from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
 from app.models.uncertainty import OpenQuestion
 from app.api.collaboration import (
@@ -718,6 +718,68 @@ def test_postgres_document_deletion_erases_original_and_uncommitted_extraction()
             with pytest.raises(HTTPException) as denied:
                 extract_saved_document(evidence_id, _request(person_id, caregiver_id), db)
             assert denied.value.status_code == 404
+    finally:
+        engine.dispose()
+
+
+
+def test_postgres_document_deletion_refuses_to_orphan_another_caregivers_saved_output():
+    """A shared-person assistant response keeps its document source dependency alive."""
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"doc-shared-output-person-{suffix}"
+    uploader_id = f"doc-shared-output-uploader-{suffix}"
+    other_caregiver_id = f"doc-shared-output-other-{suffix}"
+    try:
+        with Session() as db:
+            db.add(Person(id=person_id, name="Shared output deletion fixture"))
+            db.flush()
+            db.add_all([
+                Caregiver(id=uploader_id, name="Document uploader", relationship="family", person_id=person_id),
+                Caregiver(id=other_caregiver_id, name="Other family caregiver", relationship="family", person_id=person_id),
+            ])
+            db.commit()
+
+        with Session() as db:
+            uploaded = _upload_document_for_lifecycle(
+                db, person_id, uploader_id, "shared-source.txt", ("private source " + suffix).encode()
+            )
+            evidence_id = uploaded["evidence_id"]
+            job = QwenBackgroundJob(
+                person_id=person_id,
+                caregiver_id=other_caregiver_id,
+                task_text="Summarize the shared document.",
+                context_text="",
+                evidence_ids_json=json.dumps([evidence_id]),
+                workflow="companion",
+                status="completed",
+            )
+            db.add(job)
+            db.flush()
+            db.add(QwenModelOutput(
+                job_id=job.id,
+                person_id=person_id,
+                caregiver_id=other_caregiver_id,
+                workflow="companion",
+                model_name="test-model",
+                model_version="test-version",
+                output_text="A saved response derived from the shared document.",
+                output_metadata={},
+                source_event_ids_json="[]",
+                source_evidence_ids_json=json.dumps([evidence_id]),
+                review_status="pending_review",
+                review_required=True,
+                written_to_lcr=False,
+            ))
+            db.commit()
+
+        with Session() as db:
+            with pytest.raises(HTTPException) as blocked:
+                delete_uploaded_document(evidence_id, _request(person_id, uploader_id), db)
+            assert blocked.value.status_code == 409
+            assert "saved assistant response" in blocked.value.detail
+            assert db.query(EvidenceUpload).filter_by(evidence_id=evidence_id).count() == 1
     finally:
         engine.dispose()
 
