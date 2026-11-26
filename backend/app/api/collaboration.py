@@ -5848,6 +5848,12 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "resolved": re.compile(r"\b(?:resolved|cleared|completed|finished)\b", re.IGNORECASE),
         "changed": re.compile(r"\b(?:changed|improved|worsened|declined|increased|decreased|stopped|started)\b", re.IGNORECASE),
     }
+    _unknown_status_evidence = {
+        "open": re.compile(r"\b(?:open|unanswered|still unknown|still unclear|awaiting an answer|awaiting confirmation)\b", re.IGNORECASE),
+        "answered": re.compile(r"\b(?:answered|confirmed|provided|resolved)\b", re.IGNORECASE),
+        "declined": re.compile(r"\b(?:declined|refused|turned down|does not want|doesn't want)\b", re.IGNORECASE),
+        "no_longer_relevant": re.compile(r"\b(?:no longer relevant|no longer needed|not needed anymore|not applicable anymore)\b", re.IGNORECASE),
+    }
 
     def source_status(
         proposed: str,
@@ -5867,6 +5873,27 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         clause_prefix = clause[:match.start()]
         if _negation_pattern.search(clause_prefix):
             return "uncertain"
+        return proposed
+
+    def source_status_or_default(
+        proposed: str,
+        fragment: str,
+        claim: str,
+        patterns: dict[str, re.Pattern],
+        default: str,
+    ) -> str:
+        """Default unresolved questions to open unless the source proves closure."""
+        clause = next(
+            (part for part in _negation_clause_boundary.split(fragment) if claim in part),
+            None,
+        )
+        pattern = patterns.get(proposed)
+        match = pattern.search(clause) if pattern is not None and clause is not None else None
+        if match is None:
+            return default
+        clause_prefix = clause[:match.start()]
+        if _negation_pattern.search(clause_prefix):
+            return default
         return proposed
 
     def source_bound(value: str | None, fragment: str) -> bool:
@@ -5994,7 +6021,9 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
                     continue
                 result[key].append({
                     "question": question,
-                    "status": status,
+                    "status": source_status_or_default(
+                        status, fragment, fragment, _unknown_status_evidence, "open"
+                    ),
                     "raw_fragment": fragment,
                 })
             elif key == "non_care_facts":
