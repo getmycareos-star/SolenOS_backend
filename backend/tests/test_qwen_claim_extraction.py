@@ -121,19 +121,25 @@ def test_claim_extraction_drops_claims_without_exact_source_spans(monkeypatch):
 
     result = collaboration.qwen_claim_extraction(_request(), request=None, db=None)
 
-    assert result["run_a"]["claims"] == [
-        {
-            "claim_text": "Mom fell yesterday",
-            "entity_type": "event",
-            "event_type": "fall_reported",
-            "confidence_tag": "reported",
-            "source_span": {
-                "start_offset": 0,
-                "end_offset": 18,
-                "text": "Mom fell yesterday",
-            },
-        }
-    ]
+    claim = result["run_a"]["claims"][0]
+    assert claim["claim_text"] == "Mom fell yesterday"
+    assert claim["entity_type"] == "event"
+    assert claim["event_type"] == "fall_reported"
+    assert claim["confidence_tag"] == "reported"
+    assert claim["source_span"] == {
+        "start_offset": 0,
+        "end_offset": 18,
+        "text": "Mom fell yesterday",
+    }
+    assert claim["candidate_type"] == "claim"
+    assert claim["candidate_id"]
+    assert claim["source_id"] == "evidence-1"
+    assert claim["source_fragment"] == "Mom fell yesterday"
+    assert claim["person"] == {"id": None, "resolution_status": "unresolved"}
+    assert claim["care_recipient_id"] == "person-1"
+    assert claim["epistemic_status"] == "reported"
+    assert claim["confidence"] == "unavailable"
+    assert claim["review_state"] == "pending"
     assert result["run_b"]["claims"] == result["run_a"]["claims"]
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
