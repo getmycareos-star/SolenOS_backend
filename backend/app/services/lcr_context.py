@@ -1872,6 +1872,8 @@ def build_lcr_context(
                     ))
                     correction_rows_by_id = {}
                     corrections_table = metadata.tables.get("corrections")
+                    if corrections_table is None or not {"id", "person_id", "target_type", "target_id"}.issubset(corrections_table.c.keys()):
+                        raise SQLAlchemyError("corrections schema is unavailable for currentness verification")
                     if corrections_table is not None:
                         correction_columns = [
                             corrections_table.c[name]
