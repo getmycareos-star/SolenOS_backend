@@ -713,7 +713,7 @@ def test_real_qwen_care_understanding_preserves_negation_and_uncertainty(live_qw
     ]
     assert fall_observations, data
     assert all(
-        re.search(r"\b(?:no|not|never|neither|nor|without|did not|didn't)\\b", item["description"], re.IGNORECASE)
+        re.search(r"\b(?:no|not|never|neither|nor|without|did not|didn't)\b", item["description"], re.IGNORECASE)
         for item in fall_observations
     ), f"Qwen reversed or dropped the source's no-fall statement: {fall_observations!r}"
 
@@ -722,7 +722,7 @@ def test_real_qwen_care_understanding_preserves_negation_and_uncertainty(live_qw
         if "infection" in item["description"].casefold()
     ]
     assert all(
-        re.search(r"\b(?:may|might|could|possibly|possible|suspected|suspects|uncertain|unclear)\\b", item["description"], re.IGNORECASE)
+        re.search(r"\b(?:may|might|could|possibly|possible|suspected|suspects|uncertain|unclear)\b", item["description"], re.IGNORECASE)
         for item in infection_observations
     ), f"Qwen promoted an uncertain infection concern into a confirmed fact: {infection_observations!r}"
     assert all(item["confidence"] == "unavailable" for item in observations)
