@@ -1629,6 +1629,8 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
         job = current_job
         if result.get("ai_generated") is not True or result.get("provider_status") != "available":
             raise RuntimeError("Qwen background worker received a response without confirmed live inference")
+        if result.get("grounding_status") != "backend_validation_passed":
+            raise RuntimeError("Qwen background worker received a response without passed claim-grounding validation")
         model_name = str(result.get("model") or os.getenv("OLLAMA_MODEL") or "").strip()
         if not model_name:
             raise RuntimeError("Qwen background worker cannot persist an output without model identity")
@@ -1643,6 +1645,12 @@ async def process_one_qwen_job(job_id: str | None = None) -> bool:
                 "written_to_lcr": False,
                 "source_provenance_version": "qwen-source-records-v1",
                 "source_document_analysis_ids": result.get("source_document_analysis_ids", []),
+                "source_assertion_ids": result.get("source_assertion_ids", []),
+                "source_lcr_context_ids": result.get("source_lcr_context_ids", []),
+                "lcr_context_coverage": result.get("lcr_context_coverage"),
+                "grounding_status": result.get("grounding_status"),
+                "response_origin": result.get("response_origin"),
+                "response_mode": result.get("response_mode"),
                 "source_appointment_ids": result.get("source_appointment_ids", []),
                 "source_handoff_ids": result.get("source_handoff_ids", []),
                 "source_notification_ids": result.get("source_notification_ids", []),

@@ -472,6 +472,15 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
             "reply": "The appointment date was not supplied.",
             "ai_generated": True,
             "provider_status": "available",
+            "grounding_status": "backend_validation_passed",
+            "response_origin": "qwen",
+            "response_mode": "qwen_grounded",
+            "lcr_context_coverage": {
+                "retrieval_projection_complete": True,
+                "prompt_context_complete": True,
+            },
+            "source_assertion_ids": ["assertion-record-123456"],
+            "source_lcr_context_ids": ["lcr-context-123456"],
             "model": "qwen3.5:4b",
             "source_event_ids": [],
             "source_evidence_ids": [],
@@ -516,6 +525,12 @@ def test_worker_recovers_stale_processing_job_after_restart(tmp_path, monkeypatc
     assert output.output_metadata["source_notification_ids"] == ["notification-record-123456"]
     assert output.output_metadata["source_freshness_assessment_ids"] == ["freshness-assessment-123456"]
     assert output.output_metadata["source_freshness_status"] == "available"
+    assert output.output_metadata["source_assertion_ids"] == ["assertion-record-123456"]
+    assert output.output_metadata["source_lcr_context_ids"] == ["lcr-context-123456"]
+    assert output.output_metadata["grounding_status"] == "backend_validation_passed"
+    assert output.output_metadata["response_origin"] == "qwen"
+    assert output.output_metadata["response_mode"] == "qwen_grounded"
+    assert output.output_metadata["lcr_context_coverage"]["retrieval_projection_complete"] is True
     assert output.output_metadata["claim_provenance"]["claims"][0]["support_status"] == "not_matched_to_saved_wording"
     safety = db.query(QwenSafetyEvaluation).filter_by(output_id=output.id).one()
     assert safety.decision == "review_required"
