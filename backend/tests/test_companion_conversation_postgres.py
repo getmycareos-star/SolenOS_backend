@@ -1092,6 +1092,7 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
             id=session_id, person_id=person_id, caregiver_id=caregiver_id,
             title="Restricted conversation", status="active",
         ))
+        db.flush()
         source_message_id = f"restricted-source-{suffix}"
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
@@ -1190,6 +1191,7 @@ def test_companion_history_permission_does_not_grant_lcr_read_or_write():
             id=session_id, person_id=person_id, caregiver_id=caregiver_id,
             title="Conversation-only access", status="active",
         ))
+        db.flush()
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
             content="I noticed a change in sleep last night.",
