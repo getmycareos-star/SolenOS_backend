@@ -1181,32 +1181,46 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
     original_text = "Mum woke three times last night. What should I watch for today?"
     exact_quote = "Mum woke three times last night."
 
+    extraction_calls = []
+    turn_id = str(uuid.uuid4())
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
     monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "That sounds tiring. Keep an eye on how she feels today.")
-    monkeypatch.setattr(
-        companion_care_updates,
-        "extract_companion_care_candidates",
-        lambda text, audit_context=None: {
+
+    def extract_candidates(text, audit_context=None):
+        extraction_calls.append(text)
+        return {
             "observations": [{
                 "source_quote": exact_quote,
                 "event_time_quote": "last night",
             }]
-        },
-    )
+        }
 
+    monkeypatch.setattr(companion_care_updates, "extract_companion_care_candidates", extract_candidates)
+
+    request_body = {
+        "person_id": person_id,
+        "text": original_text,
+        "client_turn_id": turn_id,
+    }
     response = client.post(
         "/api/v1/conversation/message",
         headers=headers,
-        json={
-            "person_id": person_id,
-            "text": original_text,
-            "client_turn_id": str(uuid.uuid4()),
-        },
+        json=request_body,
     )
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["written_to_lcr"] is False
     assert body["persistence"] == "conversation_only"
+    assert len(extraction_calls) == 1
+
+    replay = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json=request_body,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["idempotent_replay"] is True
+    assert len(extraction_calls) == 1
 
     with Session() as db:
         proposal = db.query(AIOutputLCRProposal).filter_by(
