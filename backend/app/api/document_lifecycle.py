@@ -776,7 +776,7 @@ def _verify_persisted_extraction(
     return content
 
 
-def _response(analysis: CaptureAnalysis) -> dict:
+def _response(analysis: CaptureAnalysis, upload: EvidenceUpload | None = None) -> dict:
     details = analysis.candidates if isinstance(analysis.candidates, dict) else {}
     intelligence = details.get("document_intelligence")
     intelligence = intelligence if isinstance(intelligence, dict) else {}
@@ -793,13 +793,32 @@ def _response(analysis: CaptureAnalysis) -> dict:
         or str(details.get("filename") or "").casefold().endswith(".pdf")
     )
     raw_page_count = details.get("page_count")
-    page_count = (
-        raw_page_count
-        if isinstance(raw_page_count, int) and not isinstance(raw_page_count, bool) and raw_page_count > 0
-        else max(observed_pages, default=1) if is_paginated_pdf else max(len(observed_pages), 1)
-    )
+    page_count_verified = True
     if is_paginated_pdf:
-        page_count = max(page_count, max(observed_pages, default=0))
+        stored_count_is_verified = (
+            details.get("page_count_source") == "original_binary"
+            and isinstance(raw_page_count, int)
+            and not isinstance(raw_page_count, bool)
+            and 1 <= raw_page_count <= MAX_PDF_PAGES
+        )
+        if stored_count_is_verified:
+            page_count = raw_page_count
+        elif upload is not None:
+            try:
+                page_count = len(PdfReader(io.BytesIO(read_document_binary(upload)), strict=True).pages)
+                page_count_verified = 1 <= page_count <= MAX_PDF_PAGES
+            except Exception:
+                page_count = max(observed_pages, default=1)
+                page_count_verified = False
+        else:
+            page_count = (
+                raw_page_count
+                if isinstance(raw_page_count, int) and not isinstance(raw_page_count, bool) and 1 <= raw_page_count <= MAX_PDF_PAGES
+                else max(observed_pages, default=1)
+            )
+            page_count_verified = False
+    else:
+        page_count = max(len(observed_pages), 1)
     missing_page_numbers = set(range(1, page_count + 1)) - observed_pages if is_paginated_pdf else set()
     recorded_unprocessed_pages = details.get("unprocessed_page_numbers")
     persisted_unprocessed_pages = {
@@ -820,6 +839,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
     processed_pages = sorted(observed_pages - set(unprocessed_pages))
     extraction_complete = (
         analysis.extraction_status == "available"
+        and page_count_verified
         and not unprocessed_pages
         and not unreadable_pages
     )
@@ -882,6 +902,7 @@ def _response(analysis: CaptureAnalysis) -> dict:
         "extraction_status": analysis.extraction_status,
         "extraction_method": details.get("extraction_method"),
         "page_count": page_count,
+        "page_count_verified": page_count_verified,
         "page_states": page_states,
         "processed_page_numbers": processed_pages,
         # The persisted extraction text is authoritative for page-level
@@ -1088,10 +1109,10 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     if replacement is not None:
                         db.commit()
                         db.refresh(replacement)
-                        return _response(replacement)
+                        return _response(replacement, upload)
                 db.commit()
                 db.refresh(current_row)
-                return _response(current_row)
+                return _response(current_row, upload)
             row = current_row
             metadata = dict(row.candidates) if isinstance(row.candidates, dict) else {}
             attempt_count = int(metadata.get("extraction_attempt_count") or 1) + 1
@@ -1136,14 +1157,14 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
                     row.candidates = metadata
                     db.commit()
                     db.refresh(replacement)
-                    return _response(replacement)
+                    return _response(replacement, upload)
                 row.source_text = retry_text
                 row.extraction_status = retry_status
                 metadata.update(retry_metadata)
                 row.candidates = metadata
                 db.commit()
                 db.refresh(row)
-                return _response(row)
+                return _response(row, upload)
             # A failed retry can produce the exact same page marker. Persist the
             # attempt anyway so the durable worker can apply bounded backoff
             # instead of looping every few seconds forever.
@@ -1159,7 +1180,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             row.candidates = metadata
             db.commit()
             db.refresh(row)
-            return _response(row)
+            return _response(row, upload)
         evidence, current_upload = _lock_active_document_source(db, evidence_id, person_id, caregiver_id)
         if current_upload.sha256 != upload.sha256:
             db.rollback()
@@ -1174,7 +1195,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
             raise HTTPException(status_code=404, detail="Document extraction no longer exists")
         db.commit()
         db.refresh(current_row)
-        return _response(current_row)
+        return _response(current_row, upload)
 
     source_text, method = _extract(upload, content, evidence)
     source_text = _apply_capture_page_number(source_text, evidence)
@@ -1190,7 +1211,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
         current_metadata = dict(current_row.candidates) if isinstance(current_row.candidates, dict) else {}
         if current_metadata.get("kind") == "document_extraction_v1":
             db.rollback()
-            return _response(current_row)
+            return _response(current_row, upload)
     extraction_status, extraction_metadata = _extraction_metadata(current_upload, source_text, method)
     analysis = CaptureAnalysis(
         person_id=person_id,
@@ -1205,7 +1226,7 @@ def extract_saved_document(evidence_id: str, request: Request, db: Session = Dep
     db.add(analysis)
     db.commit()
     db.refresh(analysis)
-    return _response(analysis)
+    return _response(analysis, upload)
 
 
 @router.get("/analyses/{analysis_id}")
@@ -1243,7 +1264,7 @@ def get_document_extraction(analysis_id: str, request: Request, db: Session = De
         if intelligence["source_text_sha256"] != current_text_hash:
             raise HTTPException(status_code=409, detail="The persisted extraction text changed after document understanding")
     return {
-        **_response(analysis),
+        **_response(analysis, upload),
         "extracted_text": analysis.source_text,
         "document": {
             "filename": details.get("filename"),
