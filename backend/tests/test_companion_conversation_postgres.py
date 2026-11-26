@@ -271,7 +271,6 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             reply=passed_reply,
             rejection_reasons=[],
             ai_generated=True,
-            commit_success=True,
             source_event_ids=[f"event-pass-{suffix}"],
             source_evidence_ids=[f"evidence-pass-{suffix}"],
             source_document_analysis_ids=[],
@@ -280,6 +279,17 @@ def test_companion_output_validation_audit_records_pass_and_rejection_without_ra
             source_lcr_context_ids=[],
             source_freshness_assessment_ids=[],
         )
+        # The successful audit must remain in the caller's transaction so
+        # it can commit atomically with the conversation turns. A separate
+        # connection must not observe it before that transaction commits.
+        db.flush()
+        with Session() as observer:
+            assert observer.query(AISafetyCheck).filter_by(
+                person_id=person_id,
+                check_name="companion_response_grounding",
+                result="passed",
+            ).count() == 0
+        db.commit()
         passed = db.query(AISafetyCheck).filter_by(
             person_id=person_id,
             check_name="companion_response_grounding",

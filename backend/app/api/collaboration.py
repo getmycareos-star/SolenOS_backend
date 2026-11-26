@@ -6514,7 +6514,6 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             reply=reply,
             rejection_reasons=[],
             ai_generated=True,
-            commit_success=True,
             source_event_ids=source_event_ids,
             source_evidence_ids=source_evidence_ids,
             source_document_analysis_ids=source_document_analysis_ids,
