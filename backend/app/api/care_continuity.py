@@ -2557,16 +2557,9 @@ def current_care_projection(
         if status in {"completed", "closed", "resolved"}:
             add("follow_up_outcomes", {**row, "id": row.get("id"), "status": status, "title": "Follow-up outcome", "description": row.get("notes") or row.get("follow_up_kind") or "Follow-up recorded", "related_record_id": row.get("source_id") or row.get("target_id")}, "Follow-up outcome", 10)
 
-    def sort_key(item: dict[str, Any]) -> tuple[int, str]:
-        return (int(item["priority"]), str(item.get("recorded_at") or item.get("occurred_at") or ""))
-
-    current_items.sort(key=sort_key, reverse=False)
-    # Preserve priority ordering; within each priority, newest recorded item first.
-    ordered: list[dict[str, Any]] = []
-    for priority in sorted({item["priority"] for item in current_items}):
-        group = [item for item in current_items if item["priority"] == priority]
-        group.sort(key=lambda item: str(item.get("recorded_at") or item.get("occurred_at") or ""), reverse=True)
-        ordered.extend(group)
+    # Preserve deterministic priority ordering. Within a priority, sort by the
+    # time the care event happened; record time is a fallback/tie-breaker only.
+    ordered = sorted(current_items, key=_current_care_projection_sort_key)
 
     # Attach the latest persisted evidence reviews without treating absence of a
     # review as a positive quality or freshness result.
