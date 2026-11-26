@@ -2107,7 +2107,7 @@ def compare_document_version(evidence_id: str, request: Request, db: Session = D
             if not isinstance(observations, list):
                 return None
             source_page_text = _page_parsing_text(source_text)
-            page_markers = list(re.finditer(r"(?m)^\\[Page\\s+(\\d+)(?:\\s+OCR)?\\]", source_page_text))
+            page_markers = list(re.finditer(r"(?m)^\[Page\s+(\d+)(?:\s+OCR)?\]", source_page_text))
             for item in observations:
                 if not isinstance(item, dict):
                     return None
