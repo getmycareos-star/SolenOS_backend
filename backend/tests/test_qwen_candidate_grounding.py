@@ -405,3 +405,56 @@ def test_capture_candidates_preserve_source_uncertainty_wording(monkeypatch):
 
     assert len(result["observations"]) == 1
     assert "may have" in result["observations"][0]["observation"]
+
+def test_capture_candidates_never_exceed_twelve_after_deterministic_recovery(monkeypatch):
+    statements = [f"Mum reported care detail number {index}." for index in range(12)]
+    source = " ".join(statements + ["Mum may have pneumonia."])
+    model_output = {
+        "observations": [
+            {
+                "subject": "Mum",
+                "observation": statement,
+                "source_quote": statement,
+            }
+            for statement in statements
+        ],
+        "open_questions": [],
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-candidate-cap",
+        source_evidence_id="evidence-candidate-cap",
+    )
+
+    assert len(result["observations"]) == 12
+
+
+def test_capture_candidates_deduplicate_repeated_model_items(monkeypatch):
+    source = "Mum fell yesterday."
+    item = {
+        "subject": "Mum",
+        "observation": "Mum fell yesterday",
+        "source_quote": source,
+    }
+    monkeypatch.setattr(
+        qwen_gateway,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps({
+            "observations": [item, item, item],
+            "open_questions": [],
+        }),
+    )
+
+    result = qwen_gateway.extract_review_candidates(
+        source,
+        source_event_id="event-candidate-dedup",
+        source_evidence_id="evidence-candidate-dedup",
+    )
+
+    assert len(result["observations"]) == 1
