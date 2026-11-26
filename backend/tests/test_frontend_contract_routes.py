@@ -875,6 +875,31 @@ def test_daily_capture_persists_and_reads_back_under_same_care_record(monkeypatc
         invalid_photo = client.post("/api/v1/daily/log", headers=auth, json=invalid_photo_payload)
         assert invalid_photo.status_code == 422, invalid_photo.text
 
+        missing_blob_upload = client.post(
+            "/api/v1/upload",
+            headers=auth,
+            data={
+                "person_id": person_id,
+                "caregiver_id": caregiver_id,
+                "ingestion_key": "daily-capture-medication-photo-missing-blob",
+            },
+            files={"file": ("missing-blob.png", b"\\x89PNG\\r\\n\\x1a\\nmissing-blob", "image/png")},
+        )
+        assert missing_blob_upload.status_code == 201, missing_blob_upload.text
+        missing_blob_id = missing_blob_upload.json()["evidence_id"]
+        with TestingSessionLocal() as db:
+            db.query(EvidenceUpload).filter_by(evidence_id=missing_blob_id).delete(synchronize_session=False)
+            db.commit()
+        missing_blob_payload = {
+            **payload,
+            "medications": [{
+                **payload["medications"][0],
+                "photo_evidence_id": missing_blob_id,
+            }],
+        }
+        missing_blob_response = client.post("/api/v1/daily/log", headers=auth, json=missing_blob_payload)
+        assert missing_blob_response.status_code == 422, missing_blob_response.text
+
         saved = client.post("/api/v1/daily/log", headers=auth, json=payload)
         assert saved.status_code == 200, saved.text
         assert saved.json()["success"] is True
