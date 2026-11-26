@@ -5664,7 +5664,9 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
     source = payload.raw_text
     if not source.strip():
         raise HTTPException(status_code=422, detail="Source text is required")
-    _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
+    evidence = _require_owned_qwen_source(db, person_id, caregiver_id, payload.evidence_id, source)
+    recorded_at_value = getattr(evidence, "ingested_at", None) or getattr(evidence, "uploaded_at", None)
+    recorded_at = recorded_at_value.isoformat() if recorded_at_value is not None else None
     system = (
         "SOLENOS_WORKFLOW_ID: care_claim_extraction. "
         "Extract only discrete claims explicitly supported by the supplied source. Return JSON only: "
@@ -5750,8 +5752,37 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
             if span_identity in seen_source_spans:
                 continue
             seen_source_spans.add(span_identity)
-            claims.append({"claim_text": text_value.strip(), "entity_type": entity, "event_type": event.strip(),
-                           "confidence_tag": confidence, "source_span": span})
+            epistemic_status = {
+                "reported": "reported",
+                "inferred": "inferred",
+                "unknown": "missing",
+                "contradictory": "conflicting",
+            }[confidence]
+            candidate_id = uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"solenos:qwen-claim:{payload.evidence_id}:{span['start_offset']}:{span['end_offset']}:{span['text']}",
+            ).hex
+            claims.append({
+                "claim_text": text_value.strip(),
+                "entity_type": entity,
+                "event_type": event.strip(),
+                "confidence_tag": confidence,
+                "source_span": span,
+                "candidate_id": candidate_id,
+                "candidate_type": "claim",
+                "candidate_description": text_value.strip(),
+                "source_id": payload.evidence_id,
+                "source_fragment": span["text"],
+                "recorded_at": recorded_at,
+                "recorded_time_status": "available" if recorded_at is not None else "unavailable",
+                "person": {"id": None, "resolution_status": "unresolved"},
+                "care_recipient_id": person_id,
+                "event_time": None,
+                "event_time_resolution": "missing",
+                "epistemic_status": epistemic_status,
+                "confidence": "unavailable",
+                "review_state": "pending",
+            })
         return {"claims": claims}
     run_a = extract_once("A")
     run_b = extract_once("B")
