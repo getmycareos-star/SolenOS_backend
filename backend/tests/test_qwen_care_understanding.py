@@ -357,3 +357,33 @@ def test_care_understanding_preserves_positive_claim_after_unrelated_negated_cla
     }]
     assert result["written_to_lcr"] is False
     assert result["review_required"] is True
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["unexpected_top_level_key", "observation_limit_exceeded"],
+)
+def test_care_understanding_rejects_schema_drift_and_over_limit_output(monkeypatch, mutation):
+    _allow(monkeypatch)
+    model_output = {
+        "observations": [],
+        "events": [],
+        "decisions": [],
+        "outcomes": [],
+        "unknowns": [],
+        "non_care_facts": [],
+        "possible_links": [],
+    }
+    if mutation == "unexpected_top_level_key":
+        model_output["unrequested_actions"] = [{"action": "write_to_lcr"}]
+    else:
+        model_output["observations"] = [{}] * 21
+    monkeypatch.setattr(
+        collaboration,
+        "qwen_chat",
+        lambda *_args, **_kwargs: json.dumps(model_output),
+    )
+
+    with pytest.raises(HTTPException) as error:
+        collaboration.qwen_care_understanding(_request(), request=None, db=None)
+
+    assert error.value.status_code == 503
