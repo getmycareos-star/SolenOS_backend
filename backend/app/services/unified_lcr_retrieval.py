@@ -414,6 +414,7 @@ def build_unified_lcr_context(
     *,
     limit_per_source: int = 20,
     query: str | None = None,
+    reference_time: datetime | None = None,
     conversation_limit: int = MAX_CONVERSATION_CONTEXT_ITEMS,
     include_all_history: bool = False,
     source_offsets: dict[str, int] | None = None,
@@ -438,17 +439,23 @@ def build_unified_lcr_context(
         raise ValueError("The authenticated caregiver timezone settings could not be resolved")
     caregiver_timezone = str(caregiver_settings[0] or "UTC")
     timezone_configured = bool(caregiver_settings[1])
+    # Resolve relative language against one server-trusted instant supplied by
+    # the request boundary. The fallback is the server clock in UTC, never a
+    # model-generated timestamp or a client-provided calendar assumption.
+    trusted_reference_time = reference_time or datetime.now(UTC)
+    if trusted_reference_time.tzinfo is None or trusted_reference_time.utcoffset() is None:
+        raise ValueError("Temporal retrieval requires a timezone-aware trusted reference time.")
     if _is_temporal_lookup_request(query):
         if timezone_configured:
             try:
                 ZoneInfo(caregiver_timezone)
             except (ZoneInfoNotFoundError, ValueError) as exc:
                 raise ValueError("Your saved time zone is not valid. Update it in Settings before asking about dates.") from exc
-            temporal_window = _temporal_window(query, timezone_name=caregiver_timezone)
+            temporal_window = _temporal_window(query, now=trusted_reference_time, timezone_name=caregiver_timezone)
         else:
             # Never use UTC as a substitute for the caregiver's unknown local
             # calendar when answering a relative-date history question.
-            requested_window = _temporal_window(query, timezone_name="UTC")
+            requested_window = _temporal_window(query, now=trusted_reference_time, timezone_name="UTC")
             if requested_window is not None:
                 raise ValueError("Set your time zone in Settings before asking about yesterday or another date range.")
             temporal_window = None
