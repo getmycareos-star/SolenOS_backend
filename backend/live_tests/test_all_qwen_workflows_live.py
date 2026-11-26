@@ -211,7 +211,7 @@ def test_real_qwen_passes_all_ten_specialist_acceptance_scenarios_through_shared
         "failed_count": sum(1 for item in results if not item["passed"]),
         "results": results,
     }
-    artifact_path = Path(os.getenv("RUNNER_TEMP", "/tmp")) / "solenos-qwen-ten-area-acceptance.json"
+    artifact_path = Path(os.getenv("RUNNER_TEMP", "/tmp")) / "solenos-qwen-fifteen-case-acceptance.json"
     artifact_path.write_text(
         json.dumps(artifact, ensure_ascii=False, indent=2, default=str),
         encoding="utf-8",
