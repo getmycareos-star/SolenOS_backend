@@ -114,7 +114,7 @@ def test_real_qwen_passes_all_fifteen_specialist_acceptance_scenarios_through_sh
     monkeypatch.setattr(qwen_gateway.urllib.request, "urlopen", capture_real_ollama_request)
 
     # Do not abort on the first behavioural failure. Every controlled scenario
-    # must execute independently so the artifact contains all ten real outputs.
+    # must execute independently so the artifact contains all fifteen real outputs.
     for case in cases:
         messages = [
             {"role": "system", "content": case["system"]},
