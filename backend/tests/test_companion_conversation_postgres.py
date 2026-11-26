@@ -1131,6 +1131,43 @@ def test_companion_history_requires_conversation_permission_independent_of_lcr_a
         assert "view_conversations" not in (grant.permissions or [])
 
 
+def test_failed_first_companion_turn_removes_empty_session_and_releases_leases(monkeypatch):
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Failed first turn recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    turn_id = str(uuid.uuid4())
+
+    def failed_qwen(*args, **kwargs):
+        raise RuntimeError("simulated model transport failure")
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", failed_qwen)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "text": "Hello, I need help thinking through something.",
+            "client_turn_id": turn_id,
+        },
+    )
+    assert response.status_code == 503, response.text
+
+    with Session() as db:
+        assert db.query(ConversationSession).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).count() == 0
+        lock_keys = [
+            "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest(),
+        ]
+        assert db.query(CompanionTurnLease).filter(
+            CompanionTurnLease.lock_key.in_(lock_keys),
+        ).count() == 0
+
+
 def test_companion_history_permission_does_not_grant_lcr_read_or_write():
     suffix = uuid.uuid4().hex[:10]
     client = TestClient(app)
