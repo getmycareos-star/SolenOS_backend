@@ -11926,7 +11926,8 @@ async def companion_message(payload: CompanionCreate, request: Request, db: Sess
 @router.get("/conversations")
 def list_conversations(
     request: Request,
-    limit: int = Query(default=10, ge=1, le=50),
+    limit: int = Query(default=30, ge=1, le=50),
+    offset: int = Query(default=0, ge=0, le=10000),
     db: Session = Depends(get_db),
 ):
     """List the authenticated caregiver's durable Companion conversations.
@@ -11952,11 +11953,16 @@ def list_conversations(
             func.max(ConversationMessage.created_at).desc(),
             ConversationSession.created_at.desc(),
         )
-        .limit(limit)
+        .offset(offset)
+        .limit(limit + 1)
         .all()
     )
+    has_more = len(rows) > limit
+    page_rows = rows[:limit]
     return {
         "person_id": person_id,
+        "has_more": has_more,
+        "next_offset": offset + len(page_rows) if has_more else None,
         "items": [
             {
                 "session_id": session.id,
@@ -11968,7 +11974,7 @@ def list_conversations(
                 "last_message_at": last_message_at.isoformat() if last_message_at else None,
                 "message_count": int(message_count),
             }
-            for session, message_count, last_message_at in rows
+            for session, message_count, last_message_at in page_rows
         ],
     }
 
