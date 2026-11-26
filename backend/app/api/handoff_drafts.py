@@ -2006,6 +2006,11 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 CaptureAnalysis.source_evidence_id == document.id,
             ).order_by(CaptureAnalysis.created_at.desc()).first()
             extraction_details = extraction.candidates if extraction and isinstance(extraction.candidates, dict) else {}
+            is_pdf_extraction = _is_paginated_pdf(extraction_details)
+            verified_pdf_page_count = (
+                _verified_pdf_page_count(extraction_details, upload)
+                if is_pdf_extraction else None
+            )
             if not extraction:
                 effective_extraction_status = "not_extracted"
             elif extraction.extraction_status != "available":
@@ -2021,13 +2026,13 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 # this separate digest proves the persisted extraction text has
                 # not changed since it was produced from that binary.
                 effective_extraction_status = "extraction_text_checksum_mismatch"
-            elif _is_paginated_pdf(extraction_details) and _verified_pdf_page_count(extraction_details, upload) is None:
+            elif is_pdf_extraction and verified_pdf_page_count is None:
                 effective_extraction_status = "pdf_page_count_unverified"
             elif (
                 _persisted_unprocessed_pages(
                     extraction,
                     extraction_details,
-                    _verified_pdf_page_count(extraction_details, upload),
+                    verified_pdf_page_count,
                 )
                 or _unreadable_page_numbers(extraction.source_text or "")
             ):
