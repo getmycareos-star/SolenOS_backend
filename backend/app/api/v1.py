@@ -978,6 +978,57 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     "idempotent_replay": True,
                 }
         quick_check_in["request_fingerprint"] = request_fingerprint
+    attached_medication_evidence_ids: list[str] = []
+    if event_type in {"structured_daily_capture", "daily_care_entry"}:
+        medications = detail.get("medications")
+        if isinstance(medications, list):
+            for medication in medications:
+                if not isinstance(medication, dict):
+                    continue
+                raw_photo_id = medication.get("photo_evidence_id")
+                raw_ingestion_key = medication.get("photo_ingestion_key")
+                if raw_photo_id in (None, "") and raw_ingestion_key in (None, ""):
+                    continue
+                photo_filters = [
+                    EvidenceModel.person_id == person_id,
+                    EvidenceModel.type == "medication_photo",
+                    (EvidenceModel.evidence_status.is_(None))
+                    | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
+                ]
+                if raw_photo_id not in (None, ""):
+                    try:
+                        photo_evidence_id = str(uuid.UUID(str(raw_photo_id)))
+                    except (TypeError, ValueError, AttributeError) as exc:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="A medicine photo reference is invalid. Upload the photo again before saving this entry.",
+                        ) from exc
+                    photo_filters.append(EvidenceModel.id == photo_evidence_id)
+                if raw_ingestion_key not in (None, ""):
+                    if not isinstance(raw_ingestion_key, str) or len(raw_ingestion_key) > 128:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="A medicine photo reference is invalid. Upload the photo again before saving this entry.",
+                        )
+                    photo_filters.append(EvidenceModel.ingestion_key == raw_ingestion_key)
+                photo_evidence = db.query(EvidenceModel).filter(*photo_filters).with_for_update().first()
+                if photo_evidence is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="A medicine photo must reach SolenOS before adding the medication entry.",
+                    )
+                photo_blob = db.query(EvidenceUpload.evidence_id).filter(
+                    EvidenceUpload.evidence_id == photo_evidence.id,
+                ).with_for_update().first()
+                if photo_blob is None:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="A medicine photo must be fully saved before adding the medication entry.",
+                    )
+                medication["photo_evidence_id"] = photo_evidence.id
+                medication.pop("photo_ingestion_key", None)
+                attached_medication_evidence_ids.append(photo_evidence.id)
+
     evidence = None
     if event_type == "quick_daily_checkin" and isinstance(quick_check_in, dict):
         # Keep the original caregiver report as append-only source evidence.
@@ -1050,38 +1101,7 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
         db.add(evidence)
         db.flush()
     linked_evidence_ids = [evidence.id] if evidence is not None else []
-    if event_type in {"structured_daily_capture", "daily_care_entry"}:
-        medications = detail.get("medications")
-        if isinstance(medications, list):
-            for medication in medications:
-                if not isinstance(medication, dict):
-                    continue
-                raw_photo_id = medication.get("photo_evidence_id")
-                if raw_photo_id in (None, ""):
-                    continue
-                try:
-                    photo_evidence_id = str(uuid.UUID(str(raw_photo_id)))
-                except (TypeError, ValueError, AttributeError) as exc:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="A medicine photo reference is invalid. Upload the photo again before saving this entry.",
-                    ) from exc
-                photo_evidence = db.query(EvidenceModel).filter(
-                    EvidenceModel.id == photo_evidence_id,
-                    EvidenceModel.person_id == person_id,
-                    EvidenceModel.type == "medication_photo",
-                    (EvidenceModel.evidence_status.is_(None))
-                    | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
-                ).with_for_update().first()
-                photo_blob = db.query(EvidenceUpload.evidence_id).filter(
-                    EvidenceUpload.evidence_id == photo_evidence_id,
-                ).with_for_update().first()
-                if photo_evidence is None or photo_blob is None:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="A medicine photo must be saved to this care record before adding the medication entry.",
-                    )
-                linked_evidence_ids.append(photo_evidence.id)
+    linked_evidence_ids.extend(attached_medication_evidence_ids)
     linked_evidence_ids = list(dict.fromkeys(linked_evidence_ids))
 
     event = CareEventModel(
