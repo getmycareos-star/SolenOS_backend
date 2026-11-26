@@ -1072,10 +1072,10 @@ def _save_daily_capture_event(payload: dict, event_type: str, title: str, reques
                     EvidenceModel.type == "medication_photo",
                     (EvidenceModel.evidence_status.is_(None))
                     | (EvidenceModel.evidence_status != "deleted_by_caregiver"),
-                ).first()
+                ).with_for_update().first()
                 photo_blob = db.query(EvidenceUpload.evidence_id).filter(
                     EvidenceUpload.evidence_id == photo_evidence_id,
-                ).first()
+                ).with_for_update().first()
                 if photo_evidence is None or photo_blob is None:
                     raise HTTPException(
                         status_code=422,
