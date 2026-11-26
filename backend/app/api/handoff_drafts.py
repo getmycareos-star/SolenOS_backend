@@ -18,6 +18,12 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.api.care_delta import _scoped_identity
+from app.api.document_intelligence import (
+    _is_paginated_pdf,
+    _persisted_unprocessed_pages,
+    _unreadable_page_numbers,
+    _verified_pdf_page_count,
+)
 from app.core.database import get_db
 from app.services.caregiver_permissions import require_caregiver_permission
 from app.services.document_binary_storage import read_document_binary
@@ -2015,6 +2021,17 @@ def _verified_document_source(db: Session, person_id: str, caregiver_id: str) ->
                 # this separate digest proves the persisted extraction text has
                 # not changed since it was produced from that binary.
                 effective_extraction_status = "extraction_text_checksum_mismatch"
+            elif _is_paginated_pdf(extraction_details) and _verified_pdf_page_count(extraction_details, upload) is None:
+                effective_extraction_status = "pdf_page_count_unverified"
+            elif (
+                _persisted_unprocessed_pages(
+                    extraction,
+                    extraction_details,
+                    _verified_pdf_page_count(extraction_details, upload),
+                )
+                or _unreadable_page_numbers(extraction.source_text or "")
+            ):
+                effective_extraction_status = "extraction_incomplete"
             elif not (extraction.source_text or "").strip():
                 effective_extraction_status = "extraction_text_empty"
             else:
