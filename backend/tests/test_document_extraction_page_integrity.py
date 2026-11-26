@@ -35,6 +35,7 @@ def test_sparse_page_markers_are_not_reported_as_a_complete_document():
 
     assert status == "partial"
     assert metadata["page_count"] == 3
+    assert metadata["page_count_source"] == "original_binary"
     assert metadata["processed_page_numbers"] == [1, 3]
     assert metadata["unprocessed_page_numbers"] == [2]
 
