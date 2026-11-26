@@ -1120,7 +1120,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             except Exception:
                 db.rollback()
                 logger.exception("Could not backfill saved document clarification questions for evidence %s", evidence.id)
-            return _response(analysis)
+            return _response(analysis, upload)
 
     # If page extraction is complete, reveal the next bounded candidate group
     # only after the caregiver has made a final decision on the current group.
@@ -1144,7 +1144,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             )
             if _metadata(current_analysis) != original_candidates:
                 db.rollback()
-                return _response(current_analysis)
+                return _response(current_analysis, upload)
             analysis = current_analysis
             updated = copy.deepcopy(metadata)
             intelligence = updated["document_intelligence"]
@@ -1157,13 +1157,13 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
             db.add(analysis)
             db.commit()
             db.refresh(analysis)
-            return _response(analysis)
+            return _response(analysis, upload)
         if next_offset < len(stored):
             evidence, upload, current_analysis = _lock_document_source_and_analysis(
                 db, evidence_id, person_id, str(analysis.id), upload.sha256, caregiver_id
             )
             db.rollback()
-            return _response(current_analysis)
+            return _response(current_analysis, upload)
 
     source_text = (analysis.source_text or "").strip()
     if not source_text:
@@ -1480,7 +1480,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     )
     if _metadata(current_analysis) != original_candidates:
         db.rollback()
-        return _response(current_analysis)
+        return _response(current_analysis, upload)
     analysis = current_analysis
     analysis.candidates = metadata
     db.add(analysis)
@@ -1496,7 +1496,7 @@ def analyze_saved_document(evidence_id: str, request: Request, db: Session = Dep
     )
     db.commit()
     db.refresh(analysis)
-    return _response(analysis)
+    return _response(analysis, upload)
 
 
 
@@ -1604,7 +1604,7 @@ def review_document_candidate(
     if metadata.get("binary_sha256") != upload.sha256:
         raise HTTPException(status_code=409, detail="The original document no longer matches the extracted source")
     _verify_persisted_extraction(analysis, upload, db)
-    _require_complete_extraction(analysis)
+    _require_complete_extraction(analysis, upload)
     metadata = _metadata(analysis)
     intelligence = _intelligence(analysis)
     observations = intelligence.get("observations")
