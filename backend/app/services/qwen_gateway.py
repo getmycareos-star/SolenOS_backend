@@ -168,12 +168,16 @@ def _inference_audit_metadata(messages: list[dict], audit_context: dict | None =
     )
     workflow_match = re.search(r"(?im)^\s*SOLENOS_WORKFLOW_ID:\s*([a-z0-9_]+)", system_text)
     trusted_context = audit_context if isinstance(audit_context, dict) else {}
+    system_prompt_sha256 = hashlib.sha256(system_text.encode("utf-8")).hexdigest()
     metadata = {
         "provider": "ollama",
         "transport": "native_chat",
         "workflow_id": workflow_match.group(1) if workflow_match else "unspecified",
         "operating_contract_version": SOLENOS_OPERATING_CONTRACT_VERSION,
-        "system_prompt_sha256": hashlib.sha256(system_text.encode("utf-8")).hexdigest(),
+        # The assembled system-prompt digest is an immutable prompt-template
+        # fingerprint, including workflow and specialist instructions.
+        "prompt_template_version": "sha256:" + system_prompt_sha256,
+        "system_prompt_sha256": system_prompt_sha256,
         "request_context_sha256": hashlib.sha256(context_text.encode("utf-8")).hexdigest(),
         "prompt_token_estimate_method": "utf8_bytes_div_3_plus_message_framing",
     }
