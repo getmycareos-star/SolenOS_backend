@@ -1127,6 +1127,9 @@ def test_material_care_claim_fragments_without_verbs_are_still_grounded():
         "Mobility worsening.",
         "Appetite: poor.",
         "Medication discontinued.",
+        "Mum's mobility changed.",
+        "Her appetite fell.",
+        "Her sleep declined.",
     ):
         provenance = build_claim_provenance(statement, [])
         assert unmatched_material_claims(provenance), statement
