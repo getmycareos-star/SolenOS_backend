@@ -2198,12 +2198,40 @@ def current_care_projection(
                 candidate_evidence_ids.add(str(source_item["evidence_id"]))
     authorized_evidence_ids: set[str] = set()
     authorized_evidence_by_id: dict[str, Evidence] = {}
+    evidence_authorization_status = "not_needed"
     if candidate_evidence_ids:
-        authorized_evidence_rows = _active_evidence_query(db, person_id).filter(Evidence.id.in_(candidate_evidence_ids)).all()
-        authorized_evidence_by_id = {
-            str(row.id): row for row in authorized_evidence_rows
-        }
-        authorized_evidence_ids = set(authorized_evidence_by_id)
+        try:
+            with db.begin_nested():
+                authorized_evidence_rows = _active_evidence_query(db, person_id).filter(
+                    Evidence.id.in_(candidate_evidence_ids)
+                ).all()
+            authorized_evidence_by_id = {str(row.id): row for row in authorized_evidence_rows}
+            authorized_evidence_ids = set(authorized_evidence_by_id)
+            evidence_authorization_status = "checked"
+        except SQLAlchemyError:
+            # Never fall back to unscoped evidence or fail the entire care page.
+            # Keep the parent care rows visible, but disclose that source links
+            # could not be safely authorized for this response.
+            evidence_authorization_status = "failed"
+            for source_name, source_value in sources.items():
+                source_items = source_value.get("items", []) if isinstance(source_value, dict) else []
+                if any(
+                    isinstance(item, dict)
+                    and (
+                        str(item.get("id") or "") in candidate_evidence_ids
+                        or str(item.get("evidence_id") or "") in candidate_evidence_ids
+                        or bool(set(str(value) for value in item.get("evidence_ids", []) if value) & candidate_evidence_ids)
+                    )
+                    for item in source_items
+                ):
+                    source_value.update({
+                        "status": "partial",
+                        "candidate_scan_complete": False,
+                        "returned_history_complete": False,
+                        "enrichment_status": "failed",
+                        "error_code": "evidence_authorization_lookup_failed",
+                        "interpretation_limit": "The care information was retrieved, but its source links could not be safely checked. Those links are not shown as verified.",
+                    })
     current_items: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     # A completed correction supersedes the corrected event in this current-care
