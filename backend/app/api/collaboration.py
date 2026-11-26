@@ -6043,7 +6043,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         recorded_at_value = getattr(evidence, "ingested_at", None) or getattr(evidence, "uploaded_at", None)
         recorded_at = recorded_at_value.isoformat() if recorded_at_value is not None else None
         source_epistemic_status = str(getattr(evidence, "epistemic_status", None) or "reported").strip().casefold()
-        if source_epistemic_status not in {"uncertain", "conflicting", "missing"}:
+        if source_epistemic_status not in {"observed", "inferred", "uncertain", "conflicting", "missing"}:
             source_epistemic_status = "reported"
         for candidate in unique_candidates:
             candidate_text = (
