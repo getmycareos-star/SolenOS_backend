@@ -12,8 +12,10 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models.ai_output_governance import AIOutputLCRProposal
 from app.models.anonymous_session import AnonymousSession
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.collaboration import ConversationMessage, ConversationSession
 from datetime import datetime, timezone
+from app.services.caregiver_permissions import caregiver_has_permission
 from app.services.qwen_gateway import extract_companion_care_candidates
 
 logger = logging.getLogger(__name__)
@@ -180,12 +182,17 @@ def process_companion_care_update_message(
             id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
             status="active",
         ).first()
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id, status="active",
+        ).first()
         original_message = db.query(ConversationMessage).filter_by(
             id=message_id, session_id=conversation_id, role="user",
         ).first()
         if (
             auth_session is None
             or conversation is None
+            or grant is None
+            or not caregiver_has_permission(grant, "view_conversations")
             or original_message is None
             or original_message.content != source_text
         ):
