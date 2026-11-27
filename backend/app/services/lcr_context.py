@@ -1270,13 +1270,23 @@ def _temporal_clock_intent(query: str | None) -> str:
 
 
 def _temporal_window_predicate(columns, start_value: datetime, end_value: datetime):
-    """Match the first available timestamp by semantic precedence.
+    """Match only the highest-priority clock; NULL means that clock is unknown."""
+    available = list(columns)
+    if not available:
+        return false()
+    primary_timestamp = available[0]
+    return and_(
+        primary_timestamp.is_not(None),
+        primary_timestamp >= start_value,
+        primary_timestamp <= end_value,
+    )
 
-    Callers order event/effective time before report/record time and ingestion/
-    creation time. Fall through only when a stronger clock is NULL; a known
-    event time outside the window must not be overridden by a later upload.
-    Returned records retain every timestamp separately, so a report/upload-time
-    match is never rewritten or presented as event time.
+
+def _temporal_window_predicate_with_fallback(columns, start_value: datetime, end_value: datetime):
+    """Fall through to a weaker clock only when every stronger clock is NULL.
+
+    Used for explicit report/recording-time queries. Event-time queries use the
+    strict predicate above and never substitute recording or upload time.
     """
     available = list(columns)
     if not available:
@@ -1687,8 +1697,13 @@ def build_lcr_context(
                 # time is only a fallback when the event time is genuinely absent.
                 # The returned record still retains every available timestamp
                 # so event time and record time remain separately visible.
+                temporal_predicate_builder = (
+                    _temporal_window_predicate_with_fallback
+                    if temporal_intent in {"recorded", "reported"}
+                    else _temporal_window_predicate
+                )
                 temporal_predicates = [
-                    _temporal_window_predicate(temporal_columns, start_value, end_value)
+                    temporal_predicate_builder(temporal_columns, start_value, end_value)
                 ]
                 if source_name == "assertions" and "source_context" in table.c:
                     # Caregiver-approved document assertions preserve the
@@ -1731,9 +1746,11 @@ def build_lcr_context(
                             # event clock directly rather than a second correlated
                             # subquery, preserving the source event-time semantics.
                             temporal_predicates.append(
-                                _temporal_window_predicate(
-                                    evidence_date_columns, start_value, end_value,
-                                )
+                                (
+                                    _temporal_window_predicate_with_fallback
+                                    if temporal_intent in {"recorded", "reported"}
+                                    else _temporal_window_predicate
+                                )(evidence_date_columns, start_value, end_value)
                             )
                 if temporal_predicates:
                     statement = statement.where(or_(*temporal_predicates))
