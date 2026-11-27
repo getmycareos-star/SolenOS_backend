@@ -68,6 +68,18 @@ def test_replay_requires_document_permission_for_document_extraction_evidence_ty
     assert required is True
 
 
+def test_replay_fails_closed_when_source_reference_metadata_is_missing():
+    db = _EvidenceDatabase([])
+
+    required = _companion_response_requires_document_permission(
+        db,
+        person_id="person-1",
+        response={"source_record_refs": None},
+    )
+
+    assert required is True
+
+
 def test_replay_fails_closed_when_source_reference_metadata_is_not_a_list():
     db = _EvidenceDatabase([])
 
