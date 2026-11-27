@@ -3310,4 +3310,18 @@ def test_care_entity_resolution_deduplicates_document_and_extraction_by_evidence
         "evidence-1": "verified",
         "extraction-1": "completed",
     }
-    assert candidate["state"] == "mixed_source_status"
+    assert candidate["state"] == "source_specific_statuses"
+    assert candidate["status_families"] == [
+        "care_record_state", "processing_lifecycle",
+    ]
+    assert candidate["status_by_family"] == {
+        "care_record_state": ["verified"],
+        "processing_lifecycle": ["completed"],
+    }
+    assert {
+        item["source_id"]: item["status_family"]
+        for item in candidate["source_refs"]
+    } == {
+        "evidence-1": "care_record_state",
+        "extraction-1": "processing_lifecycle",
+    }
