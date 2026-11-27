@@ -432,7 +432,7 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
     items = assertions.get("items", [])
     if not isinstance(items, list):
         return []
-    groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    groups: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
     for item in items:
         if not isinstance(item, dict):
             continue
@@ -451,12 +451,18 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
         normalized = value.casefold()
         if not all((subject_type, subject_id, field, normalized)):
             continue
-        key = (subject_type, subject_id, field, assertion_kind)
+        # Distinct reported event times may represent a legitimate change,
+        # not contradictory accounts of the same state. Only compare reports
+        # within the same explicitly supplied time label; missing time is its
+        # own bucket and is never merged with a dated assertion.
+        event_time_text = " ".join(str(item.get("event_time_text") or "").split()).casefold()
+        key = (subject_type, subject_id, field, assertion_kind, event_time_text)
         group = groups.setdefault(key, {
             "subject_type": subject_type,
             "subject_id": subject_id,
             "field": field,
             "assertion_kind": assertion_kind,
+            "event_time_text": event_time_text or None,
             "values": {},
         })
         value_group = group["values"].setdefault(normalized, {
@@ -485,6 +491,7 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
             "subject_id": group["subject_id"],
             "field": group["field"],
             "assertion_kind": group["assertion_kind"],
+            "event_time_text": group["event_time_text"],
             "values": sorted(
                 group["values"].values(),
                 key=lambda entry: entry["value"].casefold(),
@@ -496,7 +503,10 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
         })
     return sorted(
         conflicts,
-        key=lambda item: (item["subject_type"], item["subject_id"], item["field"], item["assertion_kind"]),
+        key=lambda item: (
+            item["subject_type"], item["subject_id"], item["field"],
+            item["assertion_kind"], item.get("event_time_text") or "",
+        ),
     )[:8]
 
 
