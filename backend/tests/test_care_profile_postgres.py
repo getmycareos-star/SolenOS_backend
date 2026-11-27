@@ -323,3 +323,41 @@ def test_legacy_notification_attempt_backfill_refuses_to_invent_missing_created_
         """))
         with pytest.raises(RuntimeError, match="no created_at timestamp"):
             migration._backfill_nullable_attempt_values(connection)
+
+
+def test_first_use_orientation_completion_is_durable_and_caregiver_scoped():
+    client = TestClient(app)
+    created = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Care recipient", "caregiver_name": "First-use caregiver"},
+    )
+    assert created.status_code == 201, created.text
+    headers = {"Authorization": f"Bearer {created.json()['access_token']}"}
+
+    initial = client.get("/api/v1/care-profile", headers=headers)
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["first_use_orientation_completed_at"] is None
+
+    completed = client.post("/api/v1/care-profile/orientation-complete", headers=headers)
+    assert completed.status_code == 200, completed.text
+    receipt = completed.json()
+    assert receipt["completed"] is True
+    assert receipt["completed_at"]
+
+    reread = client.get("/api/v1/care-profile", headers=headers)
+    assert reread.status_code == 200, reread.text
+    assert reread.json()["first_use_orientation_completed_at"] == receipt["completed_at"]
+
+    repeated = client.post("/api/v1/care-profile/orientation-complete", headers=headers)
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["completed_at"] == receipt["completed_at"]
+
+    separate = client.post(
+        "/api/v1/sessions/anonymous",
+        json={"name": "Separate care recipient", "caregiver_name": "Separate caregiver"},
+    )
+    assert separate.status_code == 201, separate.text
+    separate_headers = {"Authorization": f"Bearer {separate.json()['access_token']}"}
+    separate_profile = client.get("/api/v1/care-profile", headers=separate_headers)
+    assert separate_profile.status_code == 200, separate_profile.text
+    assert separate_profile.json()["first_use_orientation_completed_at"] is None
