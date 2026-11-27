@@ -634,7 +634,15 @@ def review_companion_care_update(
                 status_code=503,
                 detail="Care-continuity reconciliation failed; the Companion review was not committed. Retry the review.",
             ) from exc
-    db.commit()
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Companion care-update review transaction failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Your review could not be saved. No Care Record change is confirmed; please retry.",
+        ) from exc
     if execution is not None:
         execution["stages"]["reconciliation"] = "committed"
     db.refresh(proposal)
