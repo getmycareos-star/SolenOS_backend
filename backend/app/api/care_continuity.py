@@ -2162,6 +2162,19 @@ def review_medication_record(subject_id: str, request: Request, db: Session = De
     }
 
 
+def _is_verified_completed_event_correction(
+    correction_row: dict[str, Any],
+    verified_completed_correction_ids: set[str],
+) -> bool:
+    """Only a completed correction with a checked source link may replace an event."""
+    correction_id = str(correction_row.get("id") or "")
+    return (
+        str(correction_row.get("processing_status") or "").casefold() == "completed"
+        and bool(correction_id)
+        and correction_id in verified_completed_correction_ids
+    )
+
+
 def _verified_event_correction_statuses(event_rows: list[dict[str, Any]]) -> dict[str, str]:
     """Return correction states only for links checked in this care-record scope."""
     verified: dict[str, str] = {}
@@ -2276,10 +2289,7 @@ def current_care_projection(
         correction_id = str(correction_row.get("id") or "")
         # Completion is not enough: the correction must also have a verified,
         # person-scoped "corrects" relationship to this exact event.
-        if (
-            correction_row.get("processing_status") == "completed"
-            and correction_id in verified_completed_correction_ids
-        ):
+        if _is_verified_completed_event_correction(correction_row, verified_completed_correction_ids):
             previous_completed = latest_completed_event_corrections.get(target_id)
             if previous_completed is None or str(correction_row.get("created_at") or "") >= str(previous_completed.get("created_at") or ""):
                 latest_completed_event_corrections[target_id] = correction_row
@@ -2526,7 +2536,7 @@ def current_care_projection(
         correction_id = str(correction_row.get("id") or "")
         # This collection is already gated above, but keep the invariant local
         # to the projection call so future refactors cannot bypass it.
-        if correction_id in verified_completed_correction_ids:
+        if _is_verified_completed_event_correction(correction_row, verified_completed_correction_ids):
             add_correction_projection(target_id, correction_row, completed=True, lineage_verified=True)
     for target_id, correction_row in latest_event_corrections.items():
         correction_id = str(correction_row.get("id") or "")
