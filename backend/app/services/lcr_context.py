@@ -1834,7 +1834,9 @@ def build_lcr_context(
                         evidence_id = str(item.get("source_evidence_id") or "")
                         item["extraction_metadata"] = _document_extraction_metadata(
                             item.pop("candidates", None),
-                            item.get("source_text"),
+                            # Verify the checksum against the complete persisted
+                            # extraction, not the bounded display preview in item.
+                            row_values.get("source_text"),
                             document_upload_hash_cache.get(evidence_id),
                             upload_check_performed=True,
                         )
