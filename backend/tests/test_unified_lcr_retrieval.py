@@ -1474,6 +1474,23 @@ def test_postgres_lcr_keeps_failed_and_pending_document_extractions_visible():
             db.add(caregiver)
             db.flush()
             db.add_all([
+                Evidence(
+                    id="failed-document-evidence",
+                    person_id=person.id,
+                    type="document",
+                    source_text="Unreadable clinic letter.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                ),
+                Evidence(
+                    id="pending-document-evidence",
+                    person_id=person.id,
+                    type="document",
+                    source_text="Clinic letter awaiting extraction.",
+                    uploaded_by_caregiver_id=caregiver.id,
+                ),
+            ])
+            db.flush()
+            db.add_all([
                 CaptureAnalysis(
                     id="failed-document-status",
                     person_id=person.id,
