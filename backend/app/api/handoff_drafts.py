@@ -2477,7 +2477,10 @@ def _generate_grounded_handoff(
     )
     # Keep the small-model prompt bounded. The full retrieved source snapshot,
     # coverage and truncation metadata remain persisted separately.
-    considered = eligible[:6]
+    # Keep the local 4B model input within its actual context window. Full source
+    # records remain in the immutable snapshot; inference receives four bounded
+    # source excerpts and compact correction lineage only.
+    considered = eligible[:4]
     model_sources = [
         {
             "source_ref": item["source_ref"],
@@ -2489,15 +2492,32 @@ def _generate_grounded_handoff(
             "stale_warning": item["stale_warning"],
             "information_status": item.get("information_status"),
             "correction_lineage_status": item.get("correction_lineage_status"),
-            "interpretation_limit": item.get("interpretation_limit"),
-            "corrections": item.get("corrections") or [],
-            "pending_corrections": item.get("pending_corrections") or [],
-            "source_text": item["text"][:600],
+            "interpretation_limit": str(item.get("interpretation_limit") or "")[:180],
+            "corrections": [
+                {
+                    key: str(correction.get(key))[:160]
+                    for key in ("original_text", "corrected_text", "reason", "created_at")
+                    if correction.get(key) is not None
+                }
+                for correction in (item.get("corrections") or [])[:2]
+                if isinstance(correction, dict)
+            ],
+            "pending_corrections": [
+                {
+                    key: str(correction.get(key))[:160]
+                    for key in ("original_text", "corrected_text", "reason", "created_at")
+                    if correction.get(key) is not None
+                }
+                for correction in (item.get("pending_corrections") or [])[:2]
+                if isinstance(correction, dict)
+            ],
+            "source_text": item["text"][:420],
         }
         for item in considered
     ]
     appointment_mode = purpose == "professional_appointment"
     response_length_policy = resolve_response_length_policy("", intent_hint="appointment_preparation" if appointment_mode else "care_handoff")
+    handoff_token_budget = min(int(response_length_policy.token_budget), 256)
     audience_guidance = (
         "Write for a healthcare professional: concise, dated, neutral, source-attributed, and explicit about uncertainty."
         if audience == "professional" else
@@ -2517,7 +2537,7 @@ def _generate_grounded_handoff(
             + f"Response length target: {response_length_policy.target_words} words; hard maximum: {response_length_policy.max_words}. Preserve uncertainty and all material source distinctions. "
             + audience_guidance + " " + purpose_guidance + " "
             "Return JSON only with this exact shape: {\"items\":[{\"section\":string,\"source_ref\":string,"
-            "\"summary\":string,\"supporting_quote\":string}]}. Select at most 6 relevant supplied records. "
+            "\"summary\":string,\"supporting_quote\":string}]}. Select at most 4 relevant supplied records. "
             "Each summary must be a cautious paraphrase of its supporting_quote only. The supporting_quote "
             "must be copied exactly from that source's source_text. Do not combine facts from different records "
             "into one claim. Do not diagnose, recommend treatment, infer causation, infer medication status, "
@@ -2542,7 +2562,7 @@ def _generate_grounded_handoff(
             "items": {
                 "type": "array",
                 "minItems": 1,
-                "maxItems": 6,
+                "maxItems": 4,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -2564,7 +2584,7 @@ def _generate_grounded_handoff(
             messages,
             timeout=150,
             response_format=response_schema,
-            options={"temperature": 0, "num_predict": response_length_policy.token_budget},
+            options={"temperature": 0, "num_predict": handoff_token_budget},
             audit_context=audit_context,
         )
         parsed = json.loads(raw)
