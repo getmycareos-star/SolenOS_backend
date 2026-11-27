@@ -1380,3 +1380,37 @@ def test_case_l_partial_dates_and_relative_references():
         assert len(view.unknown_facts) == 1
     finally:
         teardown_db()
+
+
+def test_relative_time_requires_an_explicit_duration_for_exact_resolution():
+    setup_db()
+    try:
+        db = TestingSessionLocal()
+        person = Person(id="relative-person", name="Relative Person")
+        caregiver = Caregiver(
+            id="relative-caregiver", name="Caregiver",
+            relationship="Family", person_id=person.id,
+        )
+        db.add_all([person, caregiver])
+        db.commit()
+        frame = create_temporal_reference_frame(
+            db,
+            person_id=person.id,
+            name="Surgery",
+            reference_time=datetime(2026, 4, 10, 9, 0, tzinfo=timezone.utc),
+            is_resolved=True,
+        )
+
+        ordered_only = resolve_relative_time(db, person.id, "before surgery", frame.id)
+        exact_duration = resolve_relative_time(db, person.id, "2 weeks after surgery", frame.id)
+        approximate_duration = resolve_relative_time(db, person.id, "about 3 months before surgery", frame.id)
+
+        assert ordered_only.is_resolved is False
+        assert ordered_only.resolved_point is None
+        assert ordered_only.derivation_method == "relative_ordering_without_duration"
+        assert exact_duration.is_resolved is True
+        assert exact_duration.resolved_point == datetime(2026, 4, 24, 9, 0, tzinfo=timezone.utc)
+        assert approximate_duration.is_resolved is True
+        assert approximate_duration.resolved_point == datetime(2026, 1, 10, 9, 0, tzinfo=timezone.utc)
+    finally:
+        teardown_db()
