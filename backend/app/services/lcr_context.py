@@ -609,6 +609,7 @@ _TEMPORAL_RANGE_TOKENS = {
     "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
     "september", "oct", "october", "nov", "november", "dec", "december",
     "correction", "corrections", "processed", "processing",
+    "what", "when", "happened", "occurred", "recorded", "reported", "logged",
 }
 
 
