@@ -4366,6 +4366,28 @@ def _trend_evidence_assessment(user_text: str, context_lines: list[str]) -> dict
         if not any(term in searchable for term in topic_terms):
             continue
         source_type = str(payload.get("source_type") or "").casefold()
+        information_status = str(record.get("information_status") or "").casefold()
+        assertion_status = str(record.get("assertion_status") or "").casefold()
+        epistemic_status = str(record.get("epistemic_status") or record.get("epistemic_state") or "").casefold()
+        lifecycle_status = str(record.get("status") or record.get("lifecycle_status") or "").casefold()
+        # Historical, withdrawn, superseded, or unresolved-currentness records
+        # remain retrievable for explanation, but cannot count as current trend
+        # observations. A later correction points to the old row; only the old
+        # row is excluded when it has a superseded-by marker.
+        if information_status in {
+            "historical_event", "historical_observation", "historical_evidence",
+            "event_correction_pending", "event_currentness_unknown",
+            "observation_currentness_unknown", "document_extraction_failed",
+        }:
+            continue
+        if assertion_status in {"rejected", "superseded", "retracted", "withdrawn"}:
+            continue
+        if lifecycle_status in {"deleted", "retracted", "superseded", "withdrawn", "cancelled", "canceled"}:
+            continue
+        if record.get("superseded_by_fact_id") or record.get("superseded_by_observation_ids"):
+            continue
+        if epistemic_status in {"uncertain", "unresolved", "conflicting", "inferred", "missing", "retracted", "withdrawn", "superseded"}:
+            continue
         source_type_map = {
             "events": "care_event",
             "assertions": "care_assertion",
