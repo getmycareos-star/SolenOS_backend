@@ -547,6 +547,9 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             or path.startswith("/api/v1/handoffs")
             or path.startswith("/api/v1/handoff-drafts")
             or path.startswith("/api/v1/caregiver-access")
+            # Preferences belong to the authenticated caregiver session. Never let
+            # a query-string person_id choose which caregiver profile is read or changed.
+            or path == "/api/v1/caregiver/preferences"
             # Caregiver-intelligence routes have their own session/person and
             # profile-ownership checks. Bind middleware scope to the bearer
             # session even when Starlette cannot resolve a legacy path parameter.
