@@ -8206,6 +8206,10 @@ def _care_history_recall_context_lines(
                 db.query(EvidenceModel.id)
                 .filter(
                     EvidenceModel.person_id == person_id,
+                    or_(
+                        EvidenceModel.evidence_status.is_(None),
+                        func.lower(EvidenceModel.evidence_status) != "deleted_by_caregiver",
+                    ),
                     or_(*(EvidenceModel.source_text.ilike(f"%{term}%") for term in terms)),
                 )
                 .order_by(EvidenceModel.reported_at.desc().nullslast(), EvidenceModel.id.asc())
@@ -8311,12 +8315,13 @@ def _care_history_recall_context_lines(
     linked_evidence_ids: list[str] = []
     for row in rows:
         caregiver_report = _care_history_event_text({"description": row.description})
-        if not caregiver_report:
-            continue
         report_terms = set(re.findall(r"[\w']{3,}", caregiver_report.casefold(), flags=re.UNICODE))
-        if not any(report_terms.intersection(variants) for _, variants in topics):
-            continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
+        matching_linked_evidence = set(evidence_ids).intersection(matching_evidence_ids)
+        if not any(report_terms.intersection(variants) for _, variants in topics) and not matching_linked_evidence:
+            continue
+        if not caregiver_report and not matching_linked_evidence:
+            continue
         linked_evidence_ids.extend(evidence_ids)
         for evidence_id in evidence_ids:
             caregiver_by_evidence_id[evidence_id] = str(row.created_by_caregiver_id or "")
@@ -8399,6 +8404,10 @@ def _care_history_recall_context_lines(
                     .filter(
                         EvidenceModel.person_id == person_id,
                         EvidenceModel.id.in_(list(dict.fromkeys(linked_evidence_ids))),
+                        or_(
+                            EvidenceModel.evidence_status.is_(None),
+                            func.lower(EvidenceModel.evidence_status) != "deleted_by_caregiver",
+                        ),
                     )
                     .all()
                 )
@@ -8519,6 +8528,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
                 continue
             if str(record.get("information_status") or "").casefold() in {
                 "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
+                continue
+            if str(record.get("evidence_status") or "").casefold() in {
+                "deleted_by_caregiver", "deleted", "withdrawn", "retracted",
             }:
                 continue
             description = _care_history_event_text({"description": record.get("source_text")})
@@ -8689,6 +8702,10 @@ def _localized_care_history_extractive_answer(
                 "historical_event", "event_correction_pending", "event_currentness_unknown",
             }:
                 continue
+            if str(record.get("evidence_status") or "").casefold() in {
+                "deleted_by_caregiver", "deleted", "withdrawn", "retracted",
+            }:
+                continue
             description = _care_history_event_text({"description": record.get("source_text")})
         else:
             continue
@@ -8834,12 +8851,16 @@ def _care_history_reply_covers_requested_topics(
                 continue
             description = _care_history_event_text(record)
         elif source_type == "evidence":
-            if payload.get("caregiver_attributed") is not True:
+            if record.get("caregiver_attributed") is not True:
                 continue
-            if str(payload.get("status") or "").strip().casefold() != "recorded":
+            if str(record.get("status") or "").strip().casefold() != "recorded":
                 continue
-            if str(payload.get("information_status") or "").casefold() in {
+            if str(record.get("information_status") or "").casefold() in {
                 "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
+                continue
+            if str(record.get("evidence_status") or "").casefold() in {
+                "deleted_by_caregiver", "deleted", "withdrawn", "retracted",
             }:
                 continue
             description = _care_history_event_text({"description": record.get("source_text")})
