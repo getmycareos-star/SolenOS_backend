@@ -17,6 +17,7 @@ from app.models.care import Caregiver, CareEvent, Person
 from app.models.change import Baseline, Change, Pattern
 from app.models.significance import AssessmentDimension, SignificanceAssessment
 from app.models.care_continuity import CareStateRevision
+from app.api.collaboration import _care_history_recall_context_lines
 from app.services.change_intelligence_reconciliation import reconcile_person_change_intelligence
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -984,4 +985,63 @@ def test_postgres_lcr_retrieval_includes_scoped_care_revisions_and_change_analys
                 Person.id.in_([person_a_id, person_b_id])
             ).delete(synchronize_session=False)
             db.commit()
+        engine.dispose()
+
+
+def test_postgres_companion_history_recall_does_not_let_undated_rows_evict_dated_records():
+    engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    suffix = uuid.uuid4().hex
+    person_id = f"companion-history-person-{suffix}"
+    caregiver_id = f"companion-history-caregiver-{suffix}"
+    db = Session()
+    try:
+        db.add(Person(id=person_id, name="Companion history ordering fixture"))
+        db.flush()
+        db.add(Caregiver(
+            id=caregiver_id, name="History ordering caregiver",
+            relationship="family", person_id=person_id,
+        ))
+        db.flush()
+        dated_older = CareEvent(
+            id=f"companion-history-older-{suffix}", person_id=person_id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+            title="Older sleep report", description="Caregiver reported poor sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+        )
+        dated_newer = CareEvent(
+            id=f"companion-history-newer-{suffix}", person_id=person_id,
+            event_type="observation", status="recorded",
+            occurred_at=datetime(2026, 1, 11, tzinfo=timezone.utc),
+            title="Newer sleep report", description="Caregiver reported improved sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+        )
+        undated = CareEvent(
+            id=f"companion-history-undated-{suffix}", person_id=person_id,
+            event_type="observation", status="recorded",
+            occurred_at=None,
+            title="Undated sleep report", description="Caregiver reported uncertain sleep.",
+            evidence_ids=[], created_by_caregiver_id=caregiver_id,
+        )
+        db.add_all([dated_older, dated_newer, undated])
+        db.commit()
+
+        result = _care_history_recall_context_lines(
+            db, person_id, "What has been recorded about sleep?", limit=2,
+        )
+        returned_ids = [
+            json.loads(line.partition(":")[2].strip())["event_id"]
+            for line in result["event_lines"]
+        ]
+        assert returned_ids == [dated_newer.id, dated_older.id]
+        assert result["has_more"] is True
+        assert undated.id not in returned_ids
+    finally:
+        db.rollback()
+        db.query(CareEvent).filter(CareEvent.person_id == person_id).delete(synchronize_session=False)
+        db.query(Caregiver).filter(Caregiver.person_id == person_id).delete(synchronize_session=False)
+        db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
+        db.commit()
+        db.close()
         engine.dispose()
