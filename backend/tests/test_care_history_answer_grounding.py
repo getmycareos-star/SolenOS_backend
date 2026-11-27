@@ -27,6 +27,63 @@ def _event_line(
     })
 
 
+
+def _evidence_line(
+    evidence_id: str,
+    source_text: str,
+    *,
+    caregiver_attributed: bool = True,
+    status: str = "recorded",
+    information_status: str = "caregiver_reported",
+) -> str:
+    return "Original evidence: " + json.dumps({
+        "source_type": "evidence",
+        "evidence_id": evidence_id,
+        "record": {
+            "source_text": json.dumps({
+                "original_capture": {"notes": source_text},
+            }),
+            "caregiver_attributed": caregiver_attributed,
+            "status": status,
+            "information_status": information_status,
+        },
+    })
+
+
+def test_history_fallback_quotes_original_caregiver_evidence_when_event_projection_is_narrower():
+    question = "What has the caregiver recorded about lunch?"
+    source = "Mum was unusually confused this afternoon and refused lunch."
+    context = [
+        _event_line("daily-event", "daily_care_observation: unusually confused this afternoon"),
+        _evidence_line("daily-evidence", source),
+    ]
+
+    answer = _care_history_extractive_answer(question, context)
+
+    assert answer is not None
+    assert source in answer
+    assert _care_history_reply_covers_requested_topics(question, answer, context)
+
+
+def test_history_fallback_rejects_unattributed_or_superseded_original_evidence():
+    question = "What has the caregiver recorded about lunch?"
+    source = "Mum refused lunch yesterday."
+    context = [
+        _evidence_line("unattributed-evidence", source, caregiver_attributed=False),
+        _evidence_line(
+            "superseded-evidence",
+            source,
+            status="superseded",
+            information_status="historical_event",
+        ),
+    ]
+
+    answer = _care_history_extractive_answer(question, context)
+
+    assert answer is not None
+    assert "I couldn't confirm lunch" in answer
+    assert source not in answer
+
 def test_history_fallback_covers_each_requested_topic_from_saved_event_reports():
     context = [
         _event_line("sleep-event", "Mum slept poorly last night and seemed more unsettled this morning."),
