@@ -3329,6 +3329,7 @@ def _collect_full_lcr_context_pages(
     query: str,
     initial_context: dict[str, Any],
     *,
+    temporal_query: str | None = None,
     limit_per_source: int = 50,
     max_pages: int = 4,
 ) -> dict[str, Any]:
@@ -3366,6 +3367,7 @@ def _collect_full_lcr_context_pages(
                 caregiver_id,
                 limit_per_source=limit_per_source,
                 query=query,
+                temporal_query=temporal_query,
                 conversation_limit=1,
                 include_all_history=True,
                 source_offsets=offsets,
@@ -10078,6 +10080,7 @@ async def companion_message(
                 db, person_id, caregiver_id,
                 limit_per_source=200 if care_journey_request else 50,
                 query=trend_retrieval_query,
+                temporal_query=user_text,
                 include_all_history=care_journey_request,
                 conversation_limit=0 if social_only else MAX_CONVERSATION_CONTEXT_ITEMS,
                 only_sources=set() if social_only else None,
@@ -10090,6 +10093,7 @@ async def companion_message(
             if _should_fetch_full_lcr_context_pages(shared_lcr_context, care_journey_request):
                 shared_lcr_context = _collect_full_lcr_context_pages(
                     db, person_id, caregiver_id, trend_retrieval_query, shared_lcr_context,
+                    temporal_query=user_text,
                     limit_per_source=200 if care_journey_request else 50,
                     max_pages=_lcr_history_page_limit(care_journey_request),
                 )
