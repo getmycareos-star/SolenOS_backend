@@ -1905,6 +1905,23 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
                 person_id="partial-document-person",
             ))
             db.flush()
+            db.add_all([
+                Evidence(
+                    id="partial-document-evidence",
+                    person_id="partial-document-person",
+                    type="document",
+                    source_text="Saved partial medication document.",
+                    uploaded_by_caregiver_id="partial-document-caregiver",
+                ),
+                Evidence(
+                    id="partial-interpretation-evidence",
+                    person_id="partial-document-person",
+                    type="document",
+                    source_text="Saved interpreted medication document.",
+                    uploaded_by_caregiver_id="partial-document-caregiver",
+                ),
+            ])
+            db.flush()
             db.add(CaptureAnalysis(
                 id="partial-document-analysis",
                 person_id="partial-document-person",
