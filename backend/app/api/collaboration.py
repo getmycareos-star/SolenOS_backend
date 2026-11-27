@@ -1307,7 +1307,7 @@ def _companion_response_requires_document_permission(
         EvidenceModel.person_id == str(person_id),
         EvidenceModel.id.in_(evidence_ids),
     ).with_for_update().all()
-    evidence_types = {str(row_id): str(row_type or "") for row_id, row_type in evidence_rows}
+    evidence_types = {str(row_id): str(row_type or "").strip().casefold() for row_id, row_type in evidence_rows}
     # A deleted or unresolvable source cannot prove that a saved answer is
     # independent of documents. Fail closed rather than replaying it.
     return (
@@ -13092,7 +13092,7 @@ def conversation_history(
                 EvidenceModel.person_id == str(person_id),
                 EvidenceModel.id.in_(candidate_evidence_ids),
             ).with_for_update().all()
-            evidence_types = {str(value): str(kind or "") for value, kind in evidence_rows}
+            evidence_types = {str(value): str(kind or "").strip().casefold() for value, kind in evidence_rows}
             for row in rows:
                 if row.role != "assistant":
                     continue
