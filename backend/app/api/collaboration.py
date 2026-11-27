@@ -1149,6 +1149,17 @@ def _caregiver_preferences_scope(request: Request, db: Session) -> tuple[str, st
     return person_id, caregiver_id
 
 
+def _companion_idempotency_lock_key(person_id: str, caregiver_id: str, client_turn_id: str) -> str:
+    """Scope an idempotency lease to the authenticated recipient and caregiver.
+
+    Client-provided turn IDs are untrusted and are not globally unique. Including
+    both ownership dimensions prevents one care circle from serializing or
+    deliberately contending with another care circle by reusing a turn ID.
+    """
+    identity = "\\0".join((str(person_id), str(caregiver_id), str(client_turn_id)))
+    return "idempotency:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
 async def _acquire_companion_turn_lease(
     db: Session,
     request: Request,
@@ -9440,10 +9451,10 @@ async def companion_message(
     # Durable leases serialize retries across workers without retaining a
     # PostgreSQL connection during slow retrieval or model inference.
     if client_turn_id:
-        idempotency_key = hashlib.sha256(client_turn_id.encode("utf-8")).hexdigest()
-        await _acquire_companion_turn_lease(
-            db, request, f"idempotency:{idempotency_key}",
+        idempotency_key = _companion_idempotency_lock_key(
+            person_id, caregiver_id, client_turn_id,
         )
+        await _acquire_companion_turn_lease(db, request, idempotency_key)
         replay = _companion_replay_response(
             db,
             client_turn_id=client_turn_id,
