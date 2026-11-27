@@ -551,11 +551,16 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             if source_name == "document_extractions"
             else "care_record_state"
         )
+        status_field = str(
+            item.get("field") or item.get("fact_type") or item.get("attribute")
+            or item.get("subject_label") or source_name
+        ).strip().casefold()
         source_ref = {
             "source_type": source_name,
             "source_id": str(item.get("id") or key),
             "information_status": state,
             "status_family": status_family,
+            "status_field": status_field,
         }
         existing = candidates.get(stable_key)
         if existing is not None:
@@ -577,9 +582,14 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             existing["status_by_family"] = {
                 family: sorted(values) for family, values in family_states.items()
             }
-            if len(families) > 1:
+            field_states = existing.setdefault("status_by_field", {})
+            field_key = f"{status_family}:{status_field}"
+            field_values = set(field_states.get(field_key, []))
+            field_values.add(state)
+            field_states[field_key] = sorted(field_values)
+            if len(families) > 1 or len(field_states) > 1:
                 existing["state"] = "source_specific_statuses"
-            elif len(family_states[status_family]) > 1:
+            elif len(field_values) > 1:
                 existing["state"] = "mixed_source_status"
             return
         candidates[stable_key] = {
@@ -592,6 +602,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             "state": state,
             "status_families": [status_family],
             "status_by_family": {status_family: [state]},
+            "status_by_field": {f"{status_family}:{status_field}": [state]},
         }
 
     for source_name, source in (sources or {}).items():
