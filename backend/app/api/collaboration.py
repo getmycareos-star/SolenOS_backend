@@ -3109,7 +3109,7 @@ def _companion_replay_response(
     """Replay a committed assistant turn only to its original authorized caregiver."""
     if not client_turn_id:
         return None
-    pair = (
+    replay_query = (
         db.query(ConversationMessage, ConversationSession)
         .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
         .filter(
@@ -3118,17 +3118,32 @@ def _companion_replay_response(
             ConversationSession.person_id == str(person_id),
             ConversationSession.caregiver_id == str(caregiver_id),
         )
-        .first()
     )
-    if pair is None:
+    # Turn IDs are unique within a conversation, not globally. When the caller
+    # knows the conversation, constrain the lookup in SQL before materializing
+    # any response. A bootstrap retry has no session ID; it may replay only if
+    # exactly one matching turn exists in this caregiver's scope. Ambiguity is
+    # a conflict, never an arbitrary .first() disclosure.
+    if requested_session_id:
+        replay_query = replay_query.filter(
+            ConversationSession.id == str(requested_session_id),
+        )
+    pairs = replay_query.order_by(
+        ConversationMessage.created_at.desc(),
+        ConversationMessage.id.desc(),
+    ).limit(2).all()
+    if not pairs:
         return None
-    assistant, saved_session = pair
-    # Recipient and caregiver ownership are enforced in the join predicate above;
-    # no cross-recipient response row is materialized for application-level checks.
+    if len(pairs) > 1:
+        raise HTTPException(
+            status_code=409,
+            detail="This turn ID matches more than one conversation. Reopen the original conversation before retrying.",
+        )
+    assistant, saved_session = pairs[0]
+    # Recipient, caregiver and optional conversation ownership are enforced in
+    # the SQL join predicate; no other recipient's response is materialized.
     if saved_session.status != "active":
         raise HTTPException(status_code=409, detail="This turn ID belongs to an inactive conversation")
-    if requested_session_id and requested_session_id != saved_session.id:
-        raise HTTPException(status_code=409, detail="This turn ID belongs to a different conversation")
     try:
         metadata = json.loads(assistant.response_metadata_json or "{}")
         source_record_refs = json.loads(assistant.source_record_refs_json or "[]")
