@@ -458,10 +458,20 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
         # subject identity, not by assertion-row identity. Keep every source
         # reference so grouping never discards provenance.
         stable_key = identity_key or f"{source_name}:{key}"
+        # A source's status must be interpreted in its own vocabulary.
+        # Document extraction lifecycle ("completed") is not an epistemic
+        # judgment ("verified"), so comparing those strings as if they were
+        # competing states creates a false conflict.
+        status_family = (
+            "processing_lifecycle"
+            if source_name == "document_extractions"
+            else "care_record_state"
+        )
         source_ref = {
             "source_type": source_name,
             "source_id": str(item.get("id") or key),
             "information_status": state,
+            "status_family": status_family,
         }
         existing = candidates.get(stable_key)
         if existing is not None:
@@ -471,7 +481,17 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             labels = existing.setdefault("labels", [])
             if label[:180] not in labels:
                 labels.append(label[:180])
-            if existing.get("state") != state:
+            families = set(existing.get("status_families") or [])
+            families.add(status_family)
+            existing["status_families"] = sorted(families)
+            family_states = existing.setdefault("status_by_family", {})
+            family_states.setdefault(status_family, set()).add(state)
+            existing["status_by_family"] = {
+                family: sorted(states) for family, states in family_states.items()
+            }
+            if len(families) > 1:
+                existing["state"] = "source_specific_statuses"
+            elif len(family_states[status_family]) > 1:
                 existing["state"] = "mixed_source_status"
             return
         candidates[stable_key] = {
@@ -482,6 +502,8 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             "label": label[:180],
             "labels": [label[:180]],
             "state": state,
+            "status_families": [status_family],
+            "status_by_family": {status_family: [state]},
         }
 
     for source_name, source in (sources or {}).items():
