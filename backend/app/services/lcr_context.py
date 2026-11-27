@@ -1623,13 +1623,11 @@ def build_lcr_context(
             if temporal_columns:
                 start_value = datetime.fromisoformat(temporal_window["start"])
                 end_value = datetime.fromisoformat(temporal_window["end"])
-                # A delayed entry has two valid clocks: when the care event
-                # happened and when it entered SolenOS. Coalescing these fields
-                # silently hides a record when its event time is outside the
-                # requested window but its recording time is inside it (or vice
-                # versa). Include the row when either available timestamp falls
-                # in the window; retain both timestamps in the returned record
-                # so the caregiver can see the distinction.
+                # Use the clock that matches the caregiver's intent. For an
+                # event-time question, occurrence/effective time wins; recording
+                # time is only a fallback when the event time is genuinely absent.
+                # The returned record still retains every available timestamp
+                # so event time and record time remain separately visible.
                 temporal_predicates = [
                     _temporal_window_predicate(temporal_columns, start_value, end_value)
                 ]
