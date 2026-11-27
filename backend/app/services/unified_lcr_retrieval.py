@@ -612,7 +612,7 @@ def build_unified_lcr_context(
         event_ids=event_ids,
     )
     entity_resolution = resolve_care_entity_reference(
-        query,
+        calendar_query,
         context.get("sources", {}),
     )
     context["entity_resolution"] = entity_resolution
