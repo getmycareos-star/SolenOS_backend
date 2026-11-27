@@ -11495,7 +11495,7 @@ async def companion_message(
                 "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
         # Capture the conversation key while the ORM object is still attached.
-        conversation_session_id = str(conversation_session_id)
+        conversation_session_id = str(session.id)
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
