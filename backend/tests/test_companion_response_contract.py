@@ -5167,15 +5167,13 @@ def test_paged_entity_resolution_does_not_hide_later_ambiguous_appointment(monke
 
 
 @pytest.mark.parametrize(
-    ("items", "expected_initial_status"),
+    "items",
     [
-        ([{"id": "appointment-visible", "title": "Neurology visit", "status": "scheduled"}], "resolved"),
-        ([], "no_match"),
+        [{"id": "appointment-visible", "title": "Neurology visit", "status": "scheduled"}],
+        [],
     ],
 )
-def test_entity_resolution_is_incomplete_when_history_paging_stops_early(
-    monkeypatch, items, expected_initial_status,
-):
+def test_entity_resolution_is_incomplete_when_history_paging_stops_early(monkeypatch, items):
     initial = {
         "sources": {
             "appointments": {
@@ -5202,7 +5200,6 @@ def test_entity_resolution_is_incomplete_when_history_paging_stops_early(
         "When is her appointment?", initial, limit_per_source=1, max_pages=1,
     )
 
-    assert expected_initial_status in {"resolved", "no_match"}
     assert merged["entity_resolution"]["status"] == "incomplete"
     assert merged["entity_resolution"]["resolution_complete"] is False
     assert merged["retrieval_projection_complete"] is False
