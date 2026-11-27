@@ -1866,3 +1866,92 @@ def test_companion_proposal_extraction_rechecks_revoked_at_after_model(monkeypat
             caregiver_id=caregiver_id,
             source_message_id=message_id,
         ).count() == 0
+
+
+
+def test_companion_history_and_replay_restrict_document_derived_answers_after_document_access_revocation():
+    """Conversation access alone cannot replay or expose a prior document-derived answer."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Document permission history recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    session_id = f"document-permission-history-{suffix}"
+    turn_id = str(uuid.uuid4())
+    source_message_id = f"document-permission-user-{suffix}"
+    assistant_message_id = f"document-permission-assistant-{suffix}"
+    question = "What did the discharge note say about the medication?"
+    document_id = f"document-evidence-{suffix}"
+    document_analysis_id = f"document-analysis-{suffix}"
+    request_sha256 = hashlib.sha256(question.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).one()
+        grant.can_manage_members = False
+        grant.permissions = [
+            permission for permission in (grant.permissions or [])
+            if permission != "view_documents"
+        ]
+        db.add(Evidence(
+            id=document_id,
+            person_id=person_id,
+            type="document",
+            source_text="Discharge note: medication instructions were reviewed.",
+            uploaded_by_caregiver_id=caregiver_id,
+            reported_by_caregiver_id=caregiver_id,
+            collected_by_caregiver_id=caregiver_id,
+        ))
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Document-derived answer", status="active", created_at=now,
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=source_message_id, session_id=session_id, role="user",
+            content=question, created_at=now,
+        ))
+        db.add(ConversationMessage(
+            id=assistant_message_id,
+            session_id=session_id,
+            role="assistant",
+            content="The discharge note says the medication instructions were reviewed.",
+            client_turn_id=turn_id,
+            evidence_ids_json=json.dumps([document_id]),
+            source_record_refs_json=json.dumps([{
+                "record_type": "document_extraction",
+                "record_id": document_analysis_id,
+            }]),
+            response_metadata_json=json.dumps({
+                "request_sha256": request_sha256,
+                "source_message_id": source_message_id,
+                "source_evidence_ids": [document_id],
+                "source_document_analysis_ids": [document_analysis_id],
+                "ai_generated": True,
+            }),
+            created_at=now + timedelta(microseconds=1),
+        ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+    assert history.status_code == 200, history.text
+    assistant = next(item for item in history.json()["messages"] if item["role"] == "assistant")
+    assert assistant["text"] == "This earlier response is unavailable because document access has changed."
+    assert assistant["evidence_ids"] == []
+    assert assistant["source_record_refs"] == []
+    assert assistant["source_document_analysis_ids"] == []
+
+    replay = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "text": question,
+            "session_id": session_id,
+            "client_turn_id": turn_id,
+        },
+    )
+    assert replay.status_code == 403, replay.text
