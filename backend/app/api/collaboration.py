@@ -3173,6 +3173,31 @@ def _companion_replay_response(
         ConversationMessage.id.desc(),
     ).limit(2).all()
     if not pairs:
+        if requested_session_id:
+            # A persisted turn ID is a caregiver-scoped idempotency key even
+            # when the client accidentally retries it with a different active
+            # conversation. Do not silently create a second turn pair in that
+            # conversation. Probe only for existence inside the same
+            # authenticated recipient/caregiver scope; never load the other
+            # conversation's response body or source metadata.
+            conflicting_turn = (
+                db.query(ConversationMessage.id)
+                .join(ConversationSession, ConversationMessage.session_id == ConversationSession.id)
+                .filter(
+                    ConversationMessage.client_turn_id == client_turn_id,
+                    ConversationMessage.role == "assistant",
+                    ConversationSession.person_id == str(person_id),
+                    ConversationSession.caregiver_id == str(caregiver_id),
+                    ConversationSession.id != str(requested_session_id),
+                )
+                .limit(1)
+                .first()
+            )
+            if conflicting_turn is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This message was already saved in a different conversation. Reopen that conversation before retrying it.",
+                )
         return None
     if len(pairs) > 1:
         raise HTTPException(
