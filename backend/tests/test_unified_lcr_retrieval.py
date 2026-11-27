@@ -3206,3 +3206,41 @@ def test_postgres_companion_retrieval_withholds_document_sources_without_documen
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_care_entity_resolution_groups_multiple_medication_assertions_by_subject_identity():
+    result = resolve_care_entity_reference(
+        "What medication is she taking?",
+        {
+            "assertions": {"items": [
+                {
+                    "id": "med-a-name", "subject_type": "medication",
+                    "subject_id": "stable-medication-a", "field": "medication_name",
+                    "asserted_value": "donepezil",
+                    "assertion_status": "accepted",
+                },
+                {
+                    "id": "med-a-dose", "subject_type": "medication",
+                    "subject_id": "stable-medication-a", "field": "medication_dose",
+                    "asserted_value": "5 mg",
+                    "assertion_status": "accepted",
+                },
+            ]},
+            "facts": {"items": [
+                {
+                    "id": "med-a-route", "subject_type": "medication",
+                    "subject_id": "stable-medication-a", "fact_type": "medication_route",
+                    "fact_value": "oral",
+                    "epistemic_status": "verified",
+                },
+            ]},
+        },
+    )
+    assert result["status"] == "resolved"
+    assert result["candidate_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["entity_ref"] == "medication:medication:stable-medication-a"
+    assert {item["source_id"] for item in candidate["source_refs"]} == {
+        "med-a-name", "med-a-dose", "med-a-route",
+    }
+    assert len(candidate["labels"]) == 3
