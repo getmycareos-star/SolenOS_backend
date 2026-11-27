@@ -167,6 +167,42 @@ jobs:
         working-directory: backend
         run: alembic upgrade head
 
+      - name: Verify schema reconciliation and migration head
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              columns = set(connection.execute(text("""
+                  SELECT column_name FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'caregivers'
+              """)).scalars())
+              required = {"id", "email", "name", "relationship", "person_id", "timezone"}
+              missing = required - columns
+              if missing:
+                  raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
+              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+              count = connection.execute(text("SELECT COUNT(*) FROM caregivers")).scalar_one()
+          engine.dispose()
+          # Derive the expected head from the checked-out migration graph instead
+          # of freezing an obsolete revision literal in CI. ScriptDirectory also
+          # fails if the migration graph has multiple heads.
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          config = Config("backend/alembic.ini")
+          scripts = ScriptDirectory.from_config(config)
+          expected_revision = scripts.get_current_head()
+          if revision != expected_revision:
+              raise SystemExit(
+                  f"database migration head {revision!r} does not match code head {expected_revision!r}"
+              )
+          if count != 0:
+              raise SystemExit(f"expected empty fixture table, got {count} rows")
+          print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
+          PY
+
       - name: Run PostgreSQL Companion identity, continuity and privacy integration tests
         working-directory: backend
         run: pytest -q tests/test_companion_conversation_postgres.py
@@ -314,42 +350,6 @@ jobs:
           conn.commit()
           conn.close()
           print("PASS: audit events reject ordinary UPDATE/DELETE; approved erasure redacts but never deletes.")
-          PY
-
-      - name: Verify schema reconciliation and migration head
-        run: |
-          python - <<'PY'
-          import os
-          from sqlalchemy import create_engine, text
-
-          engine = create_engine(os.environ["DATABASE_URL"])
-          with engine.connect() as connection:
-              columns = set(connection.execute(text("""
-                  SELECT column_name FROM information_schema.columns
-                  WHERE table_schema = 'public' AND table_name = 'caregivers'
-              """)).scalars())
-              required = {"id", "email", "name", "relationship", "person_id", "timezone"}
-              missing = required - columns
-              if missing:
-                  raise SystemExit(f"caregivers schema still missing columns: {sorted(missing)}")
-              revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-              count = connection.execute(text("SELECT COUNT(*) FROM caregivers")).scalar_one()
-          engine.dispose()
-          # Derive the expected head from the checked-out migration graph instead
-          # of freezing an obsolete revision literal in CI. ScriptDirectory also
-          # fails if the migration graph has multiple heads.
-          from alembic.config import Config
-          from alembic.script import ScriptDirectory
-          config = Config("backend/alembic.ini")
-          scripts = ScriptDirectory.from_config(config)
-          expected_revision = scripts.get_current_head()
-          if revision != expected_revision:
-              raise SystemExit(
-                  f"database migration head {revision!r} does not match code head {expected_revision!r}"
-              )
-          if count != 0:
-              raise SystemExit(f"expected empty fixture table, got {count} rows")
-          print(f"PostgreSQL legacy-schema migration passed at {expected_revision}; no caregiver rows fabricated.")
           PY
 
       - name: Verify bounded privacy export expiry on PostgreSQL
