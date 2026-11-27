@@ -572,6 +572,7 @@ async def enforce_scoped_anonymous_session(request: Request, call_next):
             # requiring a client-supplied person_id here would block the
             # session-scoped endpoint before its own authorization checks run.
             or path == "/api/v1/care-profile"
+            or path == "/api/v1/care-profile/orientation-complete"
             or path == "/api/v1/caregiver-profiles/current"
             or path == "/api/v1/multi-caregiver-summary"
             or path.startswith("/api/v1/multi-caregiver-summary/")
