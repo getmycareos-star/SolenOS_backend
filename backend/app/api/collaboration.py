@@ -13399,7 +13399,7 @@ def conversation_history(
         }
 
     return {
-        "session_id": conversation_session_id,
+        "session_id": str(session.id),
         "person_id": person_id,
         "messages": [serialize_history_message(row) for row in rows],
         "has_more": has_more,
