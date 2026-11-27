@@ -1280,6 +1280,23 @@ def _is_document_derived_record_type(value: Any) -> bool:
     return normalized in _DOCUMENT_DERIVED_RECORD_TYPES
 
 
+def _source_record_refs_require_document_permission(refs: Any) -> bool:
+    """Fail closed when persisted source-reference metadata is malformed."""
+    if refs is None:
+        return False
+    if not isinstance(refs, list):
+        return True
+    for item in refs:
+        if not isinstance(item, dict):
+            return True
+        record_type = item.get("record_type")
+        if not isinstance(record_type, str) or not record_type.strip():
+            return True
+        if _is_document_derived_record_type(record_type):
+            return True
+    return False
+
+
 def _companion_response_requires_document_permission(
     db: Session, *, person_id: str, response: dict,
 ) -> bool:
@@ -1287,11 +1304,7 @@ def _companion_response_requires_document_permission(
     if response.get("source_document_analysis_ids"):
         return True
     refs = response.get("source_record_refs")
-    if isinstance(refs, list) and any(
-        isinstance(item, dict)
-        and _is_document_derived_record_type(item.get("record_type"))
-        for item in refs
-    ):
+    if _source_record_refs_require_document_permission(refs):
         return True
     evidence_ids = {
         str(value)
@@ -13073,13 +13086,7 @@ def conversation_history(
                 document_restricted_message_ids.add(str(row.id))
             try:
                 refs = json.loads(row.source_record_refs_json or "[]")
-                if not isinstance(refs, list):
-                    raise ValueError("Invalid source reference list")
-                if any(
-                    isinstance(item, dict)
-                    and _is_document_derived_record_type(item.get("record_type"))
-                    for item in refs
-                ):
+                if _source_record_refs_require_document_permission(refs):
                     document_restricted_message_ids.add(str(row.id))
             except (TypeError, ValueError, json.JSONDecodeError):
                 document_restricted_message_ids.add(str(row.id))
