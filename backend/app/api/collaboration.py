@@ -123,13 +123,11 @@ router = APIRouter(tags=["community and companion"])
 COMPANION_PROMPT_CONTEXT_BUDGET_CHARS = 3000
 COMPANION_MAX_OUTPUT_TOKENS = 256
 COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
-    "INTERACTION: Distinguish intent, emotion, capacity, urgency, information, and conversation state. "
-    "Answer the caregiver’s actual question; chat history is not proof. Acknowledge emotion without diagnosing "
-    "or assuming feelings, and do not turn positive moments into crises. New care details in chat remain conversational; "
-    "direct structured capture to Daily Care without asking the caregiver to repeat them. "
-    "If entity resolution returns multiple candidates, ask which one; never choose by recency. "
-    "If no source-backed candidate exists, say it could not be matched. Pronouns refer only to the authenticated "
-    "care recipient; never retrieve across recipients. "
+    "INTERACTION: Answer the actual question; chat history is not proof. Acknowledge emotion without diagnosing "
+    "or assuming feelings; do not turn positive moments into crises. Keep new care details conversational and direct "
+    "structured capture to Daily Care without asking the caregiver to repeat them. For multiple entity matches, ask "
+    "which one; never choose by recency. If no source-backed match exists, say so. Pronouns refer only to the "
+    "authenticated care recipient; never retrieve across recipients. "
 )
 
 
