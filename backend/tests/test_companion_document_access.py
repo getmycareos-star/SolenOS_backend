@@ -50,7 +50,7 @@ def test_replay_requires_document_permission_for_uppercase_document_evidence():
     required = _companion_response_requires_document_permission(
         db,
         person_id="person-1",
-        response={"evidence_ids": ["evidence-1"]},
+        response={"source_record_refs": [], "evidence_ids": ["evidence-1"]},
     )
 
     assert required is True
@@ -62,7 +62,7 @@ def test_replay_requires_document_permission_for_document_extraction_evidence_ty
     required = _companion_response_requires_document_permission(
         db,
         person_id="person-1",
-        response={"evidence_ids": ["evidence-2"]},
+        response={"source_record_refs": [], "evidence_ids": ["evidence-2"]},
     )
 
     assert required is True
@@ -110,7 +110,7 @@ def test_replay_fails_closed_when_an_evidence_source_cannot_be_resolved():
     required = _companion_response_requires_document_permission(
         db,
         person_id="person-1",
-        response={"source_evidence_ids": ["missing-evidence"]},
+        response={"source_record_refs": [], "source_evidence_ids": ["missing-evidence"]},
     )
 
     assert required is True
