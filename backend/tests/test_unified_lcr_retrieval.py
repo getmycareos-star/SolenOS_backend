@@ -2935,6 +2935,7 @@ def test_postgres_temporal_filter_prefers_event_time_over_later_recording_time()
             Column("recorded_at", DateTime(timezone=True)),
         )
         rows.create(connection)
+        connection.commit()
         yesterday = datetime(2026, 11, 26, 10, 0, tzinfo=UTC)
         today = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
         with connection.begin():
