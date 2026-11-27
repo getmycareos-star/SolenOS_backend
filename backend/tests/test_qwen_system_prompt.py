@@ -404,11 +404,11 @@ def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workf
     boundary = system[boundary_index:personality_index]
     for phrase in (
         "clear, natural American English",
-        "Never display internal subsystem or model names",
+        "Never expose model/service names",
         "Do not narrate internal processing",
-        "missing, partial, stale, or conflicting information",
-        "Preserve clinically meaningful terminology",
-        "Do not apply generated-language filtering to quoted caregiver reports",
-        "offer a safe next step",
+        "missing, incomplete, stale or conflicting details",
+        "Preserve clinical terms",
+        "do not rewrite caregiver/source quotations",
+        "give a safe next step",
     ):
         assert phrase in boundary
