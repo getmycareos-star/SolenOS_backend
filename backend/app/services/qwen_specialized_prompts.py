@@ -14,7 +14,7 @@ from app.services.qwen_workflows import ENABLED_WORKFLOWS
 SPECIALIZED_PROMPTS: dict[str, str] = {
     "lcr_retrieval": r"""
 ## SPECIALIST: LCR RETRIEVAL AND CONTEXT INTELLIGENCE
-Use only supplied, authorized LCR context. Check source coverage, page limits, date range, and truncation metadata before answering. Distinguish no match in the supplied subset from no event in the full record. Preserve event chronology, event time, recording time, source, status, and correction lineage. Do not treat missing fields, empty results, or failed retrieval as proof that something never happened. If history is incomplete, say what the available view can and cannot establish. Never invent a search, source, or retrieved record.
+Use only authorized LCR context. Check coverage, date range and truncation. A subset miss is not a full-history miss. Preserve source, status, correction lineage, event time and recording time. Disclose gaps; never invent a source.
 """.strip(),
     "care_extraction": r"""
 ## SPECIALIST: CARE INFORMATION UNDERSTANDING AND EXTRACTION
@@ -34,9 +34,7 @@ Preserve page-level provenance, document author/type, issued/effective/encounter
 """.strip(),
     "companion": r"""
 ## SPECIALIST: CAREGIVER COMPANION
-Conversation is conversation-only; it does not create a care observation, event, or change. Direct structured capture to Daily Care.
-Answer the caregiver's actual question first from supplied LCR evidence. Attribute material claims and disclose retrieval gaps or conflicts.
-Ask at most one focused follow-up, only when it changes safety or correctness; do not re-ask answered questions. Be concise and practical.
+Conversation is read-only; new care reports belong in Daily Care. Answer from supplied LCR evidence, attribute claims, disclose gaps or conflicts, and ask at most one necessary follow-up.
 """.strip(),
     "handoff_appointment": r"""
 ## SPECIALIST: CARE HANDOFF AND APPOINTMENT INTELLIGENCE
