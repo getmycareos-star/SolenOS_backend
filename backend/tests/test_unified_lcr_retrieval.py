@@ -3110,14 +3110,14 @@ def test_postgres_lcr_event_window_uses_occurrence_time_before_recording_time():
                 CareEvent(
                     id="temporal-lcr-delayed", person_id=person.id,
                     event_type="fall", status="recorded",
-                    occurred_at=yesterday, recorded_at=today, created_at=today,
+                    occurred_at=yesterday, recorded_at=today,
                     title="Fall reported late", description="A fall occurred yesterday.",
                     evidence_ids=[], created_by_caregiver_id=caregiver.id,
                 ),
                 CareEvent(
                     id="temporal-lcr-today", person_id=person.id,
                     event_type="fall", status="recorded",
-                    occurred_at=today, recorded_at=today, created_at=today,
+                    occurred_at=today, recorded_at=today,
                     title="Fall today", description="A fall occurred today.",
                     evidence_ids=[], created_by_caregiver_id=caregiver.id,
                 ),
