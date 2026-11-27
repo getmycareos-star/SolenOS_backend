@@ -126,6 +126,9 @@ COMPANION_INTERACTION_INTERPRETATION_CONTRACT = (
     "Acknowledge positive moments without turning them into a crisis. "
     "Do not collect a second structured care entry in chat. When a caregiver shares a new observation, event, or change, "
     "respond to the substance and direct capture to Daily Care; do not ask them to repeat the same information in a form. "
+    "When care-entity resolution reports multiple candidates, ask which one the caregiver means; never select by recency alone. "
+    "When no source-backed candidate exists, say the reference could not be matched to saved information. "
+    "Pronouns refer only to the authenticated care recipient and never authorize cross-recipient retrieval. "
 )
 
 
@@ -6703,6 +6706,12 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
             "Canonical LCR retrieval coverage: "
             + json.dumps(_compact_lcr_retrieval_coverage(shared_lcr_context), ensure_ascii=False, default=str)
         )
+        entity_resolution = shared_lcr_context.get("entity_resolution")
+        if isinstance(entity_resolution, dict):
+            context_lines.append(
+                "Care-entity resolution (deterministic, recipient-scoped; never infer beyond these candidates): "
+                + json.dumps(entity_resolution, ensure_ascii=False, default=str)
+            )
         canonical_sources = (
             (
                 "living_record", "events", "evidence", "evidence_observations",
