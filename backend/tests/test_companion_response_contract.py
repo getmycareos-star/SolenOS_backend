@@ -4967,3 +4967,40 @@ def test_companion_rejects_material_paraphrase_without_exact_source_match(monkey
             db.close()
     finally:
         teardown()
+
+
+def test_companion_conflict_guard_requires_occurrence_time_and_current_reports():
+    import json
+
+    undated_reports = [
+        "LCR event evidence: " + json.dumps({
+            "event_id": "undated-no-fall", "status": "recorded",
+            "title": "Fall report", "description": "No fall was observed overnight.",
+            "recorded_at": "2026-11-27T09:00:00+00:00",
+        }),
+        "LCR event evidence: " + json.dumps({
+            "event_id": "undated-fall", "status": "recorded",
+            "title": "Fall report", "description": "The person fell overnight.",
+            "recorded_at": "2026-11-27T09:05:00+00:00",
+        }),
+    ]
+    assert collaboration._contradictory_event_evidence_response(
+        "Do the records agree about whether a fall happened overnight?", undated_reports
+    ) is None
+
+    corrected_reports = [
+        "LCR event evidence: " + json.dumps({
+            "event_id": "corrected-no-fall", "status": "recorded",
+            "information_status": "historical_event",
+            "title": "Fall report", "description": "No fall was observed overnight.",
+            "occurred_at": "2026-11-27T08:00:00+00:00",
+        }),
+        "LCR event evidence: " + json.dumps({
+            "event_id": "current-fall", "status": "recorded",
+            "title": "Fall report", "description": "The person fell overnight.",
+            "occurred_at": "2026-11-27T08:00:00+00:00",
+        }),
+    ]
+    assert collaboration._contradictory_event_evidence_response(
+        "Do the records agree about whether a fall happened overnight?", corrected_reports
+    ) is None
