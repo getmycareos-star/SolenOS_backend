@@ -603,6 +603,12 @@ _TEMPORAL_RANGE_TOKENS = {
     "one", "two", "three", "four", "five", "six", "seven", "eight",
     "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
     "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
+    # Calendar words and operation verbs express the time filter, not a care
+    # topic. Keep them out of lexical predicates once a temporal window exists.
+    "jan", "january", "feb", "february", "mar", "march", "apr", "april",
+    "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
+    "september", "oct", "october", "nov", "november", "dec", "december",
+    "correction", "corrections", "processed", "processing",
 }
 
 
