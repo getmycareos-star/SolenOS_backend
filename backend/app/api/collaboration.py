@@ -3173,6 +3173,8 @@ def _rank_context_lines(query: str, lines: list[str], limit: int) -> list[str]:
 
 
 _LCR_CONTEXT_SOURCE_PRIORITY = (
+    # Entity ambiguity is a hard response constraint and must survive context reduction.
+    "entity_resolution",
     # Raw source records must survive the prompt budget before derived
     # summaries, gaps, and interpretations. These are the evidence the model
     # must cite and distinguish from later analysis.
@@ -10129,7 +10131,11 @@ async def companion_message(
             if isinstance(entity_resolution, dict):
                 shared_lcr_lines.append(
                     "Care-entity resolution (recipient-scoped; deterministic; not clinical authority): "
-                    + json.dumps(entity_resolution, ensure_ascii=False, default=str)
+                    + json.dumps({
+                        "source_type": "entity_resolution",
+                        "source_id": "current_caregiver_question",
+                        "record": entity_resolution,
+                    }, ensure_ascii=False, default=str)
                     + " If status is ambiguous, ask the caregiver which candidate they mean. "
                     "If status is no_match, do not invent a saved entity. Pronouns refer only to the authenticated recipient."
                 )
