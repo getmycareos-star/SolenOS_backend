@@ -485,7 +485,7 @@ def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filena
     # The test body remains embedded after a minimal PDF header for lifecycle
     # tests that do not exercise PDF parsing or OCR.
     if normalized_filename.endswith(".pdf") and not content.startswith(b"%PDF-"):
-        content = b"%PDF-1.4\\n" + content
+        content = b"%PDF-1.4\n" + content
     mime_type = (
         "application/pdf" if normalized_filename.endswith(".pdf")
         else "image/png" if normalized_filename.endswith(".png")
