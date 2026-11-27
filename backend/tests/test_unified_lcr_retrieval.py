@@ -1750,6 +1750,7 @@ def test_postgres_historical_scan_includes_delayed_report_and_recording_timestam
             db.flush()
             context = build_lcr_context(
                 db, person.id, caregiver_id=caregiver.id,
+                query="What was recorded in March?",
                 temporal_window=window, include_all_history=True,
             )
 
@@ -2626,6 +2627,7 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
 
             historical = build_lcr_context(
                 db, person_id, caregiver_id=caregiver_id,
+                query="What happened on March 4?",
                 temporal_window={
                     "start": "2025-03-04T00:00:00+00:00",
                     "end": "2025-03-04T23:59:59.999999+00:00",
@@ -2875,6 +2877,7 @@ def test_postgres_correction_processing_timestamp_is_searched_separately_from_cr
                 db,
                 person.id,
                 caregiver_id=caregiver.id,
+                query="What correction was processed on November 24?",
                 only_sources={"corrections"},
                 temporal_window={
                     "start": "2026-11-24T00:00:00+00:00",
