@@ -17,6 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
 
 from app.main import app
+from app.core.database import engine as application_engine
 from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence, Caregiver, Person
 from app.models.collaboration import CompanionTurnLease, ConversationMessage, ConversationSession
@@ -955,6 +956,8 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
     calls_lock = threading.Lock()
 
     def fake_qwen(base, model, messages, options=None, audit_context=None):
+        # The endpoint must not hold a PostgreSQL connection while Qwen runs.
+        assert application_engine.pool.checkedout() == 0
         with calls_lock:
             calls.append(messages)
         time.sleep(0.25)
