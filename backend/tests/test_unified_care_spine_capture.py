@@ -700,6 +700,7 @@ def test_postgres_worker_recovers_stale_qwen_job_after_restart(monkeypatch):
                 "reply": "The appointment date was not supplied.",
                 "ai_generated": True,
                 "provider_status": "available",
+                "grounding_status": "backend_validation_passed",
                 "model": "qwen3.5:4b",
                 "source_event_ids": [],
                 "source_evidence_ids": [],
