@@ -1829,7 +1829,28 @@ def _verified_daily_care_source(db: Session, person_id: str, cutoff: datetime, n
         output = []
         no_text_count = 0
         for event in events:
-            text = " — ".join(part.strip() for part in (event.title, event.description or "") if part and part.strip())[:1200]
+            # Natural-language Daily Care saves persist the caregiver's exact
+            # sentence inside the immutable event payload. Prefer that sentence
+            # over the JSON envelope when preparing a professional briefing.
+            original_report = None
+            try:
+                event_payload = json.loads(event.description or "")
+                if isinstance(event_payload, dict):
+                    candidate_report = event_payload.get("notes")
+                    if not isinstance(candidate_report, str):
+                        original_capture = event_payload.get("original_capture")
+                        candidate_report = (
+                            original_capture.get("notes")
+                            if isinstance(original_capture, dict) else None
+                        )
+                    if isinstance(candidate_report, str) and candidate_report.strip():
+                        original_report = candidate_report.strip()
+            except (TypeError, ValueError, json.JSONDecodeError):
+                pass
+            text = (
+                original_report
+                or " — ".join(part.strip() for part in (event.title, event.description or "") if part and part.strip())
+            )[:1200]
             if not text:
                 no_text_count += 1
                 continue
@@ -3325,6 +3346,54 @@ def prepare_handoff_draft(
             ][:100],
         },
     )
+    # A professional appointment briefing must not omit recent caregiver
+    # observations merely because a small model selected only the appointment
+    # record. Add a small, bounded set of exact-source Daily Care excerpts when
+    # the model did not already include them. These are explicitly extractive,
+    # attributed records, not model-generated clinical interpretations.
+    if payload.purpose == "professional_appointment":
+        generated_sections = generated_document.get("sections")
+        if not isinstance(generated_sections, list):
+            generated_sections = []
+        included_refs = {
+            str(item.get("source_ref"))
+            for item in generated_sections if isinstance(item, dict) and item.get("source_ref")
+        }
+        daily_source_items = sorted(
+            (
+                item for item in records
+                if item.get("source_table") == "care_events"
+                and item.get("source_type") == "daily_care_observation"
+                and str(item.get("text") or "").strip()
+            ),
+            key=lambda item: str(item.get("event_at") or item.get("recorded_at") or ""),
+            reverse=True,
+        )
+        for item in daily_source_items[:5]:
+            source_ref = f"care_events:{item['source_id']}"
+            if source_ref in included_refs:
+                continue
+            quote = str(item.get("text") or "").strip()[:1200]
+            generated_sections.append({
+                "section": "Recent observations",
+                "source_ref": source_ref,
+                "summary": quote,
+                "supporting_quote": quote,
+                "epistemic_status": item.get("epistemic_status") or "caregiver_reported",
+                "record_status": item.get("record_status") or "recorded",
+                "event_at": item.get("event_at"),
+                "recorded_at": item.get("recorded_at"),
+                "stale_warning": bool(item.get("stale_warning")),
+                "information_status": item.get("information_status"),
+                "correction_lineage_status": item.get("correction_lineage_status"),
+                "interpretation_limit": item.get("interpretation_limit"),
+                "corrections": item.get("corrections") or [],
+                "pending_corrections": item.get("pending_corrections") or [],
+                "semantic_entailment_status": "source_text_only_no_paraphrase",
+            })
+            included_refs.add(source_ref)
+        generated_document["sections"] = generated_sections
+        generated_document["sources_considered"] = len(included_refs)
     structured_content["generation"] = generated_document
 
     # One durable identity binds the response, persisted draft, revision, and audit event.
