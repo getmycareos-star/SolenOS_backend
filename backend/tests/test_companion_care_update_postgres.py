@@ -308,6 +308,26 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
         assert rejected_replay.json()["status"] == "rejected"
         assert rejected_replay.json()["decision"] == "reject"
         assert rejected_replay.json()["written_to_lcr"] is False
+        third_source = "She left most of her dinner untouched."
+        third_message = send(client, first, third_source, "companion-care-postgres-0003")
+        assert third_message.status_code == 200, third_message.text
+        third_created = client.post(
+            f"/api/v1/companion/care-updates/from-message/{third_message.json()['source_message_id']}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert third_created.status_code == 200, third_created.text
+        third_proposal_id = third_created.json()["proposal"]["id"]
+        withdrawn = review(first, third_proposal_id, {"decision": "withdraw"})
+        assert withdrawn.status_code == 200, withdrawn.text
+        assert withdrawn.json()["proposal"]["status"] == "withdrawn"
+        assert withdrawn.json()["decision"] == "withdraw"
+        assert withdrawn.json()["written_to_lcr"] is False
+        withdrawn_replay = review(first, third_proposal_id, {"decision": "withdraw"})
+        assert withdrawn_replay.status_code == 200, withdrawn_replay.text
+        assert withdrawn_replay.json()["idempotent_replay"] is True
+        assert withdrawn_replay.json()["status"] == "withdrawn"
+        assert withdrawn_replay.json()["written_to_lcr"] is False
         with TestingSessionLocal() as db:
             assert db.query(CareAssertion).filter_by(person_id=first["person"]["id"]).count() == 1
 
