@@ -111,6 +111,68 @@ def test_postgres_companion_persists_conversation_without_creating_care_updates(
 
 
 
+
+def test_postgres_companion_review_commit_failure_rolls_back_without_false_success(monkeypatch):
+    from sqlalchemy.orm import Session as SQLAlchemySession
+
+    app.dependency_overrides[get_db] = override_db
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "I can discuss the saved care record.")
+    monkeypatch.setattr(
+        care_updates,
+        "extract_companion_care_candidates",
+        lambda source, **kwargs: {"observations": []},
+    )
+    client = TestClient(app)
+    try:
+        caregiver = create_session(client, "Commit failure caregiver")
+        headers = {"Authorization": f"Bearer {caregiver['access_token']}"}
+        message = send(client, caregiver, "She ate less at breakfast today.", "companion-commit-failure-0001")
+        assert message.status_code == 200, message.text
+        created = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message.json()['source_message_id']}",
+            headers=headers,
+            json={"confirm_care_report": True},
+        )
+        assert created.status_code == 200, created.text
+        proposal_id = created.json()["proposal"]["id"]
+
+        original_commit = SQLAlchemySession.commit
+        failed = {"value": False}
+
+        def fail_review_commit_once(db):
+            if not failed["value"]:
+                failed["value"] = True
+                raise RuntimeError("simulated PostgreSQL commit failure")
+            return original_commit(db)
+
+        monkeypatch.setattr(SQLAlchemySession, "commit", fail_review_commit_once)
+        response = client.post(
+            f"/api/v1/companion/care-updates/{proposal_id}/review",
+            headers=headers,
+            json={"decision": "accept"},
+        )
+        assert failed["value"] is True
+        assert response.status_code == 503, response.text
+        assert "could not be saved" in response.json()["detail"]
+
+        with TestingSessionLocal() as db:
+            proposal = db.query(AIOutputLCRProposal).filter_by(
+                id=proposal_id,
+                person_id=caregiver["person"]["id"],
+            ).one()
+            assert proposal.status == "pending_authorization"
+            assert db.query(CareAssertion).filter_by(
+                source_proposal_id=proposal_id,
+            ).count() == 0
+            assert db.query(AIOutputLCRDecision).filter_by(
+                proposal_id=proposal_id,
+            ).count() == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_in_new_conversation(monkeypatch):
     from sqlalchemy import inspect
 
