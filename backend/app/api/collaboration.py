@@ -11134,6 +11134,11 @@ async def companion_message(
         )
         inference_started = _time.perf_counter()
         care_history_fallback_from_outage = False
+        # Retrieval above is read-only. End its transaction before waiting on
+        # the model so a slow inference does not pin a PostgreSQL connection
+        # or retain snapshot locks. The final grant/session/conversation checks
+        # below establish fresh authorization immediately before persistence.
+        db.rollback()
         # One immutable, request-scoped provenance envelope is reused for the
         # first generation and every repair attempt. It is defined even when a
         # deterministic answer later needs a model-assisted format repair.
