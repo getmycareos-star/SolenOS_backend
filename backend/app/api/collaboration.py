@@ -11565,6 +11565,11 @@ async def companion_message(
         # or retain snapshot locks. The final grant/session/conversation checks
         # below establish fresh authorization immediately before persistence.
         db.rollback()
+        # Explicitly return the request's SQLAlchemy connection to the pool
+        # before model inference. The session is reusable for the fresh
+        # authorization and persistence queries below; only scalar IDs are
+        # retained across this boundary.
+        db.close()
         # One immutable, request-scoped provenance envelope is reused for the
         # first generation and every repair attempt. It is defined even when a
         # deterministic answer later needs a model-assisted format repair.
