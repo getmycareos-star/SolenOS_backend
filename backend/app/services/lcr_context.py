@@ -1402,12 +1402,16 @@ def build_lcr_context(
             if evidence_table is not None and {"id", "person_id"}.issubset(evidence_table.c.keys()):
                 document_conditions = []
                 if "type" in evidence_table.c:
-                    document_conditions.append(func.lower(cast(evidence_table.c.type, String)) == "document")
+                    document_conditions.append(
+                        func.coalesce(func.lower(cast(evidence_table.c.type, String)), "") == "document"
+                    )
                 if "source_type" in evidence_table.c:
-                    document_conditions.append(func.lower(cast(evidence_table.c.source_type, String)) == "document")
+                    document_conditions.append(
+                        func.coalesce(func.lower(cast(evidence_table.c.source_type, String)), "") == "document"
+                    )
                 if "evidence_kind" in evidence_table.c:
                     document_conditions.append(
-                        func.lower(cast(evidence_table.c.evidence_kind, String)).in_(
+                        func.coalesce(func.lower(cast(evidence_table.c.evidence_kind, String)), "").in_(
                             ("uploaded_document", "document_extraction")
                         )
                     )
