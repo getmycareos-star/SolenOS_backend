@@ -461,6 +461,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
         source_ref = {
             "source_type": source_name,
             "source_id": str(item.get("id") or key),
+            "information_status": state,
         }
         existing = candidates.get(stable_key)
         if existing is not None:
