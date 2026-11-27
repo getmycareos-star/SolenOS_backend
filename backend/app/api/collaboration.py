@@ -7009,7 +7009,10 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         payload.text.strip(),
         context_lines,
         options={"temperature": 0, "num_predict": response_token_budget},
-        allow_output_budget_fallback=not is_critical_safety_message(payload.text),
+        # A shorter response reservation is a safe fallback for urgent
+        # care questions: preserve the full safety contract and authorized
+        # evidence rather than returning 413 before inference.
+        allow_output_budget_fallback=True,
         audit_context=qwen_audit_context,
     )
     shared_context_truncated = shared_context_truncated or prompt_context_truncated
