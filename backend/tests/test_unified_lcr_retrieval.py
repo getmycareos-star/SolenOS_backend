@@ -1454,6 +1454,9 @@ def test_postgres_document_topic_retrieval_returns_verbatim_passage_beyond_previ
             if item["id"] == "long-document-passage"
         )
         assert extraction["source_text"].endswith("… [truncated]")
+        assert extraction["extraction_metadata"]["original_upload_present"] is True
+        assert extraction["extraction_metadata"]["binary_integrity_verified"] is True
+        assert extraction["extraction_metadata"]["source_text_integrity_verified"] is True
         assert any(exact_passage in item["text"] for item in extraction["retrieved_source_passages"])
         prompt = format_lcr_context_for_prompt(context, max_chars=12000)
         assert exact_passage in prompt
