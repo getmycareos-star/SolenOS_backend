@@ -837,6 +837,7 @@ def test_companion_document_access_revoked_during_inference_blocks_response(monk
                 permission for permission in (grant.permissions or [])
                 if permission != "view_documents"
             ]
+            grant.can_manage_members = False
             revoke_db.commit()
         return "This document-derived answer must not be delivered."
 
