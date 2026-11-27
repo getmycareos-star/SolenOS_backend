@@ -8194,6 +8194,37 @@ def _care_history_recall_context_lines(
     bounded_limit = max(1, min(int(limit), 100))
     topic_predicates = [CareEvent.description.ilike(f"%{term}%") for term in terms]
     event_lookup_complete = True
+    matching_evidence_ids: list[str] = []
+    try:
+        # Daily Care's immutable original report is stored in Evidence.source_text;
+        # CareEvent.description may contain only a structured projection such as
+        # "daily_care_observation: unusually confused". Search both source layers
+        # before ranking events so a topic present only in the original note is
+        # not lost from direct Companion recall.
+        with db.begin_nested():
+            matching_evidence_rows = (
+                db.query(EvidenceModel.id)
+                .filter(
+                    EvidenceModel.person_id == person_id,
+                    or_(*(EvidenceModel.source_text.ilike(f"%{term}%") for term in terms)),
+                )
+                .order_by(EvidenceModel.reported_at.desc().nullslast(), EvidenceModel.id.asc())
+                .limit(501)
+                .all()
+            )
+        matching_evidence_ids = [str(row[0]) for row in matching_evidence_rows[:500] if row[0]]
+        if len(matching_evidence_rows) > 500:
+            event_lookup_complete = False
+    except SQLAlchemyError:
+        # A failed original-source search is not evidence that the topic was
+        # absent from the caregiver's saved report.
+        event_lookup_complete = False
+
+    evidence_link_predicates = [
+        CareEvent.evidence_ids.contains(f'"{evidence_id}"', autoescape=True)
+        for evidence_id in matching_evidence_ids
+    ]
+    retrieval_predicates = [*topic_predicates, *evidence_link_predicates]
     try:
         with db.begin_nested():
             query = (
@@ -8202,7 +8233,7 @@ def _care_history_recall_context_lines(
                     CareEvent.person_id == person_id,
                     CareEvent.status.in_(("recorded", "withdrawn", "superseded", "invalidated", "retracted", "deleted")),
                     CareEvent.created_by_caregiver_id.isnot(None),
-                    or_(*topic_predicates),
+                    or_(*retrieval_predicates),
                 )
                 .order_by(
                     case(
