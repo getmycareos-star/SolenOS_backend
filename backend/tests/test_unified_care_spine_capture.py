@@ -489,6 +489,22 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             )
             assert lcr_matches[0]["evidence_ids"] == [evidence_id]
 
+            # A topic-specific historical lookup must scan beyond the newest
+            # 250 unrelated events before the HTTP/model layer is involved.
+            with SessionLocal() as db:
+                historical_context = build_unified_lcr_context(
+                    db, person_id, caregiver_id,
+                    query="What was recorded about waking overnight?",
+                    limit_per_source=50,
+                )
+                historical_ids = {
+                    row["id"] for row in historical_context["sources"]["events"]["items"]
+                }
+                assert old_history_event_id in historical_ids, (
+                    "query-aware PostgreSQL retrieval omitted a directly matching old event; "
+                    f"retrieved={sorted(historical_ids)}"
+                )
+
             # Exercise the actual Companion HTTP path, not only the retrieval
             # helper. The saved Daily Care event and its linked evidence must be
             # supplied to the model and cited in the response metadata.
