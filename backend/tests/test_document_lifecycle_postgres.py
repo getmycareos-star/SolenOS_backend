@@ -480,12 +480,19 @@ def _ensure_test_caregiver_access(db, person_id: str, caregiver_id: str) -> None
 
 def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filename: str, content: bytes):
     _ensure_test_caregiver_access(db, person_id, caregiver_id)
+    normalized_filename = filename.casefold()
+    mime_type = (
+        "application/pdf" if normalized_filename.endswith(".pdf")
+        else "image/png" if normalized_filename.endswith(".png")
+        else "image/jpeg" if normalized_filename.endswith((".jpg", ".jpeg"))
+        else "text/plain"
+    )
     return asyncio.run(upload_evidence(
         _request(person_id, caregiver_id),
         UploadFile(
             filename=filename,
             file=io.BytesIO(content),
-            headers=Headers({"content-type": "text/plain"}),
+            headers=Headers({"content-type": mime_type}),
         ),
         person_id,
         caregiver_id,
