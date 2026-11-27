@@ -119,10 +119,22 @@ def _care_recipient_profile_json(
                 recipient_snapshot = metadata
                 break
     condition = recipient_snapshot.get("condition") if recipient_snapshot else None
+    session_caregiver = None
+    if caregiver_profile.session_caregiver_id:
+        session_caregiver = db.query(SessionCaregiverModel).filter(
+            SessionCaregiverModel.id == str(caregiver_profile.session_caregiver_id),
+            SessionCaregiverModel.person_id == str(person.id),
+        ).first()
+    completed_at = (
+        session_caregiver.first_use_orientation_completed_at
+        if session_caregiver is not None
+        else None
+    )
     return {
         "name": person.name,
         "relationship": caregiver_profile.relationship or "",
         "condition": condition if isinstance(condition, str) and condition.strip() else None,
+        "first_use_orientation_completed_at": completed_at.isoformat() if completed_at else None,
     }
 
 
@@ -460,6 +472,47 @@ def update_care_recipient_profile(
     except Exception:
         db.rollback()
         raise
+
+
+@router.post("/care-profile/orientation-complete")
+def complete_first_use_orientation(request: Request, db: Session = Depends(get_db)):
+    """Persist dismissal of first-use guidance on the current caregiver identity."""
+    person_id, session_caregiver_id, _caregiver_profile = _session_profile(request, db)
+    caregiver = (
+        db.query(SessionCaregiverModel)
+        .filter(
+            SessionCaregiverModel.id == session_caregiver_id,
+            SessionCaregiverModel.person_id == person_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if caregiver is None:
+        raise HTTPException(status_code=404, detail="Caregiver identity not found")
+    if caregiver.first_use_orientation_completed_at is None:
+        completed_at = datetime.now(timezone.utc)
+        caregiver.first_use_orientation_completed_at = completed_at
+        db.add(AuditLogEvent(
+            actor_id=session_caregiver_id,
+            subject_id=person_id,
+            person_id=person_id,
+            caregiver_id=session_caregiver_id,
+            action="caregiver.first_use_orientation_completed",
+            target_type="caregiver",
+            target_id=session_caregiver_id,
+            occurred_at=completed_at,
+            outcome="success",
+            request_id=request.headers.get("x-request-id"),
+            policy_version="caregiver-first-use-v1",
+            record_metadata={"state": "completed"},
+        ))
+        db.commit()
+        db.refresh(caregiver)
+    return {
+        "completed": caregiver.first_use_orientation_completed_at is not None,
+        "completed_at": caregiver.first_use_orientation_completed_at.isoformat()
+        if caregiver.first_use_orientation_completed_at else None,
+    }
 
 
 @router.get("/caregiver-profiles/{person_id}", response_model=List[CaregiverProfile])
