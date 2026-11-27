@@ -2273,7 +2273,13 @@ def current_care_projection(
         previous = latest_event_corrections.get(target_id)
         if previous is None or str(correction_row.get("created_at") or "") >= str(previous.get("created_at") or ""):
             latest_event_corrections[target_id] = correction_row
-        if correction_row.get("processing_status") == "completed":
+        correction_id = str(correction_row.get("id") or "")
+        # Completion is not enough: the correction must also have a verified,
+        # person-scoped "corrects" relationship to this exact event.
+        if (
+            correction_row.get("processing_status") == "completed"
+            and correction_id in verified_completed_correction_ids
+        ):
             previous_completed = latest_completed_event_corrections.get(target_id)
             if previous_completed is None or str(correction_row.get("created_at") or "") >= str(previous_completed.get("created_at") or ""):
                 latest_completed_event_corrections[target_id] = correction_row
@@ -2517,7 +2523,11 @@ def current_care_projection(
     # linked correction is still processing. An unlinked completed row is never
     # allowed to replace its source event or disappear from the caregiver view.
     for target_id, correction_row in latest_completed_event_corrections.items():
-        add_correction_projection(target_id, correction_row, completed=True, lineage_verified=True)
+        correction_id = str(correction_row.get("id") or "")
+        # This collection is already gated above, but keep the invariant local
+        # to the projection call so future refactors cannot bypass it.
+        if correction_id in verified_completed_correction_ids:
+            add_correction_projection(target_id, correction_row, completed=True, lineage_verified=True)
     for target_id, correction_row in latest_event_corrections.items():
         correction_id = str(correction_row.get("id") or "")
         if correction_row.get("processing_status") == "completed" and correction_id in verified_completed_correction_ids:
