@@ -4623,7 +4623,14 @@ def _contradictory_event_evidence_response(user_text: str, event_context: list[s
         if not event_id:
             continue
         status = str(record.get("status") or record.get("epistemic_status") or "").casefold()
+        information_status = str(record.get("information_status") or "").casefold()
         if status in {"retracted", "deleted", "superseded", "rejected", "cancelled", "canceled"}:
+            continue
+        if information_status in {
+            "historical_event", "event_correction_pending", "event_currentness_unknown",
+        }:
+            # A corrected or unverified-currentness report must remain visible
+            # as history, but cannot be treated as a live side of a conflict.
             continue
 
         title = str(record.get("title") or record.get("event_type") or "").casefold()
@@ -4631,10 +4638,10 @@ def _contradictory_event_evidence_response(user_text: str, event_context: list[s
         if not description:
             continue
         searchable = f"{title} {description}"
-        raw_date = (
-            record.get("occurred_at") or record.get("event_time")
-            or record.get("recorded_at") or record.get("created_at")
-        )
+        # Contradictions about an event must be grouped by occurrence time.
+        # Recording/creation time describes when the report entered the system,
+        # not when the reported event happened.
+        raw_date = record.get("occurred_at") or record.get("event_time") or record.get("observed_at")
         if not isinstance(raw_date, str) or not raw_date.strip():
             continue
         try:
