@@ -481,6 +481,11 @@ def _ensure_test_caregiver_access(db, person_id: str, caregiver_id: str) -> None
 def _upload_document_for_lifecycle(db, person_id: str, caregiver_id: str, filename: str, content: bytes):
     _ensure_test_caregiver_access(db, person_id, caregiver_id)
     normalized_filename = filename.casefold()
+    # Keep fixtures consistent with the upload endpoint's real signature check.
+    # The test body remains embedded after a minimal PDF header for lifecycle
+    # tests that do not exercise PDF parsing or OCR.
+    if normalized_filename.endswith(".pdf") and not content.startswith(b"%PDF-"):
+        content = b"%PDF-1.4\\n" + content
     mime_type = (
         "application/pdf" if normalized_filename.endswith(".pdf")
         else "image/png" if normalized_filename.endswith(".png")
