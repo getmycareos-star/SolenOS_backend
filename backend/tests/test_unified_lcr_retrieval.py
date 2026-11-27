@@ -3384,7 +3384,7 @@ def test_assertion_conflicts_are_grouped_by_subject_field_and_preserve_source_li
                     "subject_id": "med-1", "field": "dose",
                     "assertion_kind": "current_state", "asserted_value": "10 mg",
                     "assertion_status": "reported", "epistemic_state": "reported",
-                    "event_time_text": "Tuesday morning", "source_event_id": "event-b",
+                    "event_time_text": "Monday morning", "source_event_id": "event-b",
                     "evidence_ids": ["evidence-b"], "source_label": "Discharge summary",
                 },
                 {
@@ -3427,6 +3427,7 @@ def test_assertion_conflicts_are_grouped_by_subject_field_and_preserve_source_li
     assert by_value["5 mg"]["evidence_ids"] == ["evidence-a"]
     assert by_value["10 mg"]["source_event_id"] == "event-b"
     assert by_value["5 mg"]["event_time_text"] == "Monday morning"
+    assert conflict["event_time_text"] == "monday morning"
 
 
 def test_entity_resolution_exposes_assertion_conflicts_even_without_entity_category():
@@ -3529,3 +3530,24 @@ def test_care_entity_resolution_marks_status_disagreement_on_same_field_only():
     assert candidate["status_by_field"] == {
         "care_record_state:medication_name": ["reported", "verified"],
     }
+
+
+def test_assertion_values_at_different_reported_times_are_not_classified_as_contradictions():
+    conflicts = _assertion_conflict_groups({
+        "assertions": {"items": [
+            {
+                "id": "dose-monday", "subject_type": "medication",
+                "subject_id": "med-1", "field": "dose",
+                "assertion_kind": "current_state", "asserted_value": "5 mg",
+                "event_time_text": "Monday",
+            },
+            {
+                "id": "dose-tuesday", "subject_type": "medication",
+                "subject_id": "med-1", "field": "dose",
+                "assertion_kind": "current_state", "asserted_value": "10 mg",
+                "event_time_text": "Tuesday",
+            },
+        ]},
+    })
+
+    assert conflicts == []
