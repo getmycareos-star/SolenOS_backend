@@ -7794,7 +7794,6 @@ def _build_companion_prompt_prefix(
         f"SOLENOS_WORKFLOW_ID: {workflow}. Task: {guidance}"
         f"{appointment_status_guidance}{empty_context_output_constraint}\n"
         f"{response_length_instruction} Use authorized supplied context only. "
-        "Follow the shared SolenOS evidence, uncertainty, safety and action rules. "
         "Return only a plain-language response.\n\n"
         + ("\n".join(canonical_coverage_lines) + "\n\n" if canonical_coverage_lines else "")
         + "Authorized context (may be empty):\n"
@@ -8519,8 +8518,10 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         if not description:
             continue
         terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
-        if source_type in {"assertions", "care_assertions"}:
-            terms.update(re.findall(r"[a-z0-9']{3,}", source_text.casefold()))
+        # Match assertion topics only against the reviewed value itself. Its
+        # original source_text is provenance, not the assertion's current value;
+        # using it here can make a short extracted assertion appear to cover
+        # unrelated details from the longer caregiver report.
         matched_topics = {
             label for label, variants in topics if terms & variants
         }
