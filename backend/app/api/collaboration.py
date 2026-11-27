@@ -8192,7 +8192,7 @@ def _care_history_recall_context_lines(
                     CareEvent.created_by_caregiver_id.isnot(None),
                     or_(*topic_predicates),
                 )
-                .order_by(CareEvent.occurred_at.desc(), CareEvent.id.asc())
+                .order_by(CareEvent.occurred_at.desc().nullslast(), CareEvent.id.asc())
             )
             rows = query.limit(bounded_limit + 1).all()
     except SQLAlchemyError:
