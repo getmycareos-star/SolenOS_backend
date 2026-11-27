@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 from sqlalchemy.orm import Session
@@ -167,9 +168,9 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
     # an exact timestamp; keep them unresolved rather than collapsing them to
     # the reference instant.
     relative_match = re.fullmatch(
-        r"(?:about\\s+|approximately\\s+|around\\s+)?"
-        r"(\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\\s+"
-        r"(day|week|month|year)s?\\s+(before|after)\\s+.+",
+        r"(?:about\s+|approximately\s+|around\s+)?"
+        r"(\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+        r"(day|week|month|year)s?\s+(before|after)\s+.+",
         text_lower,
     )
     if relative_match:
