@@ -128,6 +128,19 @@ def test_postgres_companion_review_commit_failure_rolls_back_without_false_succe
     try:
         caregiver = create_session(client, "Commit failure caregiver")
         headers = {"Authorization": f"Bearer {caregiver['access_token']}"}
+        timezone_response = client.patch(
+            "/api/v1/caregiver/preferences",
+            headers=headers,
+            json={
+                "preferred_name": "Commit failure caregiver",
+                "timezone": "America/New_York",
+                "locale": "en-US",
+                "date_format": "MM/DD/YYYY",
+                "measurement_system": "us_customary",
+                "communication_style": "balanced",
+            },
+        )
+        assert timezone_response.status_code == 200, timezone_response.text
         message = send(client, caregiver, "She ate less at breakfast today.", "companion-commit-failure-0001")
         assert message.status_code == 200, message.text
         created = client.post(
