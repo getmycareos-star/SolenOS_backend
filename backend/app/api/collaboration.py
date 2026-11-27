@@ -10125,6 +10125,14 @@ async def companion_message(
             if not social_only:
                 shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
             evidence_lineage_context = shared_lcr_context.get("evidence_lineage") or evidence_lineage_context
+            entity_resolution = shared_lcr_context.get("entity_resolution")
+            if isinstance(entity_resolution, dict):
+                shared_lcr_lines.append(
+                    "Care-entity resolution (recipient-scoped; deterministic; not clinical authority): "
+                    + json.dumps(entity_resolution, ensure_ascii=False, default=str)
+                    + " If status is ambiguous, ask the caregiver which candidate they mean. "
+                    "If status is no_match, do not invent a saved entity. Pronouns refer only to the authenticated recipient."
+                )
             for source_name, source in shared_lcr_context["sources"].items():
                 if source_name == "companion_conversation":
                     continue
