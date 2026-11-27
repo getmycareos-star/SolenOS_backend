@@ -51,12 +51,12 @@ def _is_temporal_lookup_request(query: str | None) -> bool:
     # here silently dropped the date filter and fell back to recent history.
     explicit_date = re.search(
         r"\b(?:today|yesterday|last|past|this)\s+(?:week|month|year|"
-        r"\d{1,6}\s+(?:days?|weeks?|months?|years?))\\b"
-        r"|\b(?:today|yesterday)\\b"
+        r"\d{1,6}\s+(?:days?|weeks?|months?|years?))\b"
+        r"|\b(?:today|yesterday)\b"
         r"|\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
         r"jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|"
-        r"dec(?:ember)?)\s+20\d{2}\\b"
-        r"|\b20\d{2}-\d{2}-\d{2}\\b",
+        r"dec(?:ember)?)\s+20\d{2}\b"
+        r"|\b20\d{2}-\d{2}-\d{2}\b",
         text,
     )
     return bool(explicit_date)
