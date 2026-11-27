@@ -377,15 +377,23 @@ jobs:
 
           conversation_turn_indexes = inspector.get_indexes("conversation_messages")
           conversation_turn_constraints = inspector.get_unique_constraints("conversation_messages")
-          assert any(
+          scoped_turn_uniqueness = any(
               item.get("unique") is True
-              and item.get("column_names") == ["client_turn_id"]
+              and item.get("column_names") == ["session_id", "client_turn_id"]
               for item in conversation_turn_indexes
           ) or any(
-              item.get("column_names") == ["client_turn_id"]
+              item.get("column_names") == ["session_id", "client_turn_id"]
               for item in conversation_turn_constraints
-          ), "Companion client_turn_id must be uniquely constrained for idempotent turns"
-          print("PASS Companion turn idempotency uniqueness")
+          )
+          assert scoped_turn_uniqueness, (
+              "Companion client_turn_id must be unique within each conversation"
+          )
+          assert any(
+              item.get("unique") is False
+              and item.get("column_names") == ["client_turn_id"]
+              for item in conversation_turn_indexes
+          ), "Companion client_turn_id lookup index is missing"
+          print("PASS Companion conversation-scoped turn idempotency uniqueness")
           print("PASS normalized clarification-to-claim foreign key")
 
           fks = {
