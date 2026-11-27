@@ -187,7 +187,7 @@ def test_personality_precedence_makes_identity_and_traits_invariant_against_spec
 
 
 def test_aggregate_contract_manifest_pins_all_constitution_versions():
-    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.5"
+    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.6"
     assert "Identity constitution: 2.5" in SOLENOS_OPERATING_CONTRACT_MANIFEST
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.4"
     assert "Personality constitution: 2.4" in SOLENOS_OPERATING_CONTRACT_MANIFEST
