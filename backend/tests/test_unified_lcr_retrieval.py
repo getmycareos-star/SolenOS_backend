@@ -1975,7 +1975,8 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         documents = context["sources"]["document_extractions"]
         assert documents["returned_count"] == 2
         item = next(value for value in documents["items"] if value["id"] == "partial-document-analysis")
-        assert item["information_status"] == "document_extraction_partial"
+        assert item["information_status"] == "document_source_integrity_unverified"
+        assert item["extraction_metadata"]["binary_integrity_verified"] is False
         assert item["extraction_metadata"]["unreadable_page_numbers"] == [2]
         assert item["extraction_metadata"]["interpretation_status"] == "partial"
         assert item["extraction_metadata"]["unreviewed_candidate_count"] == 1
@@ -1983,11 +1984,11 @@ def test_postgres_lcr_retrieval_keeps_partial_document_pages_and_discloses_gaps(
         interpretation_only = next(
             value for value in documents["items"] if value["id"] == "partial-interpretation-analysis"
         )
-        assert interpretation_only["information_status"] == "document_interpretation_partial"
+        assert interpretation_only["information_status"] == "document_source_integrity_unverified"
+        assert interpretation_only["extraction_metadata"]["binary_integrity_verified"] is False
         assert interpretation_only["extraction_status"] == "available"
         prompt_context = format_lcr_context_for_prompt(context)
-        assert "document_extraction_partial" in prompt_context
-        assert "document_interpretation_partial" in prompt_context
+        assert "document_source_integrity_unverified" in prompt_context
         assert "unreadable_page_numbers" in prompt_context
         assert '"source_quote"' not in prompt_context, (
             "unreviewed model candidate objects must not be leaked into the LCR retrieval prompt"
