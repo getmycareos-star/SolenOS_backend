@@ -3338,7 +3338,6 @@ def test_care_entity_resolution_marks_disagreement_within_same_status_family():
                     "subject_id": "stable-medication",
                     "field": "medication_name",
                     "asserted_value": "Medication: donepezil",
-                    "assertion_status": "accepted",
                     "epistemic_status": "reported",
                 },
                 {
