@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timedelta, timezone
 import hashlib
 import uuid
@@ -23,10 +24,15 @@ from app.models.care_continuity import EvidenceFreshnessPolicy, EvidenceFreshnes
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.open_loop import OpenLoopRecord
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+_test_postgres_url = os.environ.get("TEST_POSTGRES_URL")
+engine = (
+    create_engine(_test_postgres_url, pool_pre_ping=True)
+    if _test_postgres_url
+    else create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -52,10 +58,10 @@ def client():
                 fact_type VARCHAR(100),
                 fact_value TEXT,
                 epistemic_status VARCHAR(40),
-                effective_at DATETIME,
-                recorded_at DATETIME,
-                created_at DATETIME,
-                updated_at DATETIME,
+                effective_at TIMESTAMP WITH TIME ZONE,
+                recorded_at TIMESTAMP WITH TIME ZONE,
+                created_at TIMESTAMP WITH TIME ZONE,
+                updated_at TIMESTAMP WITH TIME ZONE,
                 superseded_by_fact_id VARCHAR(36),
                 created_by_caregiver_id VARCHAR(255)
             )
