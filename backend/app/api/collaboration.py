@@ -1312,7 +1312,11 @@ def _companion_response_requires_document_permission(
     # independent of documents. Fail closed rather than replaying it.
     return (
         set(evidence_types) != evidence_ids
-        or any(evidence_types[value] in {"", "document"} for value in evidence_ids)
+        or any(
+            not evidence_types[value]
+            or _is_document_derived_record_type(evidence_types[value])
+            for value in evidence_ids
+        )
     )
 
 
@@ -13106,7 +13110,9 @@ def conversation_history(
                 # Missing sources and unknown evidence types are restricted too:
                 # they cannot prove the response was independent of a document.
                 if any(
-                    str(value) not in evidence_types or evidence_types[str(value)] in {"", "document"}
+                    str(value) not in evidence_types
+                    or not evidence_types[str(value)]
+                    or _is_document_derived_record_type(evidence_types[str(value)])
                     for value in row_ids
                 ):
                     document_restricted_message_ids.add(str(row.id))
