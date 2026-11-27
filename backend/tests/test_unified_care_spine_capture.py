@@ -552,6 +552,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 assert "Mum was unusually confused this afternoon and refused lunch." in companion_daily_body["reply"]
                 assert "saved notes mention" in companion_daily_body["reply"].casefold()
 
+            historical_prompt_count_before = len(captured_prompts)
             historical_companion = client.post(
                 "/api/v1/conversation/message",
                 headers=headers,
@@ -568,7 +569,7 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
                 "\\n".join(
                     str(message.get("content", "")) for message in captured_prompts[-1]
                 )
-                if captured_prompts else ""
+                if len(captured_prompts) > historical_prompt_count_before else ""
             )
             # Internal IDs belong in response provenance metadata, not
             # caregiver-facing prose. Verify the source content either in the
