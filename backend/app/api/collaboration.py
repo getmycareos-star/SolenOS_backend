@@ -82,7 +82,11 @@ from app.services.qwen_gateway import (
     qwen_readiness_status,
     qwen_runtime_status,
 )
-from app.services.unified_lcr_retrieval import MAX_CONVERSATION_CONTEXT_ITEMS, build_unified_lcr_context
+from app.services.unified_lcr_retrieval import (
+    MAX_CONVERSATION_CONTEXT_ITEMS,
+    build_unified_lcr_context,
+    resolve_care_entity_reference,
+)
 from app.api.document_lifecycle import (
     MAX_PDF_PAGES,
     _blocked_page_numbers,
@@ -3561,6 +3565,15 @@ def _collect_full_lcr_context_pages(
             break
 
     merged["sources"] = merged_sources
+    # Entity resolution must use the same merged, paged source set as the
+    # answer. Resolving only the first page can falsely turn an ambiguous
+    # historical reference into a unique candidate when a second matching
+    # medication, appointment, or document exists on a later page.
+    entity_query = temporal_query if temporal_query is not None else query
+    merged["entity_resolution"] = resolve_care_entity_reference(
+        entity_query,
+        merged_sources,
+    )
     # A failed first page can be recovered by the bounded retry above. Do not
     # keep its initial missing-source marker after a complete retry succeeds.
     merged["missing_required_sources"] = sorted(
