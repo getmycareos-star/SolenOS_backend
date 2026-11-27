@@ -2475,9 +2475,9 @@ def _generate_grounded_handoff(
         key=lambda item: str(item.get("event_at") or item.get("recorded_at") or ""),
         reverse=True,
     )
-    # Keep the inference payload below the configured 4K context budget.
-    # The complete snapshot and correction lineage remain persisted separately;
-    # the model receives only the three most relevant, compact source excerpts.
+    # The full source snapshot and correction lineage remain persisted.
+    # Send only the three highest-ranked source excerpts with the metadata
+    # required to preserve attribution, chronology, currentness and uncertainty.
     considered = eligible[:3]
     model_sources = [
         {
@@ -2487,33 +2487,15 @@ def _generate_grounded_handoff(
             "record_status": item["record_status"],
             "event_at": item["event_at"],
             "recorded_at": item["recorded_at"],
-            "stale_warning": item["stale_warning"],
+            "stale_warning": str(item.get("stale_warning") or "")[:120],
             "correction_lineage_status": item.get("correction_lineage_status"),
-            "corrections": [
-                {
-                    key: str(correction.get(key))[:80]
-                    for key in ("corrected_text", "reason")
-                    if correction.get(key) is not None
-                }
-                for correction in (item.get("corrections") or [])[:1]
-                if isinstance(correction, dict)
-            ],
-            "pending_corrections": [
-                {
-                    key: str(correction.get(key))[:80]
-                    for key in ("corrected_text", "reason")
-                    if correction.get(key) is not None
-                }
-                for correction in (item.get("pending_corrections") or [])[:1]
-                if isinstance(correction, dict)
-            ],
-            "source_text": item["text"][:300],
+            "source_text": item["text"][:180],
         }
         for item in considered
     ]
     appointment_mode = purpose == "professional_appointment"
     response_length_policy = resolve_response_length_policy("", intent_hint="appointment_preparation" if appointment_mode else "care_handoff")
-    handoff_token_budget = min(int(response_length_policy.token_budget), 256)
+    handoff_token_budget = min(int(response_length_policy.token_budget), 160)
     audience_guidance = (
         "For a healthcare professional: concise, dated, neutral, attributed, and explicit about uncertainty."
         if audience == "professional" else
