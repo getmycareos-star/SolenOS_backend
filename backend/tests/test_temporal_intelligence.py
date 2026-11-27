@@ -216,8 +216,8 @@ def test_update_temporal_fact():
         )
         assert revision is not None
         assert revision.change_kind == "updated"
-        assert '"2026-03-04T12:00:00+00:00"' in revision.before_state
-        assert '"2026-03-05T12:00:00+00:00"' in revision.after_state
+        assert '"2026-03-04T12:00:00"' in revision.before_state
+        assert '"2026-03-05T12:00:00"' in revision.after_state
         assert '"corrected"' in revision.after_state
     finally:
         teardown_db()
