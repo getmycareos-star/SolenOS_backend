@@ -2920,42 +2920,46 @@ def test_relative_care_history_requires_an_explicit_caregiver_timezone():
         engine.dispose()
 
 
-def test_temporal_filter_prefers_event_time_over_later_recording_time():
+def test_postgres_temporal_filter_prefers_event_time_over_later_recording_time():
     """A delayed report belongs to its event date, not its later entry date."""
     from sqlalchemy import MetaData, select
 
-    engine = create_engine("sqlite://")
-    metadata = MetaData()
-    rows = Table(
-        "temporal_precedence_rows",
-        metadata,
-        Column("id", String, primary_key=True),
-        Column("occurred_at", DateTime(timezone=True)),
-        Column("recorded_at", DateTime(timezone=True)),
-    )
-    metadata.create_all(engine)
-    yesterday = datetime(2026, 11, 26, 10, 0, tzinfo=UTC)
-    today = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
-    with engine.begin() as connection:
-        connection.execute(rows.insert(), [
-            {"id": "delayed-report", "occurred_at": yesterday, "recorded_at": today},
-            {"id": "today-event", "occurred_at": today, "recorded_at": today},
-            {"id": "undated-event", "occurred_at": None, "recorded_at": today},
-        ])
-        yesterday_ids = connection.execute(
-            select(rows.c.id).where(_temporal_window_predicate(
-                [rows.c.occurred_at, rows.c.recorded_at],
-                datetime(2026, 11, 26, 0, 0, tzinfo=UTC),
-                datetime(2026, 11, 26, 23, 59, 59, tzinfo=UTC),
-            ))
-        ).scalars().all()
-        today_ids = connection.execute(
-            select(rows.c.id).where(_temporal_window_predicate(
-                [rows.c.occurred_at, rows.c.recorded_at],
-                datetime(2026, 11, 27, 0, 0, tzinfo=UTC),
-                datetime(2026, 11, 27, 23, 59, 59, tzinfo=UTC),
-            ))
-        ).scalars().all()
-    engine.dispose()
-    assert yesterday_ids == ["delayed-report"]
-    assert today_ids == ["today-event"]
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        metadata = MetaData()
+        rows = Table(
+            "temporal_precedence_rows",
+            metadata,
+            Column("id", String, primary_key=True),
+            Column("occurred_at", DateTime(timezone=True)),
+            Column("recorded_at", DateTime(timezone=True)),
+        )
+        rows.create(connection)
+        yesterday = datetime(2026, 11, 26, 10, 0, tzinfo=UTC)
+        today = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
+        with connection.begin():
+            connection.execute(rows.insert(), [
+                {"id": "delayed-report", "occurred_at": yesterday, "recorded_at": today},
+                {"id": "today-event", "occurred_at": today, "recorded_at": today},
+                {"id": "undated-event", "occurred_at": None, "recorded_at": today},
+            ])
+        with Session(bind=connection) as db:
+            yesterday_ids = db.execute(
+                select(rows.c.id).where(_temporal_window_predicate(
+                    [rows.c.occurred_at, rows.c.recorded_at],
+                    datetime(2026, 11, 26, 0, 0, tzinfo=UTC),
+                    datetime(2026, 11, 26, 23, 59, 59, tzinfo=UTC),
+                ))
+            ).scalars().all()
+            today_ids = db.execute(
+                select(rows.c.id).where(_temporal_window_predicate(
+                    [rows.c.occurred_at, rows.c.recorded_at],
+                    datetime(2026, 11, 27, 0, 0, tzinfo=UTC),
+                    datetime(2026, 11, 27, 23, 59, 59, tzinfo=UTC),
+                ))
+            ).scalars().all()
+        assert yesterday_ids == ["delayed-report"]
+        assert today_ids == ["today-event"]
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
