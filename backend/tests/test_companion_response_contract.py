@@ -5103,3 +5103,64 @@ def test_companion_trend_uncertainty_reports_actual_distinct_day_coverage():
         "prompt_context_complete": True,
     })
     assert "record search or supplied history was incomplete" in partial
+
+
+def test_paged_entity_resolution_does_not_hide_later_ambiguous_appointment(monkeypatch):
+    initial = {
+        "sources": {
+            "appointments": {
+                "status": "available",
+                "items": [{
+                    "id": "appointment-first",
+                    "title": "Neurology follow-up",
+                    "status": "scheduled",
+                }],
+                "candidate_count": 2,
+                "candidate_scan_complete": True,
+                "has_more": True,
+                "next_offset": 1,
+            },
+        },
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+        "entity_resolution": {
+            "status": "resolved",
+            "candidate_count": 1,
+            "candidates": [{"source_id": "appointment-first"}],
+        },
+    }
+
+    def next_page(*args, **kwargs):
+        assert kwargs["source_offsets"]["appointments"] == 1
+        return {
+            "sources": {
+                "appointments": {
+                    "status": "available",
+                    "items": [{
+                        "id": "appointment-second",
+                        "title": "Primary care review",
+                        "status": "scheduled",
+                    }],
+                    "candidate_count": 2,
+                    "candidate_scan_complete": True,
+                    "has_more": False,
+                    "next_offset": None,
+                },
+            },
+            "missing_required_sources": [],
+            "missing_optional_sources": [],
+            "retrieval_contract": {},
+        }
+
+    monkeypatch.setattr(collaboration, "build_unified_lcr_context", next_page)
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1",
+        "When is her appointment?", initial, limit_per_source=1, max_pages=3,
+    )
+
+    assert merged["entity_resolution"]["status"] == "ambiguous"
+    assert merged["entity_resolution"]["candidate_count"] == 2
+    assert {
+        item["source_id"] for item in merged["entity_resolution"]["candidates"]
+    } == {"appointment-first", "appointment-second"}
