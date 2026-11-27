@@ -8,8 +8,10 @@ import math
 import os
 import time
 import uuid
+from io import BytesIO
 
 import pytest
+from pypdf import PdfWriter
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -1896,7 +1898,12 @@ def test_postgres_older_document_retry_cannot_overwrite_a_newer_extraction(monke
     suffix = uuid.uuid4().hex
     person_id = f"doc-stale-retry-person-{suffix}"
     caregiver_id = f"doc-stale-retry-caregiver-{suffix}"
-    original = b"%PDF-1.4\nsource fixture for concurrent retry\n%%EOF"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    pdf_buffer = BytesIO()
+    writer.write(pdf_buffer)
+    original = pdf_buffer.getvalue()
     try:
         with Session() as db:
             db.add(Person(id=person_id, name="Concurrent document retry fixture"))
