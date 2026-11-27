@@ -1790,3 +1790,76 @@ def test_same_client_turn_id_is_independent_across_caregiver_recipients():
             role="assistant",
         ).all()
         assert {row.session_id for row in rows} == {first_session_id, second_session_id}
+
+
+
+def test_companion_proposal_extraction_rechecks_revoked_at_after_model(monkeypatch):
+    """A still-active status cannot override a populated grant revocation timestamp."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Proposal revocation timestamp recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    conversation_id = f"proposal-revocation-{suffix}"
+    message_id = f"proposal-source-{suffix}"
+    source_text = "Mum slept poorly last night and woke several times."
+    with Session() as db:
+        bearer = db.query(AnonymousSession).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).order_by(AnonymousSession.created_at.desc()).first()
+        assert bearer is not None
+        db.add(ConversationSession(
+            id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Proposal revocation", status="active",
+        ))
+        db.add(ConversationMessage(
+            id=message_id, session_id=conversation_id, role="user",
+            content=source_text,
+        ))
+        db.commit()
+        bearer_id = bearer.id
+
+    extraction_calls = []
+
+    def revoke_during_extraction(text, audit_context=None):
+        extraction_calls.append(text)
+        with Session() as db:
+            grant = db.query(CaregiverAccessGrant).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            # Simulate a revocation writer that has populated the authoritative
+            # timestamp but has not yet synchronized the legacy status field.
+            grant.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+        return {"observations": [{
+            "source_quote": "Mum slept poorly last night",
+            "event_time_quote": "last night",
+        }]}
+
+    monkeypatch.setattr(
+        companion_care_updates,
+        "extract_companion_care_candidates",
+        revoke_during_extraction,
+    )
+    companion_care_updates.process_companion_care_update_message(
+        engine,
+        person_id=person_id,
+        caregiver_id=caregiver_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        source_text=source_text,
+        anonymous_session_id=bearer_id,
+    )
+
+    assert extraction_calls == [source_text]
+    with Session() as db:
+        grant = db.query(CaregiverAccessGrant).filter_by(
+            person_id=person_id, caregiver_id=caregiver_id,
+        ).one()
+        assert grant.status == "active"
+        assert grant.revoked_at is not None
+        assert db.query(AIOutputLCRProposal).filter_by(
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_message_id=message_id,
+        ).count() == 0
