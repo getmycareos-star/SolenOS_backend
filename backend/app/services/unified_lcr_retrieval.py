@@ -515,7 +515,15 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 label = " — ".join(str(item.get(name) or "").strip() for name in (
                     "title", "provider", "healthcare_org", "scheduled_at", "status",
                 ) if str(item.get(name) or "").strip())
-                add(source_name, item, str(item.get("appointment_id") or item.get("id") or ""), label, str(item.get("status") or "available"))
+                appointment_id = str(item.get("appointment_id") or item.get("id") or "").strip()
+                add(
+                    source_name,
+                    item,
+                    appointment_id,
+                    label,
+                    str(item.get("status") or "available"),
+                    identity_key=f"appointment:{appointment_id}" if appointment_id else None,
+                )
             elif domain in {"mobility", "nutrition", "vital"}:
                 field = " ".join(str(item.get(name) or "") for name in (
                     "field", "fact_type", "attribute", "subject_label",
@@ -548,7 +556,15 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 label = " — ".join(str(item.get(name) or "").strip() for name in (
                     "filename", "type", "source_text", "extraction_status",
                 ) if str(item.get(name) or "").strip())
-                add(source_name, item, str(item.get("id") or item.get("source_evidence_id") or ""), label, str(item.get("epistemic_status") or item.get("extraction_status") or "unreviewed"))
+                evidence_id = str(item.get("source_evidence_id") or item.get("evidence_id") or item.get("id") or "").strip()
+                add(
+                    source_name,
+                    item,
+                    evidence_id,
+                    label,
+                    str(item.get("epistemic_status") or item.get("extraction_status") or "unreviewed"),
+                    identity_key=f"document:{evidence_id}" if evidence_id else None,
+                )
 
     ordered = sorted(candidates.values(), key=lambda candidate: (
         candidate["source_type"], candidate["source_id"], candidate["entity_ref"]
