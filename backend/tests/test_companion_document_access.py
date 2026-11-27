@@ -56,6 +56,18 @@ def test_replay_requires_document_permission_for_uppercase_document_evidence():
     assert required is True
 
 
+def test_replay_requires_document_permission_for_document_extraction_evidence_type():
+    db = _EvidenceDatabase([("evidence-2", "DOCUMENT_EXTRACTION")])
+
+    required = _companion_response_requires_document_permission(
+        db,
+        person_id="person-1",
+        response={"evidence_ids": ["evidence-2"]},
+    )
+
+    assert required is True
+
+
 def test_replay_fails_closed_when_an_evidence_source_cannot_be_resolved():
     db = _EvidenceDatabase([])
 
