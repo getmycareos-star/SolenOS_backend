@@ -10591,7 +10591,7 @@ async def companion_message(
                     + json.dumps({
                         "assertion_id": assertion_id,
                         "source_id": assertion_id,
-                        "source_type": "care_assertions",
+                        "source_type": "assertions",
                         "caregiver_attributed": bool(assertion.created_by_caregiver_id),
                         "field": assertion.field,
                         "value": assertion.asserted_value,
