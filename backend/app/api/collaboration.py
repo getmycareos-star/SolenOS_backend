@@ -1283,7 +1283,7 @@ def _is_document_derived_record_type(value: Any) -> bool:
 def _source_record_refs_require_document_permission(refs: Any) -> bool:
     """Fail closed when persisted source-reference metadata is malformed."""
     if refs is None:
-        return False
+        return True
     if not isinstance(refs, list):
         return True
     for item in refs:
