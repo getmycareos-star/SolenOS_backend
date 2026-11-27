@@ -651,7 +651,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 label = " — ".join(str(item.get(name) or "").strip() for name in (
                     "field", "fact_type", "subject_label", "asserted_value", "fact_value", "value_text",
                 ) if str(item.get(name) or "").strip())
-                state = str(item.get("assertion_status") or item.get("epistemic_status") or item.get("epistemic_state") or "available")
+                state = str(item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "available")
                 if item.get("superseded_by_fact_id") or item.get("superseded_by_observation_id"):
                     state = "superseded_historical"
                 add(
@@ -689,7 +689,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 key = ":".join(str(item.get(name) or "") for name in (
                     "subject_type", "subject_id", "field", "fact_type", "id",
                 ))
-                state = str(item.get("assertion_status") or item.get("epistemic_status") or item.get("epistemic_state") or "available")
+                state = str(item.get("epistemic_status") or item.get("epistemic_state") or item.get("assertion_status") or "available")
                 if item.get("superseded_by_fact_id") or item.get("supersedes_observation_id"):
                     state = "historical_or_corrected"
                 add(source_name, item, key, label, state)
