@@ -154,55 +154,62 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
             derivation_method="missing_reference",
         )
 
-    ref_time = frame.reference_time
-    text_lower = expression.lower().strip()
+    ref_time = _ensure_utc(frame.reference_time)
+    text_lower = " ".join((expression or "").casefold().split())
     resolved_point = None
     confidence = None  # Temporal inference confidence is not calibrated.
-    derivation_method = "relative_calculation"
+    derivation_method = "unparseable"
     lower_bound = None
     upper_bound = None
 
-    if "day after" in text_lower:
-        days = int(text_lower.split("day after")[0].strip().split()[-1]) if any(c.isdigit() for c in text_lower) else 1
-        resolved_point = ref_time + timedelta(days=days)
-    elif "days after" in text_lower:
-        days_str = text_lower.split("days after")[0].strip().split()[-1]
-        try:
-            days = int(days_str)
-            resolved_point = ref_time + timedelta(days=days)
-        except ValueError:
-            pass
-    elif "week after" in text_lower:
-        weeks_str = text_lower.split("week after")[0].strip().split()[-1]
-        try:
-            weeks = int(weeks_str)
-            resolved_point = ref_time + timedelta(weeks=weeks)
-        except ValueError:
-            pass
-    elif "weeks after" in text_lower:
-        weeks_str = text_lower.split("weeks after")[0].strip().split()[-1]
-        try:
-            weeks = int(weeks_str)
-            resolved_point = ref_time + timedelta(weeks=weeks)
-        except ValueError:
-            pass
-    elif "month after" in text_lower:
-        months_str = text_lower.split("month after")[0].strip().split()[-1]
-        try:
-            months = int(months_str)
-            resolved_point = ref_time + relativedelta(months=months)
-        except ValueError:
-            pass
-    elif "before" in text_lower and "after" not in text_lower:
-        if ref_time:
-            resolved_point = ref_time
-            confidence = None
-            derivation_method = "relative_ordering"
+    # Resolve only explicit quantities. Phrases such as "before surgery",
+    # "around then", or "a while after" establish ordering/approximation, not
+    # an exact timestamp; keep them unresolved rather than collapsing them to
+    # the reference instant.
+    relative_match = re.fullmatch(
+        r"(?:about\\s+|approximately\\s+|around\\s+)?"
+        r"(\\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten)\\s+"
+        r"(day|week|month|year)s?\\s+(before|after)\\s+.+",
+        text_lower,
+    )
+    if relative_match:
+        quantity_text, unit, direction = relative_match.groups()
+        quantities = {
+            "a": 1, "an": 1, "one": 1, "two": 2, "three": 3,
+            "four": 4, "five": 5, "six": 6, "seven": 7,
+            "eight": 8, "nine": 9, "ten": 10,
+        }
+        amount = int(quantity_text) if quantity_text.isdigit() else quantities[quantity_text]
+        if amount <= 3650:
+            delta = (
+                timedelta(days=amount)
+                if unit == "day"
+                else timedelta(weeks=amount)
+                if unit == "week"
+                else relativedelta(months=amount)
+                if unit == "month"
+                else relativedelta(years=amount)
+            )
+            resolved_point = ref_time + delta if direction == "after" else ref_time - delta
+            derivation_method = "explicit_relative_calculation"
+    elif text_lower in {"the day after", "day after"}:
+        resolved_point = ref_time + timedelta(days=1)
+        derivation_method = "explicit_relative_calculation"
+    elif text_lower in {"the day before", "day before"}:
+        resolved_point = ref_time - timedelta(days=1)
+        derivation_method = "explicit_relative_calculation"
+    elif text_lower in {"yesterday", "the previous day"}:
+        resolved_point = ref_time - timedelta(days=1)
+        derivation_method = "explicit_relative_calculation"
+    elif text_lower in {"tomorrow", "the next day"}:
+        resolved_point = ref_time + timedelta(days=1)
+        derivation_method = "explicit_relative_calculation"
+    elif "before" in text_lower or "after" in text_lower:
+        derivation_method = "relative_ordering_without_duration"
     else:
-        confidence = None
         derivation_method = "unparseable"
 
-    if resolved_point:
+    if resolved_point is not None:
         return RelativeTimeResolution(
             original_text=expression,
             reference_frame_id=reference_frame_id,
@@ -222,7 +229,7 @@ def resolve_relative_time(db: Session, person_id: str, expression: str, referenc
         resolved_point=None,
         is_resolved=False,
         confidence=None,
-        derivation_method="unresolved",
+        derivation_method=derivation_method,
     )
 
 
