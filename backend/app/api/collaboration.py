@@ -8481,6 +8481,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             # what was reported. It is eligible only when the linked event and
             # evidence both retain explicit caregiver attribution and current
             # lifecycle status; derived summaries are never quoted here.
+            record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
             if record.get("caregiver_attributed") is not True:
                 continue
             if str(record.get("status") or "").strip().casefold() != "recorded":
