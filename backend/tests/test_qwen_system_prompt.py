@@ -403,12 +403,13 @@ def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workf
     assert boundary_index < personality_index < identity_index
     boundary = system[boundary_index:personality_index]
     for phrase in (
-        "clear, natural American English",
         "Never expose model/service names",
-        "never narrate processing",
-        "State gaps and conflicts plainly",
-        "Preserve medical terms",
-        "source quotations",
-        "give a safe next step",
+        "API/database terms",
+        "raw statuses",
+        "confidence scores",
+        "internal processing",
+        "Explain gaps plainly",
+        "preserve medical meaning, negation and source wording",
     ):
         assert phrase in boundary
+    assert "plain American English" in system
