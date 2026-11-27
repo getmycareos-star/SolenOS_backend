@@ -7421,6 +7421,60 @@ def _stored_claim_provenance(row: ConversationMessage) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _temporal_diversify_prompt_candidates(
+    source_type: str,
+    candidates: list[tuple[int, str, str]],
+) -> list[tuple[int, str, str]]:
+    """Interleave recent and historical records before applying the hard prompt budget.
+
+    Longitudinal questions need a chance to retain both a recent observation and
+    an older baseline. This selection affects only prompt ordering; the complete
+    retrieval receipt and source records remain unchanged.
+    """
+    if source_type not in {
+        "events", "evidence_observations", "assertions", "facts", "timeline",
+    } or len(candidates) < 3:
+        return candidates
+
+    dated: list[tuple[float, tuple[int, str, str]]] = []
+    undated: list[tuple[int, str, str]] = []
+    for candidate in candidates:
+        line = candidate[1]
+        brace = (line or "").find("{")
+        try:
+            payload = json.loads(line[brace:]) if brace >= 0 else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            payload = {}
+        record = payload.get("record") if isinstance(payload, dict) and isinstance(payload.get("record"), dict) else payload
+        raw_time = next((
+            record.get(field) for field in (
+                "occurred_at", "observed_at", "effective_at", "event_date",
+                "source_time", "scheduled_at", "recorded_at", "created_at",
+            ) if isinstance(record, dict) and record.get(field)
+        ), None)
+        try:
+            parsed = datetime.fromisoformat(str(raw_time).replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            dated.append((parsed.timestamp(), candidate))
+        except (TypeError, ValueError, OverflowError, OSError):
+            undated.append(candidate)
+
+    if len(dated) < 3:
+        return candidates
+    dated.sort(key=lambda item: (item[0], item[1][0]))
+    spread: list[tuple[int, str, str]] = []
+    left, right = 0, len(dated) - 1
+    while left <= right:
+        spread.append(dated[right][1])
+        right -= 1
+        if left <= right:
+            spread.append(dated[left][1])
+            left += 1
+    spread.extend(undated)
+    return spread
+
+
 def _fit_model_context_lines_across_sources(
     lines: list[str], max_chars: int
 ) -> tuple[list[str], list[str], int, bool]:
@@ -7459,7 +7513,9 @@ def _fit_model_context_lines_across_sources(
     while True:
         made_progress = False
         for source_type in ordered_types:
-            candidates = grouped[source_type]
+            candidates = _temporal_diversify_prompt_candidates(
+                source_type, grouped[source_type],
+            )
             cursor = cursors[source_type]
             while cursor < len(candidates):
                 candidate = candidates[cursor]
