@@ -682,6 +682,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
     # or its exact subject/field scope.
     if domain == "medication":
         assertion_ids_by_candidate: dict[str, set[str]] = {}
+        fields_by_candidate: dict[str, set[str]] = {}
         for source_name, source in (sources or {}).items():
             if not isinstance(source, dict):
                 continue
@@ -693,8 +694,14 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 if not subject_id:
                     continue
                 candidate_key = f"medication:{subject_type}:{subject_id}"
-                if candidate_key in candidates and item.get("id") is not None:
-                    assertion_ids_by_candidate.setdefault(candidate_key, set()).add(str(item["id"]))
+                if candidate_key in candidates:
+                    if item.get("id") is not None:
+                        assertion_ids_by_candidate.setdefault(candidate_key, set()).add(str(item["id"]))
+                    item_field = str(
+                        item.get("field") or item.get("fact_type") or item.get("attribute") or ""
+                    ).strip().casefold()
+                    if item_field:
+                        fields_by_candidate.setdefault(candidate_key, set()).add(item_field)
 
         contradiction_source = (sources or {}).get("contradictions", {})
         if isinstance(contradiction_source, dict):
@@ -723,10 +730,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                         and bool(conflict_subject_id)
                         and (
                             not conflict_field
-                            or any(
-                                str(ref.get("source_id") or "") in candidate_assertions
-                                for ref in candidate.get("source_refs", [])
-                            )
+                            or conflict_field in fields_by_candidate.get(candidate_key, set())
                         )
                     )
                     if not (linked_assertions.intersection(candidate_assertions) or same_subject):
