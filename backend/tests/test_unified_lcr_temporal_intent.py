@@ -95,3 +95,10 @@ def test_prior_companion_date_phrase_does_not_become_current_calendar_filter(mon
     assert result["retrieval_contract"]["caregiver_timezone_status"] == "not_configured"
     assert captured["temporal_window"] is None
     assert captured["query"] == relevance_query
+
+
+def test_generic_recording_verbs_do_not_broaden_topic_retrieval():
+    from app.services.lcr_context import _query_search_terms
+
+    terms = _query_search_terms("What was recorded about waking overnight?")
+    assert terms == ["waking", "overnight"]
