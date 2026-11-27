@@ -30,6 +30,7 @@ from app.services.epistemic_contract import assertion_information_status
 from app.models.anonymous_session import AnonymousSession
 from app.models.caregiver_access import CaregiverAccessGrant
 from app.services.caregiver_permissions import require_caregiver_permission
+from app.services.caregiver_language_boundary import contains_internal_caregiver_language
 from app.models.capture_analysis import CaptureAnalysis, DocumentReviewEvent
 from app.models.care import CareEvent, Caregiver, Correction, Insight, Person
 from app.models.care import Evidence as EvidenceModel
@@ -7301,6 +7302,11 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         for source_record in claim_source_records:
             source_record.setdefault("person_id", str(person_id))
         reasons = []
+        # Always run the caregiver-language boundary. It must not be nested
+        # under formatting/length checks: a short, well-formed answer can still
+        # expose internal implementation details.
+        if contains_internal_caregiver_language(candidate):
+            reasons.append("internal_caregiver_language")
         if _companion_reply_needs_revision(candidate, response_length_policy.max_words):
             words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", (candidate or "").casefold(), flags=re.UNICODE)
             if not words:
