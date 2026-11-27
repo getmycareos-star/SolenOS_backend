@@ -8640,14 +8640,28 @@ def _localized_care_history_extractive_answer(
             record_payload = json.loads(line[brace:])
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(record_payload, dict) or record_payload.get("source_type") != "events":
+        if not isinstance(record_payload, dict):
             continue
+        source_type = record_payload.get("source_type")
         record = record_payload.get("record") if isinstance(record_payload.get("record"), dict) else {}
-        if not record.get("created_by_caregiver_id"):
+        if source_type == "events":
+            if not record.get("created_by_caregiver_id"):
+                continue
+            if str(record.get("status") or "").strip().casefold() != "recorded":
+                continue
+            description = _care_history_event_text(record)
+        elif source_type == "evidence":
+            if record_payload.get("caregiver_attributed") is not True:
+                continue
+            if str(record_payload.get("status") or "").strip().casefold() != "recorded":
+                continue
+            if str(record_payload.get("information_status") or "").casefold() in {
+                "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
+                continue
+            description = _care_history_event_text({"description": record.get("source_text")})
+        else:
             continue
-        if str(record.get("status") or "").strip().casefold() != "recorded":
-            continue
-        description = _care_history_event_text(record)
         if not description:
             continue
         terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
@@ -8781,12 +8795,26 @@ def _care_history_reply_covers_requested_topics(
             payload = json.loads(line[brace:])
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
-        if not isinstance(payload, dict) or payload.get("source_type") != "events":
+        if not isinstance(payload, dict):
             continue
+        source_type = payload.get("source_type")
         record = payload.get("record") if isinstance(payload.get("record"), dict) else {}
-        if not record.get("created_by_caregiver_id") or str(record.get("status") or "").strip().casefold() != "recorded":
+        if source_type == "events":
+            if not record.get("created_by_caregiver_id") or str(record.get("status") or "").strip().casefold() != "recorded":
+                continue
+            description = _care_history_event_text(record)
+        elif source_type == "evidence":
+            if payload.get("caregiver_attributed") is not True:
+                continue
+            if str(payload.get("status") or "").strip().casefold() != "recorded":
+                continue
+            if str(payload.get("information_status") or "").casefold() in {
+                "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
+                continue
+            description = _care_history_event_text({"description": record.get("source_text")})
+        else:
             continue
-        description = _care_history_event_text(record)
         if not description:
             continue
         normalized_description = re.sub(r"\s+", " ", description.casefold()).strip()
