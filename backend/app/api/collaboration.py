@@ -11513,6 +11513,17 @@ async def companion_message(
                 "shared_lcr_ref_count": len(source_lcr_record_refs),
             }, separators=(",", ":")),
         )
+        care_history_fallback_context = list(dict.fromkeys([
+            *included_model_context_lines,
+            *(
+                care_history_recall_context["event_lines"]
+                if care_history_recall_context else []
+            ),
+            *(
+                care_history_recall_context["evidence_lines"]
+                if care_history_recall_context else []
+            ),
+        ]))
         care_history_direct_answer = None
         if (
             _CARE_HISTORY_INTENT_PATTERN.search(user_text or "")
@@ -11520,10 +11531,10 @@ async def companion_message(
             and not emergency
         ):
             care_history_direct_answer = (
-                _care_history_extractive_answer(user_text, included_model_context_lines)
+                _care_history_extractive_answer(user_text, care_history_fallback_context)
                 if payload.language == "en"
                 else _localized_care_history_extractive_answer(
-                    user_text, included_model_context_lines, payload.language
+                    user_text, care_history_fallback_context, payload.language
                 )
             )
         care_history_direct_answer_used = bool(care_history_direct_answer)
@@ -11730,10 +11741,10 @@ async def companion_message(
                 )
             elif not emergency:
                 deterministic_reply = (
-                    _care_history_extractive_answer(user_text, included_model_context_lines)
+                    _care_history_extractive_answer(user_text, care_history_fallback_context)
                     if payload.language == "en"
                     else _localized_care_history_extractive_answer(
-                        user_text, included_model_context_lines, payload.language
+                        user_text, care_history_fallback_context, payload.language
                     )
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
@@ -11834,10 +11845,10 @@ async def companion_message(
                 )
             elif not emergency:
                 deterministic_reply = (
-                    _care_history_extractive_answer(user_text, included_model_context_lines)
+                    _care_history_extractive_answer(user_text, care_history_fallback_context)
                     if payload.language == "en"
                     else _localized_care_history_extractive_answer(
-                        user_text, included_model_context_lines, payload.language
+                        user_text, care_history_fallback_context, payload.language
                     )
                 )
                 care_history_fallback_from_outage = bool(deterministic_reply)
