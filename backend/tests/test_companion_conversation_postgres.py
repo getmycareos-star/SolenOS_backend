@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -1786,7 +1787,7 @@ def test_companion_replay_is_conversation_scoped_and_rejects_ambiguous_bootstrap
         assert first["reply"] == "Reply from the first conversation"
         assert second["reply"] == "Reply from the second conversation"
 
-        with pytest.raises(Exception) as ambiguous:
+        with pytest.raises(HTTPException) as ambiguous:
             collaboration._companion_replay_response(
                 db,
                 client_turn_id=turn_id,
