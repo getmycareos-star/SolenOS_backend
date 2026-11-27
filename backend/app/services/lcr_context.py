@@ -1237,6 +1237,26 @@ def _mark_source_enrichment_partial(
     })
 
 
+def _temporal_window_predicate(columns, start_value: datetime, end_value: datetime):
+    """Match a row using its highest-priority available timestamp.
+
+    Timestamp lists are ordered by semantic precedence: event/effective time
+    first, then report/record time, then ingestion/creation time. Using OR
+    across every clock makes a delayed report appear in multiple calendar
+    periods. COALESCE preserves fallback behavior only when the stronger clock
+    is genuinely absent.
+    """
+    available = list(columns)
+    if not available:
+        return false()
+    primary_timestamp = func.coalesce(*available)
+    return and_(
+        primary_timestamp.is_not(None),
+        primary_timestamp >= start_value,
+        primary_timestamp <= end_value,
+    )
+
+
 def build_lcr_context(
     db: Session,
     person_id: str,
@@ -1561,8 +1581,7 @@ def build_lcr_context(
                 # in the window; retain both timestamps in the returned record
                 # so the caregiver can see the distinction.
                 temporal_predicates = [
-                    and_(column >= start_value, column <= end_value)
-                    for column in temporal_columns
+                    _temporal_window_predicate(temporal_columns, start_value, end_value)
                 ]
                 if source_name == "assertions" and "source_context" in table.c:
                     # Caregiver-approved document assertions preserve the
@@ -1601,10 +1620,9 @@ def build_lcr_context(
                                 and_(
                                     evidence_table.c.id == table.c.source_evidence_id,
                                     evidence_table.c.person_id == str(person_id),
-                                    or_(*[
-                                        and_(column >= start_value, column <= end_value)
-                                        for column in evidence_date_columns
-                                    ]),
+                                    _temporal_window_predicate(
+                                        evidence_date_columns, start_value, end_value,
+                                    ),
                                 )
                             ).exists()
                             temporal_predicates.append(linked_source_in_window)
