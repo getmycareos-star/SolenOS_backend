@@ -3244,3 +3244,62 @@ def test_care_entity_resolution_groups_multiple_medication_assertions_by_subject
         "med-a-name", "med-a-dose", "med-a-route",
     }
     assert len(candidate["labels"]) == 3
+
+
+def test_care_entity_resolution_deduplicates_appointment_workspace_and_record():
+    result = resolve_care_entity_reference(
+        "When is her appointment?",
+        {
+            "appointments": {"items": [{
+                "id": "appointment-row-1",
+                "appointment_id": "appointment-stable-1",
+                "title": "Neurology follow-up",
+                "scheduled_at": "2026-12-03T10:00:00Z",
+                "status": "scheduled",
+            }]},
+            "appointment_workspaces": {"items": [{
+                "id": "workspace-row-1",
+                "appointment_id": "appointment-stable-1",
+                "title": "Neurology follow-up",
+                "provider": "Neurology clinic",
+                "status": "scheduled",
+            }]},
+        },
+    )
+    assert result["status"] == "resolved"
+    assert result["candidate_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["entity_ref"] == "appointment:appointment-stable-1"
+    assert {item["source_id"] for item in candidate["source_refs"]} == {
+        "appointment-row-1", "workspace-row-1",
+    }
+
+
+def test_care_entity_resolution_deduplicates_document_and_extraction_by_evidence_id():
+    result = resolve_care_entity_reference(
+        "What does her document say?",
+        {
+            "evidence": {"items": [{
+                "id": "evidence-1",
+                "filename": "discharge-summary.pdf",
+                "type": "document",
+                "source_text": "Discharge summary",
+                "epistemic_status": "verified",
+            }]},
+            "document_extractions": {"items": [{
+                "id": "extraction-1",
+                "source_evidence_id": "evidence-1",
+                "filename": "discharge-summary.pdf",
+                "source_text": "Discharge summary",
+                "extraction_status": "completed",
+            }]},
+        },
+    )
+    assert result["status"] == "resolved"
+    assert result["candidate_count"] == 1
+    candidate = result["candidates"][0]
+    assert candidate["entity_ref"] == "document:evidence-1"
+    assert {item["source_id"] for item in candidate["source_refs"]} == {
+        "evidence-1", "extraction-1",
+    }
+    assert candidate["state"] == "mixed_source_status"
