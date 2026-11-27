@@ -17,6 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DATABASE_URL, reason="requires migrated PostgreSQL DATABASE_URL")
 
 from app.main import app
+from app.models.anonymous_session import AnonymousSession
 from app.models.care import CareEvent, Evidence, Caregiver, Person
 from app.models.collaboration import CompanionTurnLease, ConversationMessage, ConversationSession
 from app.models.caregiver_access import CaregiverAccessGrant
@@ -1118,6 +1119,64 @@ def test_revoked_caregiver_grant_during_inference_prevents_companion_response_pe
         response = future.result(timeout=30)
 
     assert response.status_code == 403, response.text
+    with Session() as db:
+        assert db.query(ConversationMessage).join(
+            ConversationSession, ConversationMessage.session_id == ConversationSession.id,
+        ).filter(
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+        ).count() == 0
+        assert db.query(CompanionTurnLease).filter(
+            CompanionTurnLease.lock_key == (
+                "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest()
+            )
+        ).count() == 0
+
+
+def test_expired_bearer_session_during_inference_prevents_companion_response_persistence(monkeypatch):
+    """A bearer session expiring during model inference must not save or replay a reply."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Session expiry during inference {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    started = threading.Event()
+    release = threading.Event()
+    turn_id = str(uuid.uuid4())
+
+    def blocking_qwen(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=10), "test did not release Companion inference"
+        return "I cannot confirm that from the records retrieved for this response."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", blocking_qwen)
+
+    def submit():
+        return client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": "What does the saved care record establish?",
+                "client_turn_id": turn_id,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(submit)
+        assert started.wait(timeout=10), "Companion did not reach inference"
+        with Session() as db:
+            bearer = db.query(AnonymousSession).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            bearer.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+        release.set()
+        response = future.result(timeout=30)
+
+    assert response.status_code == 401, response.text
     with Session() as db:
         assert db.query(ConversationMessage).join(
             ConversationSession, ConversationMessage.session_id == ConversationSession.id,
