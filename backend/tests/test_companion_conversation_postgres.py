@@ -1728,6 +1728,76 @@ def test_companion_replay_query_never_materializes_another_recipients_turn():
 
 
 
+def test_companion_replay_is_conversation_scoped_and_rejects_ambiguous_bootstrap_retry():
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    owner = _new_anonymous(client, f"Conversation-scoped replay owner {suffix}")
+    person_id = owner["person"]["id"]
+    caregiver_id = owner["caregiver"]["id"]
+    turn_id = str(uuid.uuid4())
+    first_session_id = f"replay-scope-first-{suffix}"
+    second_session_id = f"replay-scope-second-{suffix}"
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        for session_id, reply in (
+            (first_session_id, "Reply from the first conversation"),
+            (second_session_id, "Reply from the second conversation"),
+        ):
+            db.add(ConversationSession(
+                id=session_id,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                title=session_id,
+                status="active",
+                created_at=now,
+            ))
+            db.flush()
+            db.add(ConversationMessage(
+                id=f"assistant-{session_id}",
+                session_id=session_id,
+                role="assistant",
+                content=reply,
+                client_turn_id=turn_id,
+                response_metadata_json=json.dumps({
+                    "request_sha256": "same-request-fingerprint",
+                    "source_message_id": None,
+                }),
+                created_at=now,
+            ))
+        db.commit()
+
+        first = collaboration._companion_replay_response(
+            db,
+            client_turn_id=turn_id,
+            request_sha256="same-request-fingerprint",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=first_session_id,
+        )
+        second = collaboration._companion_replay_response(
+            db,
+            client_turn_id=turn_id,
+            request_sha256="same-request-fingerprint",
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            requested_session_id=second_session_id,
+        )
+        assert first["reply"] == "Reply from the first conversation"
+        assert second["reply"] == "Reply from the second conversation"
+
+        with pytest.raises(Exception) as ambiguous:
+            collaboration._companion_replay_response(
+                db,
+                client_turn_id=turn_id,
+                request_sha256="same-request-fingerprint",
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                requested_session_id=None,
+            )
+        assert getattr(ambiguous.value, "status_code", None) == 409
+
+
 def test_companion_idempotency_lease_key_is_recipient_and_caregiver_scoped():
     turn_id = str(uuid.uuid4())
     first = collaboration._companion_idempotency_lock_key("person-a", "caregiver-a", turn_id)
