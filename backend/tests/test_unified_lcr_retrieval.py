@@ -3087,3 +3087,67 @@ def test_postgres_entity_resolution_never_reads_another_recipients_medication():
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_postgres_lcr_event_window_uses_occurrence_time_before_recording_time():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        yesterday = datetime(2026, 11, 26, 10, 0, tzinfo=UTC)
+        today = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
+        with Session(bind=connection) as db:
+            person = Person(id="temporal-lcr-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="temporal-lcr-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            db.add_all([
+                CareEvent(
+                    id="temporal-lcr-delayed", person_id=person.id,
+                    event_type="fall", status="recorded",
+                    occurred_at=yesterday, recorded_at=today, created_at=today,
+                    title="Fall reported late", description="A fall occurred yesterday.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                ),
+                CareEvent(
+                    id="temporal-lcr-today", person_id=person.id,
+                    event_type="fall", status="recorded",
+                    occurred_at=today, recorded_at=today, created_at=today,
+                    title="Fall today", description="A fall occurred today.",
+                    evidence_ids=[], created_by_caregiver_id=caregiver.id,
+                ),
+            ])
+            db.commit()
+            yesterday_context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id, query="fall",
+                temporal_query="What happened yesterday?",
+                temporal_window={
+                    "start": "2026-11-26T00:00:00+00:00",
+                    "end": "2026-11-26T23:59:59+00:00",
+                    "basis": "explicit_user_temporal_expression",
+                },
+                only_sources={"events"}, limit_per_source=20,
+            )
+            today_context = build_lcr_context(
+                db, person.id, caregiver_id=caregiver.id, query="fall",
+                temporal_query="What happened today?",
+                temporal_window={
+                    "start": "2026-11-27T00:00:00+00:00",
+                    "end": "2026-11-27T23:59:59+00:00",
+                    "basis": "explicit_user_temporal_expression",
+                },
+                only_sources={"events"}, limit_per_source=20,
+            )
+        assert [item["id"] for item in yesterday_context["sources"]["events"]["items"]] == [
+            "temporal-lcr-delayed",
+        ]
+        assert [item["id"] for item in today_context["sources"]["events"]["items"]] == [
+            "temporal-lcr-today",
+        ]
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
