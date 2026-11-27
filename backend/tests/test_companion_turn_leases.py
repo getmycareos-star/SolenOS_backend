@@ -48,6 +48,25 @@ def _request():
     return SimpleNamespace(state=SimpleNamespace())
 
 
+class _NonPostgres(_Postgres):
+    def __init__(self):
+        super().__init__([])
+        self.dialect = SimpleNamespace(name="sqlite")
+
+
+def test_turn_lease_requires_postgresql_and_fails_closed():
+    db = _NonPostgres()
+    request = _request()
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(_acquire_companion_turn_lease(db, request, "conversation:key"))
+
+    assert raised.value.status_code == 503
+    assert "requires the PostgreSQL database" in raised.value.detail
+    assert db.statements == []
+    assert db.commits == 0
+
+
 def test_turn_lease_acquisition_persists_owner_and_lock_key():
     db = _Postgres([("conversation:key",)])
     request = _request()
