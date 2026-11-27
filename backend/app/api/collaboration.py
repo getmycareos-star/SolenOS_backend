@@ -8481,18 +8481,15 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             # what was reported. It is eligible only when the linked event and
             # evidence both retain explicit caregiver attribution and current
             # lifecycle status; derived summaries are never quoted here.
-            if payload.get("caregiver_attributed") is not True:
+            if record.get("caregiver_attributed") is not True:
                 continue
-            if str(payload.get("status") or "").strip().casefold() != "recorded":
+            if str(record.get("status") or "").strip().casefold() != "recorded":
                 continue
-            if str(payload.get("information_status") or "").casefold() in {
+            if str(record.get("information_status") or "").casefold() in {
                 "historical_event", "event_correction_pending", "event_currentness_unknown",
             }:
                 continue
-            description = _care_history_event_text({
-                "description": (payload.get("record") or {}).get("source_text")
-                if isinstance(payload.get("record"), dict) else ""
-            })
+            description = _care_history_event_text({"description": record.get("source_text")})
         elif source_type in {"assertions", "care_assertions"}:
             # The caller emits this source type only after a person-scoped query
             # for accepted/reviewed assertions. Require explicit caregiver
@@ -8652,11 +8649,11 @@ def _localized_care_history_extractive_answer(
                 continue
             description = _care_history_event_text(record)
         elif source_type == "evidence":
-            if record_payload.get("caregiver_attributed") is not True:
+            if record.get("caregiver_attributed") is not True:
                 continue
-            if str(record_payload.get("status") or "").strip().casefold() != "recorded":
+            if str(record.get("status") or "").strip().casefold() != "recorded":
                 continue
-            if str(record_payload.get("information_status") or "").casefold() in {
+            if str(record.get("information_status") or "").casefold() in {
                 "historical_event", "event_correction_pending", "event_currentness_unknown",
             }:
                 continue
