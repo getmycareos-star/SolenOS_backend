@@ -13194,7 +13194,7 @@ def list_conversations(
         next_cursor = {
             "before_last_message_at": last_message_at.isoformat() if last_message_at else None,
             "before_created_at": last_session.created_at.isoformat() if last_session.created_at else None,
-            "before_session_id": last_conversation_session_id,
+            "before_session_id": str(last_session.id),
         }
     return {
         "person_id": person_id,
@@ -13203,7 +13203,7 @@ def list_conversations(
         "next_cursor": next_cursor,
         "items": [
             {
-                "session_id": conversation_session_id,
+                "session_id": str(session.id),
                 "person_id": person_id,
                 "title": session.title,
                 "status": session.status,
@@ -13273,7 +13273,7 @@ def conversation_history(
     if (before is None) != (before_id is None):
         raise HTTPException(status_code=422, detail="Both before and before_id are required for history pagination")
 
-    query = db.query(ConversationMessage).filter_by(session_id=conversation_session_id)
+    query = db.query(ConversationMessage).filter_by(session_id=session_id)
     if before is not None and before_id is not None:
         query = query.filter(or_(
             ConversationMessage.created_at < before,
