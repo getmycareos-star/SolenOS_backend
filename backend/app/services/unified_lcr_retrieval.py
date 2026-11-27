@@ -46,6 +46,18 @@ def _is_temporal_lookup_request(query: str | None) -> bool:
         return False
     if "?" in text or _TEMPORAL_LOOKUP_LEAD.match(text):
         return True
+    # A declarative caregiver report may contain the same date words as a
+    # history query. Do not turn "She did not finish lunch yesterday" or
+    # "Her sleep has been worse since last Friday" into a timezone-dependent
+    # lookup. Short topic phrases such as "sleep yesterday" remain lookups.
+    if re.search(
+        r"\\b(?:did|does|do|has|have|had|is|are|was|were|fell|ate|slept|refused|"
+        r"finished|missed|changed|worsened|improved|started|stopped|reported|"
+        r"noticed|felt|became|seemed|looked|showed|took|gave|went|came|needed|asked)\\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
     # A short topic plus an explicit calendar/relative date is a retrieval
     # request too (for example, "sleep yesterday"). Requiring question syntax
     # here silently dropped the date filter and fell back to recent history.
