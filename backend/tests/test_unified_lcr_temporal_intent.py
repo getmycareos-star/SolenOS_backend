@@ -7,6 +7,8 @@ def test_relative_dates_in_caregiver_statements_do_not_require_timezone():
     assert not _is_temporal_lookup_request("She did not finish lunch yesterday.")
     assert not _is_temporal_lookup_request("Her sleep has been worse since last Friday.")
     assert not _is_temporal_lookup_request("Last Friday she refused lunch.")
+    assert not _is_temporal_lookup_request("Mum fell yesterday.")
+    assert _is_temporal_lookup_request("sleep yesterday")
 
 
 def test_relative_dates_in_history_questions_and_requests_are_lookups():
