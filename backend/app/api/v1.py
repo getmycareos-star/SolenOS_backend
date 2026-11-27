@@ -61,6 +61,7 @@ from app.models.temporal import (
     TemporalFact as TemporalFactModel,
     TemporalRelation as TemporalRelationModel,
     TemporalReferenceFrame as TemporalReferenceFrameModel,
+    TemporalContradiction as TemporalContradictionModel,
 )
 from app.schemas.care import (
     PersonCreate,
