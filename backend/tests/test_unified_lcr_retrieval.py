@@ -2431,6 +2431,18 @@ def test_postgres_query_coverage_is_incomplete_when_a_present_source_is_unsearch
                     "fields": ["id", "person_id", "created_at"],
                     "order": ["created_at"],
                 },
+                # Event currentness checks must be able to reflect the
+                # correction source even when events use a synthetic table.
+                "corrections": {
+                    "table": "corrections",
+                    "required": False,
+                    "fields": [
+                        "id", "person_id", "target_type", "target_id",
+                        "original_text", "corrected_text", "reason",
+                        "caregiver_id", "created_at", "processing_status", "processed_at",
+                    ],
+                    "order": ["created_at"],
+                },
             },
         )
         _load_source_schema.cache_clear()
