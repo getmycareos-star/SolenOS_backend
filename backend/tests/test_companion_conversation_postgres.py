@@ -1737,3 +1737,56 @@ def test_companion_idempotency_lease_key_is_recipient_and_caregiver_scoped():
     assert len(first) <= 160
     assert first != other_recipient
     assert first != other_caregiver
+
+
+
+def test_same_client_turn_id_is_independent_across_caregiver_recipients():
+    """A client-generated UUID collision in one care circle cannot block another."""
+    client = TestClient(app)
+    first = _new_anonymous(client, "Idempotency scope recipient A")
+    second = _new_anonymous(client, "Idempotency scope recipient B")
+    shared_turn_id = str(uuid.uuid4())
+    first_session_id = f"turn-scope-a-{uuid.uuid4().hex}"
+    second_session_id = f"turn-scope-b-{uuid.uuid4().hex}"
+
+    with Session() as db:
+        db.add_all([
+            ConversationSession(
+                id=first_session_id,
+                person_id=first["person"]["id"],
+                caregiver_id=first["caregiver"]["id"],
+                title="First recipient",
+                status="active",
+            ),
+            ConversationSession(
+                id=second_session_id,
+                person_id=second["person"]["id"],
+                caregiver_id=second["caregiver"]["id"],
+                title="Second recipient",
+                status="active",
+            ),
+        ])
+        db.flush()
+        db.add_all([
+            ConversationMessage(
+                id=f"turn-a-{uuid.uuid4().hex}",
+                session_id=first_session_id,
+                role="assistant",
+                content="First recipient response",
+                client_turn_id=shared_turn_id,
+            ),
+            ConversationMessage(
+                id=f"turn-b-{uuid.uuid4().hex}",
+                session_id=second_session_id,
+                role="assistant",
+                content="Second recipient response",
+                client_turn_id=shared_turn_id,
+            ),
+        ])
+        db.commit()
+
+        rows = db.query(ConversationMessage).filter_by(
+            client_turn_id=shared_turn_id,
+            role="assistant",
+        ).all()
+        assert {row.session_id for row in rows} == {first_session_id, second_session_id}
