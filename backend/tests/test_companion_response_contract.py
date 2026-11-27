@@ -1,6 +1,7 @@
 """Behavioral contract tests for the dynamic, evidence-grounded AI Companion."""
 import importlib
 import json
+import os
 import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -29,10 +30,15 @@ from app.services.lcr_context import format_lcr_context_for_prompt
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
 app = main_module.app
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+_test_postgres_url = os.environ.get("TEST_POSTGRES_URL")
+engine = (
+    create_engine(_test_postgres_url, pool_pre_ping=True)
+    if _test_postgres_url
+    else create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
