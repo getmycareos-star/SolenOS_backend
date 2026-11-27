@@ -8426,7 +8426,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
 
     topics = _care_history_requested_topics(user_text)
     query_terms = set(re.findall(r"[\w']{3,}", (user_text or "").casefold(), flags=re.UNICODE)) - _CARE_HISTORY_STOPWORDS
-    candidates: list[tuple[int, int, int, str, set[str]]] = []
+    candidates: list[tuple[int, int, int, int, str, set[str]]] = []
     order = 0
 
     for line in context_lines:
@@ -8453,7 +8453,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             }:
                 continue
             description = _care_history_event_text(record)
-        elif source_type == "care_assertions":
+        elif source_type in {"assertions", "care_assertions"}:
             # The caller emits this source type only after a person-scoped query
             # for accepted/reviewed assertions. Require explicit caregiver
             # attribution again here; never quote a model-only assertion.
@@ -8478,7 +8478,7 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         if not description:
             continue
         terms = set(re.findall(r"[\w']{3,}", description.casefold(), flags=re.UNICODE))
-        if source_type == "care_assertions":
+        if source_type in {"assertions", "care_assertions"}:
             terms.update(re.findall(r"[a-z0-9']{3,}", source_text.casefold()))
         matched_topics = {
             label for label, variants in topics if terms & variants
@@ -8488,30 +8488,30 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         candidates.append((
             len(matched_topics),
             len(terms & query_terms),
+            1 if source_type in {"assertions", "care_assertions"} else 0,
             order,
             re.sub(r"\s+", " ", description).strip(),
             matched_topics,
         ))
         order += 1
 
-    # Prefer the caregiver entry that best matches the actual question, not
-    # merely the first medication-related note in the timeline. A newer or
-    # previously reviewed dose must not eclipse a report about a possible
-    # medication change yesterday.
-    candidates.sort(key=lambda item: (-item[0], -item[1], item[2]))
+    # Prefer caregiver-reviewed assertions over the original event wording
+    # when both describe the same topic. An accepted assertion is the current
+    # reviewed value; the source event remains separately preserved in history.
+    candidates.sort(key=lambda item: (-item[0], -item[1], -item[2], item[3]))
     selected: list[tuple[int, int, int, str, set[str]]] = []
     covered_topics: set[str] = set()
     for candidate in candidates:
-        if not topics or candidate[4] - covered_topics:
+        if not topics or candidate[5] - covered_topics:
             selected.append(candidate)
-            covered_topics.update(candidate[4])
+            covered_topics.update(candidate[5])
         if topics and len(covered_topics) == len(topics):
             break
         if not topics and len(selected) >= 3:
             break
 
-    selected.sort(key=lambda item: item[2])
-    descriptions = [item[3] for item in selected[:3]]
+    selected.sort(key=lambda item: item[3])
+    descriptions = [item[4] for item in selected[:3]]
     if topics:
         missing_topics = [
             label for label, _ in topics if label not in covered_topics
