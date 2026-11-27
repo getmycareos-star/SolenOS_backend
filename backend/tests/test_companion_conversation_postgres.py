@@ -1073,6 +1073,65 @@ def test_distinct_companion_turns_in_one_conversation_are_serialized(monkeypatch
         assert db.query(CompanionTurnLease).filter_by(lock_key=conversation_lock_key).count() == 0
 
 
+def test_revoked_caregiver_grant_during_inference_prevents_companion_response_persistence(monkeypatch):
+    """A grant revoked while the model is running must fence the final response."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Revocation during inference {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    started = threading.Event()
+    release = threading.Event()
+    turn_id = str(uuid.uuid4())
+
+    def blocking_qwen(*args, **kwargs):
+        started.set()
+        assert release.wait(timeout=10), "test did not release Companion inference"
+        return "I cannot confirm that from the records retrieved for this response."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", blocking_qwen)
+
+    def submit():
+        return client.post(
+            "/api/v1/conversation/message",
+            headers=headers,
+            json={
+                "person_id": person_id,
+                "text": "What does the saved care record establish?",
+                "client_turn_id": turn_id,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(submit)
+        assert started.wait(timeout=10), "Companion did not reach inference"
+        with Session() as db:
+            grant = db.query(CaregiverAccessGrant).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            grant.status = "revoked"
+            grant.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+        release.set()
+        response = future.result(timeout=30)
+
+    assert response.status_code == 403, response.text
+    with Session() as db:
+        assert db.query(ConversationMessage).join(
+            ConversationSession, ConversationMessage.session_id == ConversationSession.id,
+        ).filter(
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+        ).count() == 0
+        assert db.query(CompanionTurnLease).filter(
+            CompanionTurnLease.lock_key == (
+                "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest()
+            )
+        ).count() == 0
+
+
 def test_companion_history_requires_conversation_permission_independent_of_lcr_access():
     suffix = uuid.uuid4().hex[:10]
     client = TestClient(app)
