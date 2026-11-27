@@ -415,8 +415,8 @@ def review_companion_care_update(
     person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
-    if decision not in {"accept", "correct", "reject"}:
-        raise HTTPException(status_code=422, detail="Decision must be accept, correct, or reject")
+    if decision not in {"accept", "correct", "reject", "withdraw"}:
+        raise HTTPException(status_code=422, detail="Decision must be accept, correct, reject, or withdraw")
 
     if decision == "accept":
         require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
@@ -435,7 +435,7 @@ def review_companion_care_update(
         AIOutputLCRDecision.person_id == person_id,
     ).order_by(AIOutputLCRDecision.created_at.asc()).all()
     if proposal.status != "pending_authorization":
-        terminal_status = {"accept": "accepted", "correct": "corrected", "reject": "rejected"}[decision]
+        terminal_status = {"accept": "accepted", "correct": "corrected", "reject": "rejected", "withdraw": "withdrawn"}[decision]
         if proposal.status == terminal_status and existing_decisions:
             if decision == "correct":
                 corrected_value = (payload.corrected_text or "").strip()
@@ -490,7 +490,15 @@ def review_companion_care_update(
     assertion_id = None
     corrected_proposal = None
 
-    if decision == "reject":
+    if decision == "withdraw":
+        proposal.status = "withdrawn"
+        db.add(AIOutputLCRDecision(
+            id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
+            reviewer_caregiver_id=caregiver_id, decision="withdrawn",
+            rationale="Caregiver withdrew this pending suggestion. No Care Record change was made.",
+            created_at=now,
+        ))
+    elif decision == "reject":
         proposal.status = "rejected"
         db.add(AIOutputLCRDecision(
             id=str(uuid.uuid4()), proposal_id=proposal.id, person_id=person_id,
