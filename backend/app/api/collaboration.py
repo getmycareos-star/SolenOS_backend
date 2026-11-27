@@ -21,7 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import Response
 from pypdf import PdfReader
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, func, inspect, or_, select, text
+from sqlalchemy import and_, case, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -8193,7 +8193,14 @@ def _care_history_recall_context_lines(
                     CareEvent.created_by_caregiver_id.isnot(None),
                     or_(*topic_predicates),
                 )
-                .order_by(CareEvent.occurred_at.desc().nullslast(), CareEvent.id.asc())
+                .order_by(
+                    case(
+                        (func.lower(func.coalesce(CareEvent.time_provenance, "")) == "server_recorded_at", 1),
+                        else_=0,
+                    ).asc(),
+                    CareEvent.occurred_at.desc().nullslast(),
+                    CareEvent.id.asc(),
+                )
             )
             rows = query.limit(bounded_limit + 1).all()
     except SQLAlchemyError:
@@ -8315,8 +8322,20 @@ def _care_history_recall_context_lines(
                     "description": caregiver_report,
                     "event_type": row.event_type,
                     "title": row.title,
-                    "occurred_at": row.occurred_at.isoformat() if row.occurred_at else None,
+                    # server_recorded_at is a storage fallback, not proof of
+                    # when the caregiver's reported event actually occurred.
+                    "occurred_at": (
+                        None
+                        if str(row.time_provenance or "").casefold() == "server_recorded_at"
+                        else row.occurred_at.isoformat() if row.occurred_at else None
+                    ),
                     "recorded_at": row.recorded_at.isoformat() if getattr(row, "recorded_at", None) else None,
+                    "time_provenance": row.time_provenance,
+                    "time_interpretation_limit": (
+                        "The event date was not supplied. This timestamp records when the update was saved, not when the event happened."
+                        if str(row.time_provenance or "").casefold() == "server_recorded_at"
+                        else None
+                    ),
                     "evidence_ids": evidence_ids,
                     "corrections": linked_corrections,
                 },

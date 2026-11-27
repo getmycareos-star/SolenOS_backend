@@ -1020,7 +1020,11 @@ def test_postgres_companion_history_recall_does_not_let_undated_rows_evict_dated
         undated = CareEvent(
             id=f"companion-history-undated-{suffix}", person_id=person_id,
             event_type="observation", status="recorded",
-            occurred_at=None,
+            # CareEvent.occurred_at is NOT NULL. When the caregiver gives no
+            # event date, ingestion stores the server recording time with this
+            # provenance marker; retrieval must not mistake it for occurrence time.
+            occurred_at=datetime(2026, 1, 12, tzinfo=timezone.utc),
+            time_provenance="server_recorded_at",
             title="Undated sleep report", description="Caregiver reported uncertain sleep.",
             evidence_ids=[], created_by_caregiver_id=caregiver_id,
         )
@@ -1037,6 +1041,21 @@ def test_postgres_companion_history_recall_does_not_let_undated_rows_evict_dated
         assert returned_ids == [dated_newer.id, dated_older.id]
         assert result["has_more"] is True
         assert undated.id not in returned_ids
+
+        # When explicitly included, the fallback timestamp remains a recording
+        # timestamp and is never represented as the event's occurrence date.
+        complete = _care_history_recall_context_lines(
+            db, person_id, "What has been recorded about sleep?", limit=3,
+        )
+        undated_line = next(
+            line for line in complete["event_lines"]
+            if json.loads(line.partition(":")[2].strip())["event_id"] == undated.id
+        )
+        undated_record = json.loads(undated_line.partition(":")[2].strip())["record"]
+        assert undated_record["occurred_at"] is None
+        assert undated_record["time_provenance"] == "server_recorded_at"
+        assert undated_record["recorded_at"] is not None
+        assert undated_record["time_interpretation_limit"]
     finally:
         db.rollback()
         db.query(CareEvent).filter(CareEvent.person_id == person_id).delete(synchronize_session=False)
