@@ -13299,8 +13299,15 @@ class CaregiverPreferencesUpdate(BaseModel):
 
 
 @router.get("/caregiver/preferences")
-def get_caregiver_preferences(request: Request, db: Session = Depends(get_db)):
-    person_id, caregiver_id = _caregiver_preferences_scope(request, db)
+def get_caregiver_preferences(
+    request: Request,
+    person_id: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    scoped_person_id, caregiver_id = _caregiver_preferences_scope(request, db)
+    if person_id is not None and str(person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="Caregiver preferences are not available for the requested care record")
+    person_id = scoped_person_id
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
@@ -13319,9 +13326,13 @@ def get_caregiver_preferences(request: Request, db: Session = Depends(get_db)):
 def update_caregiver_preferences(
     payload: CaregiverPreferencesUpdate,
     request: Request,
+    person_id: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    person_id, caregiver_id = _caregiver_preferences_scope(request, db)
+    scoped_person_id, caregiver_id = _caregiver_preferences_scope(request, db)
+    if person_id is not None and str(person_id) != scoped_person_id:
+        raise HTTPException(status_code=403, detail="Caregiver preferences are not available for the requested care record")
+    person_id = scoped_person_id
     caregiver = db.query(Caregiver).filter_by(id=caregiver_id, person_id=person_id).first()
     if caregiver is None:
         raise HTTPException(status_code=403, detail="Caregiver identity could not be confirmed")
