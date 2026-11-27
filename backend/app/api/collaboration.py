@@ -7230,6 +7230,7 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_handoff_ids": source_handoff_ids,
         "source_notification_ids": source_notification_ids,
         "source_assertion_ids": source_assertion_ids,
+        "source_contradiction_ids": source_contradiction_ids,
         "source_lcr_context_ids": source_lcr_context_ids,
         "source_freshness_assessment_ids": source_freshness_assessment_ids,
         "retrieval_coverage": {
@@ -10859,6 +10860,24 @@ async def companion_message(
                     }, ensure_ascii=False, default=str)
                 )
         source_lcr_record_refs = _context_record_refs(shared_lcr_lines)
+        # Persisted contradiction rows are embedded inside deterministic entity
+        # resolution rather than ordinary source lines. Carry their identifiers
+        # into the inference receipt so the disagreement itself is auditable.
+        entity_resolution_for_audit = shared_lcr_context.get("entity_resolution") or {}
+        source_contradiction_ids = list(dict.fromkeys(
+            str(conflict.get("source_id"))
+            for candidate in entity_resolution_for_audit.get("candidates", [])
+            if isinstance(candidate, dict)
+            for conflict in candidate.get("conflicts", [])
+            if isinstance(conflict, dict) and conflict.get("source_id")
+        ))
+        source_lcr_record_refs.extend(
+            {"record_type": "contradiction", "record_id": conflict_id}
+            for conflict_id in source_contradiction_ids
+        )
+        source_lcr_context_ids = list(dict.fromkeys([
+            *source_lcr_context_ids, *source_contradiction_ids,
+        ]))
         source_evidence_ids = list(dict.fromkeys([
             *source_evidence_ids,
             *(
