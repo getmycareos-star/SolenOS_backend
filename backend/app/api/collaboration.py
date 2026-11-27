@@ -3626,6 +3626,34 @@ def _collect_full_lcr_context_pages(
             and source.get("status") in {"available", "empty"}
         )
     )
+    # A unique/no-match result is valid only when the relevant source
+    # scan is complete. A page ceiling or failed source means another matching
+    # entity may exist outside the retrieved subset; never present subset
+    # uniqueness or absence as a resolved fact.
+    resolution = merged.get("entity_resolution")
+    if (
+        isinstance(resolution, dict)
+        and resolution.get("status") in {"resolved", "no_match"}
+        and not (
+            merged.get("retrieval_scan_complete") is True
+            and merged.get("retrieval_projection_complete") is True
+            and not merged.get("source_offsets")
+        )
+    ):
+        resolution = dict(resolution)
+        resolution["status"] = "incomplete"
+        resolution["interpretation"] = (
+            "The retrieved care history is incomplete, so this scan cannot establish "
+            "that the candidate is unique or that no matching saved entity exists. "
+            "Do not select a candidate or infer absence from this partial result."
+        )
+        resolution["resolution_complete"] = False
+        merged["entity_resolution"] = resolution
+    elif isinstance(resolution, dict):
+        resolution = dict(resolution)
+        resolution["resolution_complete"] = True
+        merged["entity_resolution"] = resolution
+
     merged["retrieval_contract"] = {
         **merged.get("retrieval_contract", {}),
         "pages_fetched": page_count,
