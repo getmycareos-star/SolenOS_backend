@@ -1278,11 +1278,19 @@ def _companion_response_requires_document_permission(
         )
         if value
     }
-    return bool(evidence_ids) and db.query(EvidenceModel.id).filter(
+    if not evidence_ids:
+        return False
+    evidence_rows = db.query(EvidenceModel.id, EvidenceModel.type).filter(
         EvidenceModel.person_id == str(person_id),
-        EvidenceModel.type == "document",
         EvidenceModel.id.in_(evidence_ids),
-    ).first() is not None
+    ).with_for_update().all()
+    evidence_types = {str(row_id): str(row_type or "") for row_id, row_type in evidence_rows}
+    # A deleted or unresolvable source cannot prove that a saved answer is
+    # independent of documents. Fail closed rather than replaying it.
+    return (
+        set(evidence_types) != evidence_ids
+        or any(evidence_types[value] in {"", "document"} for value in evidence_ids)
+    )
 
 
 def _revalidate_companion_replay_access(
@@ -12917,6 +12925,24 @@ def conversation_history(
     Ordering by both fields prevents ties from duplicating or dropping messages.
     """
     person_id, caregiver_id = _companion_scope(request, db)
+    bearer_session_id = getattr(request.state, "anonymous_session_id", None)
+    bearer = db.query(AnonymousSession.id).filter(
+        AnonymousSession.id == str(bearer_session_id or ""),
+        AnonymousSession.person_id == str(person_id),
+        AnonymousSession.caregiver_id == str(caregiver_id),
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).with_for_update().first()
+    if bearer is None:
+        raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before conversation history could be returned")
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Caregiver access changed before conversation history could be returned")
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     can_view_lcr = True
     try:
@@ -12988,14 +13014,11 @@ def conversation_history(
             except (TypeError, ValueError, json.JSONDecodeError):
                 document_restricted_message_ids.add(str(row.id))
         if candidate_evidence_ids:
-            document_evidence_ids = {
-                str(value)
-                for (value,) in db.query(EvidenceModel.id).filter(
-                    EvidenceModel.person_id == str(person_id),
-                    EvidenceModel.type == "document",
-                    EvidenceModel.id.in_(candidate_evidence_ids),
-                ).all()
-            }
+            evidence_rows = db.query(EvidenceModel.id, EvidenceModel.type).filter(
+                EvidenceModel.person_id == str(person_id),
+                EvidenceModel.id.in_(candidate_evidence_ids),
+            ).with_for_update().all()
+            evidence_types = {str(value): str(kind or "") for value, kind in evidence_rows}
             for row in rows:
                 if row.role != "assistant":
                     continue
@@ -13003,9 +13026,15 @@ def conversation_history(
                 try:
                     row_ids = set(json.loads(row.evidence_ids_json or "[]"))
                 except (TypeError, ValueError, json.JSONDecodeError):
+                    document_restricted_message_ids.add(str(row.id))
                     continue
                 row_ids.update(metadata.get("source_evidence_ids") or [])
-                if row_ids.intersection(document_evidence_ids):
+                # Missing sources and unknown evidence types are restricted too:
+                # they cannot prove the response was independent of a document.
+                if any(
+                    str(value) not in evidence_types or evidence_types[str(value)] in {"", "document"}
+                    for value in row_ids
+                ):
                     document_restricted_message_ids.add(str(row.id))
 
     def serialize_history_message(row: ConversationMessage) -> dict:
