@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime, timezone
 
 import pytest
@@ -18,10 +19,15 @@ from app.models.collaboration import ConversationMessage, ConversationSession
 
 pytestmark = pytest.mark.session_security
 
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
+_test_postgres_url = os.environ.get("TEST_POSTGRES_URL")
+engine = (
+    create_engine(_test_postgres_url, pool_pre_ping=True)
+    if _test_postgres_url
+    else create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
