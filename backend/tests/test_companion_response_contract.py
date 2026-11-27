@@ -5076,3 +5076,30 @@ def test_companion_trend_assessment_excludes_superseded_and_conflicting_observat
     assert assessment["distinct_days"] == 1
     assert assessment["sufficient"] is False
     assert [row["record_id"] for row in assessment["source_records"]] == ["sleep-latest"]
+
+
+def test_companion_trend_uncertainty_reports_actual_distinct_day_coverage():
+    two_days = collaboration._trend_uncertainty_response({
+        "topic": "mobility", "period_label": "within the last month",
+        "direction": "getting worse", "record_count": 2, "distinct_days": 2,
+        "minimum_distinct_days": 3, "retrieval_complete": True,
+        "prompt_context_complete": True,
+    })
+    assert "2 dated mobility observations across 2 distinct days" in two_days
+    assert "at least 3 separate days" in two_days
+
+    no_direction = collaboration._trend_uncertainty_response({
+        "topic": "mobility", "period_label": "within the last month",
+        "direction": "getting worse", "record_count": 5, "distinct_days": 4,
+        "minimum_distinct_days": 3, "directional_source_signal": False,
+        "retrieval_complete": True, "prompt_context_complete": True,
+    })
+    assert "does not show a clear, source-recorded direction" in no_direction
+
+    partial = collaboration._trend_uncertainty_response({
+        "topic": "mobility", "period_label": "within the last month",
+        "direction": "getting worse", "record_count": 5, "distinct_days": 4,
+        "minimum_distinct_days": 3, "retrieval_complete": False,
+        "prompt_context_complete": True,
+    })
+    assert "record search or supplied history was incomplete" in partial
