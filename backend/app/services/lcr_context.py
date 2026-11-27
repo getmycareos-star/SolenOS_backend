@@ -1269,24 +1269,28 @@ def _temporal_clock_intent(query: str | None) -> str:
 
 
 def _temporal_window_predicate(columns, start_value: datetime, end_value: datetime):
-    """Match a row against its highest-priority timestamp column.
+    """Match the first available timestamp by semantic precedence.
 
-    Callers order columns by semantic precedence: event/effective time first,
-    then report/record time, then ingestion/creation time. Schema-level fallback
-    is allowed when a stronger clock column does not exist. A NULL value in an
-    existing stronger clock is different: it means the event time is unknown,
-    not that the event happened when it was recorded. In particular, a delayed
-    or undated care report must not be assigned to its upload date.
+    Callers order event/effective time before report/record time and ingestion/
+    creation time. Fall through only when a stronger clock is NULL; a known
+    event time outside the window must not be overridden by a later upload.
+    Returned records retain every timestamp separately, so a report/upload-time
+    match is never rewritten or presented as event time.
     """
     available = list(columns)
     if not available:
         return false()
-    primary_timestamp = available[0]
-    return and_(
-        primary_timestamp.is_not(None),
-        primary_timestamp >= start_value,
-        primary_timestamp <= end_value,
-    )
+    predicates = []
+    stronger_clocks_are_null = []
+    for timestamp in available:
+        predicates.append(and_(
+            *stronger_clocks_are_null,
+            timestamp.is_not(None),
+            timestamp >= start_value,
+            timestamp <= end_value,
+        ))
+        stronger_clocks_are_null.append(timestamp.is_(None))
+    return or_(*predicates)
 
 
 def build_lcr_context(
