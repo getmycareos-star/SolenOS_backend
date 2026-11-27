@@ -11193,7 +11193,7 @@ async def companion_message(
                 or value.get("has_more")
                 or value.get("returned_history_complete") is False
             )
-        ][:8]
+        ][:6]
         # The full receipt stays in the API response. The model gets only the
         # coverage facts needed to qualify its answer, not repeated per-source
         # counters and internal completeness fields.
