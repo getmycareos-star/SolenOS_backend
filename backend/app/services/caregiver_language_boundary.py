@@ -13,29 +13,29 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "internal_runtime",
         re.compile(
-            r"\\b(?:system prompt|hidden reasoning|api key|provider configuration|"
+            r"\b(?:system prompt|hidden reasoning|api key|provider configuration|"
             r"ollama|qwen(?: model)?|backend|frontend|endpoint|payload|schema|"
             r"database|postgres(?:ql)?|sqlite|telemetry|inference pipeline|"
-            r"retrieval pipeline|extraction pipeline|migration|idempotent)\\b",
+            r"retrieval pipeline|extraction pipeline|migration|idempotent)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "internal_record_metadata",
         re.compile(
-            r"\\b(?:epistemic(?: status| state)?|provenance|reconciliation|"
+            r"\b(?:epistemic(?: status| state)?|provenance|reconciliation|"
             r"assertion(?: record| candidate)?|source[_ -]?id|record[_ -]?id|"
             r"evidence[_ -]?id|claim[_ -]?id|request[_ -]?id|response[_ -]?body|"
             r"session token|bearer token|confidence score|audit trail|"
-            r"diagnostic (?:trace|log|payload)|machine-readable metadata)\\b",
+            r"diagnostic (?:trace|log|payload)|machine-readable metadata)\b",
             re.IGNORECASE,
         ),
     ),
     (
         "opaque_identifier",
         re.compile(
-            r"\\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\b"
-            r"|\\bsha-?256\\b|\\bhttp\\s*\\d{3}\\b",
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b"
+            r"|\bsha-?256\b|\bhttp\s*\d{3}\b",
             re.IGNORECASE,
         ),
     ),
