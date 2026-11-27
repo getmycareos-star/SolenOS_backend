@@ -8216,11 +8216,11 @@ def _care_history_recall_context_lines(
                     or_(*(EvidenceModel.source_text.ilike(f"%{term}%") for term in terms)),
                 )
                 .order_by(EvidenceModel.reported_at.desc().nullslast(), EvidenceModel.id.asc())
-                .limit(501)
+                .limit(101)
                 .all()
             )
-        matching_evidence_ids = [str(row[0]) for row in matching_evidence_rows[:500] if row[0]]
-        if len(matching_evidence_rows) > 500:
+        matching_evidence_ids = [str(row[0]) for row in matching_evidence_rows[:100] if row[0]]
+        if len(matching_evidence_rows) > 100:
             event_lookup_complete = False
     except SQLAlchemyError:
         # A failed original-source search is not evidence that the topic was
