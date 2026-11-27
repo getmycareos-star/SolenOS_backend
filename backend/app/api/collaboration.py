@@ -1256,12 +1256,42 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     request.state.anonymous_session_id = str(session.id)
     return str(session.id)
 
+def _companion_response_requires_document_permission(
+    db: Session, *, person_id: str, response: dict,
+) -> bool:
+    """Detect saved responses that disclose document-derived information."""
+    if response.get("source_document_analysis_ids"):
+        return True
+    refs = response.get("source_record_refs")
+    if isinstance(refs, list) and any(
+        isinstance(item, dict)
+        and str(item.get("record_type") or "").casefold()
+        in {"document", "document_extraction", "document_analysis", "capture_analysis"}
+        for item in refs
+    ):
+        return True
+    evidence_ids = {
+        str(value)
+        for value in (
+            list(response.get("source_evidence_ids") or [])
+            + list(response.get("evidence_ids") or [])
+        )
+        if value
+    }
+    return bool(evidence_ids) and db.query(EvidenceModel.id).filter(
+        EvidenceModel.person_id == str(person_id),
+        EvidenceModel.type == "document",
+        EvidenceModel.id.in_(evidence_ids),
+    ).first() is not None
+
+
 def _revalidate_companion_replay_access(
     db: Session,
     *,
     person_id: str,
     caregiver_id: str,
     bearer_session_id: str,
+    replay_response: dict | None = None,
 ) -> None:
     """Re-authorize a persisted response immediately before replay.
 
@@ -1280,6 +1310,19 @@ def _revalidate_companion_replay_access(
         raise HTTPException(status_code=403, detail="Caregiver access changed before this saved response could be returned")
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
+    if replay_response is not None:
+        try:
+            require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+            if _companion_response_requires_document_permission(
+                db, person_id=person_id, response=replay_response,
+            ):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Document access changed; this saved response cannot be replayed.",
+                ) from exc
     bearer = db.query(AnonymousSession.id).filter(
         AnonymousSession.id == str(bearer_session_id),
         AnonymousSession.person_id == str(person_id),
@@ -3113,6 +3156,7 @@ def _companion_replay_response(
         "evidence_ids": evidence_ids,
         "source_event_ids": metadata.get("source_event_ids", []),
         "source_evidence_ids": metadata.get("source_evidence_ids", []),
+        "source_document_analysis_ids": metadata.get("source_document_analysis_ids", []),
         "source_appointment_ids": metadata.get("source_appointment_ids", []),
         "source_assertion_ids": metadata.get("source_assertion_ids", []),
         "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
@@ -9553,6 +9597,7 @@ async def companion_message(
             person_id=person_id,
             caregiver_id=caregiver_id,
             bearer_session_id=authenticated_session_id,
+            replay_response=replay,
         )
         return replay
 
@@ -9577,6 +9622,7 @@ async def companion_message(
                 person_id=person_id,
                 caregiver_id=caregiver_id,
                 bearer_session_id=authenticated_session_id,
+                replay_response=replay,
             )
             replay_message = db.query(ConversationMessage).filter(
                 ConversationMessage.id == replay.get("source_message_id"),
@@ -12660,6 +12706,7 @@ async def companion_message(
                 person_id=person_id,
                 caregiver_id=caregiver_id,
                 bearer_session_id=authenticated_session_id,
+                replay_response=replay,
             )
             replay_message = db.query(ConversationMessage).filter(
                 ConversationMessage.id == replay.get("source_message_id"),
@@ -12878,6 +12925,13 @@ def conversation_history(
         if exc.status_code != 403:
             raise
         can_view_lcr = False
+    can_view_documents = True
+    try:
+        require_caregiver_permission(db, person_id, caregiver_id, "view_documents")
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        can_view_documents = False
     session = db.query(ConversationSession).filter_by(
         id=session_id, person_id=person_id, caregiver_id=caregiver_id,
     ).first()
@@ -12903,24 +12957,80 @@ def conversation_history(
     page_descending = descending_rows[:limit]
     oldest_in_page = page_descending[-1] if page_descending else None
     rows = list(reversed(page_descending))
+    document_restricted_message_ids: set[str] = set()
+    if not can_view_documents:
+        candidate_evidence_ids: set[str] = set()
+        for row in rows:
+            if row.role != "assistant":
+                continue
+            metadata = _stored_response_metadata(row)
+            if metadata.get("source_document_analysis_ids"):
+                document_restricted_message_ids.add(str(row.id))
+            try:
+                refs = json.loads(row.source_record_refs_json or "[]")
+                if not isinstance(refs, list):
+                    raise ValueError("Invalid source reference list")
+                if any(
+                    isinstance(item, dict)
+                    and str(item.get("record_type") or "").casefold()
+                    in {"document", "document_extraction", "document_analysis", "capture_analysis"}
+                    for item in refs
+                ):
+                    document_restricted_message_ids.add(str(row.id))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                document_restricted_message_ids.add(str(row.id))
+            try:
+                row_ids = json.loads(row.evidence_ids_json or "[]")
+                if not isinstance(row_ids, list):
+                    raise ValueError("Invalid evidence reference list")
+                candidate_evidence_ids.update(str(value) for value in row_ids if value)
+                candidate_evidence_ids.update(str(value) for value in (metadata.get("source_evidence_ids") or []) if value)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                document_restricted_message_ids.add(str(row.id))
+        if candidate_evidence_ids:
+            document_evidence_ids = {
+                str(value)
+                for (value,) in db.query(EvidenceModel.id).filter(
+                    EvidenceModel.person_id == str(person_id),
+                    EvidenceModel.type == "document",
+                    EvidenceModel.id.in_(candidate_evidence_ids),
+                ).all()
+            }
+            for row in rows:
+                if row.role != "assistant":
+                    continue
+                metadata = _stored_response_metadata(row)
+                try:
+                    row_ids = set(json.loads(row.evidence_ids_json or "[]"))
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    continue
+                row_ids.update(metadata.get("source_evidence_ids") or [])
+                if row_ids.intersection(document_evidence_ids):
+                    document_restricted_message_ids.add(str(row.id))
 
     def serialize_history_message(row: ConversationMessage) -> dict:
         # Conversation permission does not preserve access to historical
         # assistant answers that were generated from the Living Care Record.
         # Keep caregiver-authored messages visible, but redact assistant output
         # and every linked evidence reference when LCR access has been removed.
+        restricted_reason = None
         if row.role == "assistant" and not can_view_lcr:
+            restricted_reason = "This earlier response is unavailable because care-record access has changed."
+        elif row.role == "assistant" and str(row.id) in document_restricted_message_ids:
+            restricted_reason = "This earlier response is unavailable because document access has changed."
+        if restricted_reason:
             return {
                 "id": row.id,
                 "source_message_id": None,
                 "role": "assistant",
-                "text": "This earlier response is unavailable because care-record access has changed.",
+                "text": restricted_reason,
                 "created_at": row.created_at.isoformat() if row.created_at else None,
                 "guard_verdict": "access_restricted",
                 "evidence_ids": [],
                 "source_record_refs": [],
                 "source_event_ids": [],
                 "source_evidence_ids": [],
+                "source_document_analysis_ids": [],
                 "source_appointment_ids": [],
                 "source_assertion_ids": [],
                 "source_lcr_context_ids": [],
@@ -12944,6 +13054,7 @@ def conversation_history(
             "source_record_refs": json.loads(row.source_record_refs_json or "[]"),
             "source_event_ids": metadata.get("source_event_ids", []),
             "source_evidence_ids": metadata.get("source_evidence_ids", []),
+            "source_document_analysis_ids": metadata.get("source_document_analysis_ids", []),
             "source_appointment_ids": metadata.get("source_appointment_ids", []),
             "source_assertion_ids": metadata.get("source_assertion_ids", []),
             "source_lcr_context_ids": metadata.get("source_lcr_context_ids", []),
