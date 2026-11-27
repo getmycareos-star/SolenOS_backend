@@ -26,6 +26,7 @@ from app.services.unified_lcr_retrieval import (
     _conversation_context,
     _temporal_window,
     build_unified_lcr_context,
+    resolve_care_entity_reference,
 )
 
 
@@ -2964,3 +2965,69 @@ def test_postgres_temporal_filter_prefers_event_time_over_later_recording_time()
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_care_entity_resolution_returns_ambiguous_for_multiple_recipient_scoped_medications():
+    result = resolve_care_entity_reference(
+        "What medication is she taking?",
+        {"assertions": {"items": [
+            {
+                "id": "assertion-med-a", "subject_type": "medication",
+                "subject_id": "med-a", "field": "medication_name",
+                "asserted_value": "Medication: donepezil 5 mg",
+                "assertion_status": "accepted",
+            },
+            {
+                "id": "assertion-med-b", "subject_type": "medication",
+                "subject_id": "med-b", "field": "medication_name",
+                "asserted_value": "Medication: memantine 10 mg",
+                "assertion_status": "accepted",
+            },
+        ]}},
+    )
+    assert result["status"] == "ambiguous"
+    assert result["domain"] == "medication"
+    assert result["recipient_reference"] == "authenticated_recipient"
+    assert result["candidate_count"] == 2
+    assert {candidate["source_id"] for candidate in result["candidates"]} == {
+        "assertion-med-a", "assertion-med-b",
+    }
+
+
+def test_care_entity_resolution_does_not_invent_a_missing_medication():
+    result = resolve_care_entity_reference(
+        "What medication is her doctor giving?",
+        {"assertions": {"items": []}, "facts": {"items": []}},
+    )
+    assert result["status"] == "no_match"
+    assert result["candidate_count"] == 0
+    assert result["candidates"] == []
+
+
+def test_care_entity_resolution_uses_only_the_requested_entity_domain():
+    result = resolve_care_entity_reference(
+        "When is her next appointment?",
+        {
+            "appointments": {"items": [
+                {"id": "appointment-a", "title": "Neurology follow-up", "status": "scheduled"},
+                {"id": "appointment-b", "title": "Primary care review", "status": "scheduled"},
+            ]},
+            "events": {"items": [
+                {"id": "event-a", "event_type": "fall", "title": "Fall reported"},
+            ]},
+        },
+    )
+    assert result["status"] == "ambiguous"
+    assert result["domain"] == "appointment"
+    assert {candidate["source_id"] for candidate in result["candidates"]} == {
+        "appointment-a", "appointment-b",
+    }
+
+
+def test_care_entity_resolution_leaves_unrelated_questions_unresolved():
+    result = resolve_care_entity_reference(
+        "Can you explain what changed?",
+        {"events": {"items": [{"id": "event-a", "title": "Fall"}]}},
+    )
+    assert result["status"] == "not_requested"
+    assert result["candidates"] == []
