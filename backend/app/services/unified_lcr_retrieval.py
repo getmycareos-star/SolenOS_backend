@@ -740,9 +740,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 conflict_field = str(conflict.get("field") or "").strip().casefold()
                 linked_assertions = {
                     str(value) for value in (
-                        conflict.get("source_assertion_ids")
-                        or conflict.get("matching_candidate_ids")
-                        or []
+                        conflict.get("source_assertion_ids") or []
                     ) if value
                 }
                 for candidate_key, candidate in candidates.items():
@@ -762,7 +760,12 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                     linked_to_candidate = bool(
                         linked_assertions.intersection(candidate_assertions)
                     )
-                    if not field_matches or not (linked_to_candidate or same_subject):
+                    # A source-assertion link alone cannot override a subject or
+                    # field mismatch. Legacy conflicts without assertion links
+                    # remain attachable only by exact subject + field scope.
+                    if not same_subject or not field_matches:
+                        continue
+                    if linked_assertions and not linked_to_candidate:
                         continue
                     conflict_ref = {
                         "source_type": "contradictions",
