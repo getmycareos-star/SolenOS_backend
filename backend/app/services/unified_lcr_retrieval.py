@@ -418,6 +418,87 @@ _ENTITY_DOMAIN_PATTERNS = {
 }
 
 
+def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return source-backed disagreements for the same subject, field and assertion kind.
+
+    This is a retrieval-time warning, not a clinical adjudication. Superseded
+    assertions are retained as history but excluded from current disagreement
+    detection. Values are compared conservatively after whitespace/case
+    normalization; no fuzzy matching or model-generated equivalence is used.
+    """
+    assertions = (sources or {}).get("assertions", {})
+    if not isinstance(assertions, dict):
+        return []
+    items = assertions.get("items", [])
+    if not isinstance(items, list):
+        return []
+    groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("assertion_status") or item.get("epistemic_state") or "").strip().casefold()
+        if (
+            item.get("superseded_by_assertion_id")
+            or item.get("superseded_by_fact_id")
+            or status in {"superseded", "withdrawn", "retracted", "rejected", "historical"}
+        ):
+            continue
+        subject_type = str(item.get("subject_type") or "").strip().casefold()
+        subject_id = str(item.get("subject_id") or "").strip()
+        field = str(item.get("field") or "").strip().casefold()
+        assertion_kind = str(item.get("assertion_kind") or "current_state").strip().casefold()
+        value = " ".join(str(item.get("asserted_value") or "").split())
+        normalized = value.casefold()
+        if not all((subject_type, subject_id, field, normalized)):
+            continue
+        key = (subject_type, subject_id, field, assertion_kind)
+        group = groups.setdefault(key, {
+            "subject_type": subject_type,
+            "subject_id": subject_id,
+            "field": field,
+            "assertion_kind": assertion_kind,
+            "values": {},
+        })
+        value_group = group["values"].setdefault(normalized, {
+            "value": value,
+            "assertions": [],
+        })
+        value_group["assertions"].append({
+            "assertion_id": str(item.get("id") or ""),
+            "epistemic_state": str(item.get("epistemic_state") or "unknown"),
+            "assertion_status": str(item.get("assertion_status") or "unknown"),
+            "event_time_text": item.get("event_time_text"),
+            "observed_at": item.get("observed_at"),
+            "recorded_at": item.get("recorded_at"),
+            "source_event_id": item.get("source_event_id"),
+            "evidence_ids": list(item.get("evidence_ids") or []),
+            "source_label": str(item.get("source_label") or ""),
+        })
+    conflicts = []
+    for group in groups.values():
+        if len(group["values"]) < 2:
+            continue
+        conflicts.append({
+            "conflict_type": "assertion_value_disagreement",
+            "subject_type": group["subject_type"],
+            "subject_id": group["subject_id"],
+            "field": group["field"],
+            "assertion_kind": group["assertion_kind"],
+            "values": sorted(
+                group["values"].values(),
+                key=lambda entry: entry["value"].casefold(),
+            ),
+            "interpretation": (
+                "Saved reports disagree about this field. Preserve each source and "
+                "its timing; do not select a value or describe either as confirmed."
+            ),
+        })
+    return sorted(
+        conflicts,
+        key=lambda item: (item["subject_type"], item["subject_id"], item["field"], item["assertion_kind"]),
+    )
+
+
 def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) -> dict[str, Any]:
     """Resolve explicit care-entity references only when source-backed and unique.
 
@@ -426,6 +507,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
     to search outside the already-authorized recipient scope.
     """
     text = " ".join(str(query or "").split())
+    assertion_conflicts = _assertion_conflict_groups(sources)
     domain = next(
         (name for name, pattern in _ENTITY_DOMAIN_PATTERNS.items() if pattern.search(text)),
         None,
@@ -437,6 +519,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             "domain": None,
             "recipient_reference": "authenticated_recipient" if recipient_reference else None,
             "candidates": [],
+            "assertion_conflicts": assertion_conflicts,
             "interpretation": "No explicit care-entity category was present in the question.",
         }
 
@@ -682,6 +765,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
         "recipient_reference": "authenticated_recipient" if recipient_reference else None,
         "candidate_count": len(ordered),
         "candidates": ordered[:8],
+        "assertion_conflicts": assertion_conflicts,
         "interpretation": interpretation,
     }
 
