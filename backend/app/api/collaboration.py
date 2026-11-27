@@ -1242,6 +1242,41 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     request.state.anonymous_session_id = str(session.id)
     return str(session.id)
 
+def _revalidate_companion_replay_access(
+    db: Session,
+    *,
+    person_id: str,
+    caregiver_id: str,
+    bearer_session_id: str,
+) -> None:
+    """Re-authorize a persisted response immediately before replay.
+
+    A replay avoids model inference, but it still discloses care history. The
+    request-entry scope check is not enough if a membership or bearer session
+    is revoked between that check and the replay. Row locks make the final
+    authorization check the serialization point against concurrent revocation.
+    """
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Caregiver access changed before this saved response could be returned")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
+    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
+    bearer = db.query(AnonymousSession.id).filter(
+        AnonymousSession.id == str(bearer_session_id),
+        AnonymousSession.person_id == str(person_id),
+        AnonymousSession.caregiver_id == str(caregiver_id),
+        AnonymousSession.revoked_at.is_(None),
+        AnonymousSession.expires_at > datetime.now(timezone.utc),
+    ).with_for_update().first()
+    if bearer is None:
+        raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before this saved response could be returned")
+
+
 def _release_companion_turn_leases(db: Session, request: Request) -> None:
     """Release only this request's leases after its committed turn pair is durable."""
     leases = getattr(request.state, "companion_turn_leases", [])
@@ -9387,6 +9422,12 @@ async def companion_message(
         requested_session_id=payload.session_id,
     )
     if replay is not None:
+        _revalidate_companion_replay_access(
+            db,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            bearer_session_id=authenticated_session_id,
+        )
         return replay
 
     # Durable leases serialize retries across workers without retaining a
@@ -9405,6 +9446,12 @@ async def companion_message(
             requested_session_id=payload.session_id,
         )
         if replay is not None:
+            _revalidate_companion_replay_access(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                bearer_session_id=authenticated_session_id,
+            )
             replay_message = db.query(ConversationMessage).filter(
                 ConversationMessage.id == replay.get("source_message_id"),
                 ConversationMessage.session_id == replay.get("session_id"),
@@ -12461,6 +12508,12 @@ async def companion_message(
             requested_session_id=payload.session_id,
         )
         if replay is not None:
+            _revalidate_companion_replay_access(
+                db,
+                person_id=person_id,
+                caregiver_id=caregiver_id,
+                bearer_session_id=authenticated_session_id,
+            )
             replay_message = db.query(ConversationMessage).filter(
                 ConversationMessage.id == replay.get("source_message_id"),
                 ConversationMessage.session_id == replay.get("session_id"),
