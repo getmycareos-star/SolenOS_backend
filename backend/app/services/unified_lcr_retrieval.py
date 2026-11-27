@@ -485,9 +485,13 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
             families.add(status_family)
             existing["status_families"] = sorted(families)
             family_states = existing.setdefault("status_by_family", {})
-            family_states.setdefault(status_family, set()).add(state)
+            states = family_states.get(status_family, [])
+            if not isinstance(states, set):
+                states = set(states)
+            states.add(state)
+            family_states[status_family] = states
             existing["status_by_family"] = {
-                family: sorted(states) for family, states in family_states.items()
+                family: sorted(values) for family, values in family_states.items()
             }
             if len(families) > 1:
                 existing["state"] = "source_specific_statuses"
