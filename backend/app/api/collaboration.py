@@ -10772,6 +10772,7 @@ async def companion_message(
                 *shared_lcr_lines,
                 *care_history_recall_context["event_lines"],
                 *care_history_recall_context["evidence_lines"],
+                *care_history_assertion_lines,
             ]))
             lcr_context_coverage["direct_care_history_recall"] = {
                 "status": (
