@@ -7752,20 +7752,28 @@ def _compact_lcr_retrieval_coverage(shared_lcr_context: dict) -> dict:
     )
     searchable_statuses = {"available", "empty"}
     non_available = {}
-    for name, value in sources.items():
-        if not isinstance(value, dict) or value.get("status") in searchable_statuses:
-            continue
-        non_available[str(name)] = {
+    ordered_sources = sorted(
+        (
+            (str(name), value) for name, value in sources.items()
+            if isinstance(value, dict) and value.get("status") not in searchable_statuses
+        ),
+        key=lambda item: (
+            item[1].get("status") != "unsearchable",
+            item[0],
+        ),
+    )
+    for name, value in ordered_sources:
+        non_available[name] = {
             "status": value.get("status") or "unknown",
-            "interpretation_limit": value.get("interpretation_limit"),
+            "interpretation_limit": str(value.get("interpretation_limit") or "")[:180],
         }
-        if len(non_available) >= 20:
+        if len(non_available) >= 8:
             break
     missing = shared_lcr_context.get("missing_required_sources", [])
     return {
         "schema_status": shared_lcr_context.get("schema_status"),
         "history_coverage": shared_lcr_context.get("history_coverage"),
-        "missing_required_sources": missing[:20] if isinstance(missing, list) else [],
+        "missing_required_sources": missing[:8] if isinstance(missing, list) else [],
         "retrieval_scan_complete": bool(shared_lcr_context.get("retrieval_scan_complete", False)),
         "available_source_count": available_count,
         "empty_source_count": empty_count,
