@@ -1177,7 +1177,10 @@ async def _acquire_companion_turn_lease(
     from releasing another request's lease.
     """
     if db.get_bind().dialect.name != "postgresql":
-        return
+        raise HTTPException(
+            status_code=503,
+            detail="Companion conversation safety requires the PostgreSQL database. Please retry when it is available.",
+        )
     if not lock_key or len(lock_key) > 160:
         raise HTTPException(status_code=500, detail="Companion turn lock key is invalid")
     owner_token = getattr(request.state, "companion_turn_lease_owner", None)
