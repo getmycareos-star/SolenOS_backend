@@ -1201,6 +1201,11 @@ def _load_source_schema(bind: Any) -> tuple[frozenset[str], MetaData]:
     # used by private observations, perspectives, and context records.
     if "caregiver_profiles" in available_tables:
         present.append("caregiver_profiles")
+    # Original upload checksums are required to distinguish verified extracted
+    # text from orphaned or mismatched document text. Reflect the upload table
+    # even though it is auxiliary to the document-extraction source itself.
+    if "evidence_uploads" in available_tables:
+        present.append("evidence_uploads")
     if present:
         metadata.reflect(bind=bind, only=list(dict.fromkeys(present)), resolve_fks=False)
     return available_tables, metadata
