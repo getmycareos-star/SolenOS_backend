@@ -1677,3 +1677,48 @@ def test_companion_idempotent_replay_rechecks_revoked_membership_before_disclosu
     assert revoked["value"] is True
     assert response.status_code == 403, response.text
     assert "previously saved care-history response" not in response.text
+
+
+def test_companion_replay_query_never_materializes_another_recipients_turn():
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    owner = _new_anonymous(client, f"Replay query owner {suffix}")
+    other = _new_anonymous(client, f"Replay query other recipient {suffix}")
+    turn_id = str(uuid.uuid4())
+    session_id = f"replay-query-session-{suffix}"
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        db.add(ConversationSession(
+            id=session_id,
+            person_id=owner["person"]["id"],
+            caregiver_id=owner["caregiver"]["id"],
+            title="Private conversation",
+            status="active",
+            created_at=now,
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=f"replay-query-assistant-{suffix}",
+            session_id=session_id,
+            role="assistant",
+            content="Private saved response",
+            client_turn_id=turn_id,
+            response_metadata_json=json.dumps({
+                "request_sha256": "fingerprint",
+                "source_message_id": None,
+            }),
+            created_at=now,
+        ))
+        db.commit()
+
+        replay = collaboration._companion_replay_response(
+            db,
+            client_turn_id=turn_id,
+            request_sha256="fingerprint",
+            person_id=other["person"]["id"],
+            caregiver_id=other["caregiver"]["id"],
+            requested_session_id=None,
+        )
+
+    assert replay is None
