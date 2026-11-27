@@ -5037,3 +5037,42 @@ def test_companion_prompt_budget_preserves_recent_and_historical_evidence():
     }
     assert truncated is True
     assert selected_ids == {"event-2020", "event-2026"}
+
+
+def test_companion_trend_assessment_excludes_superseded_and_conflicting_observations():
+    import json
+
+    records = []
+    for day, record_id in (
+        ("2026-11-01", "sleep-old"),
+        ("2026-11-10", "sleep-middle"),
+        ("2026-11-20", "sleep-latest"),
+    ):
+        records.append("LCR evidence: " + json.dumps({
+            "source_type": "evidence_observations",
+            "source_id": record_id,
+            "record": {
+                "id": record_id,
+                "attribute": "sleep duration",
+                "subject_label": "sleep",
+                "value_text": "worse sleep",
+                "occurred_at": day + "T21:00:00+00:00",
+                "epistemic_status": "reported",
+            },
+        }))
+    records[0] = records[0].replace(
+        '"epistemic_status": "reported"',
+        '"epistemic_status": "reported", "superseded_by_observation_ids": ["sleep-correction"]',
+    )
+    records[1] = records[1].replace(
+        '"epistemic_status": "reported"',
+        '"epistemic_status": "conflicting"',
+    )
+    assessment = collaboration._trend_evidence_assessment(
+        "Has sleep been getting worse over the last month?", records,
+    )
+    assert assessment is not None
+    assert assessment["record_count"] == 1
+    assert assessment["distinct_days"] == 1
+    assert assessment["sufficient"] is False
+    assert [row["record_id"] for row in assessment["source_records"]] == ["sleep-latest"]
