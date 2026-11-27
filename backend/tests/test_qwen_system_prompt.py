@@ -390,3 +390,25 @@ def test_identity_greeting_contract_is_present_in_full_and_runtime_constitutions
     for constitution in (SOLENOS_IDENTITY_CONSTITUTION, SOLENOS_RUNTIME_IDENTITY_CONSTITUTION):
         for phrase in required:
             assert phrase.casefold() in constitution.casefold(), phrase
+
+
+def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workflow():
+    system = apply_solenos_system_contract([
+        {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion"},
+        {"role": "user", "content": "What changed?"},
+    ])[0]["content"]
+    boundary_index = system.index("CAREGIVER-FACING COMMUNICATION BOUNDARY")
+    personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
+    identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
+    assert boundary_index < personality_index < identity_index
+    boundary = system[boundary_index:personality_index]
+    for phrase in (
+        "clear, natural American English",
+        "Never display internal subsystem or model names",
+        "Do not narrate internal processing",
+        "missing, partial, stale, or conflicting information",
+        "Preserve clinically meaningful terminology",
+        "Do not apply generated-language filtering to quoted caregiver reports",
+        "offer a safe next step",
+    ):
+        assert phrase in boundary
