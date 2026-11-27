@@ -43,7 +43,10 @@ class ConversationSession(Base):
 
 class ConversationMessage(Base):
     __tablename__ = "conversation_messages"
-    __table_args__ = (Index("uq_conversation_messages_session_client_turn", "session_id", "client_turn_id", unique=True),)
+    __table_args__ = (
+        Index("uq_conversation_messages_session_client_turn", "session_id", "client_turn_id", unique=True),
+        Index("ix_conversation_messages_client_turn_id", "client_turn_id"),
+    )
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     session_id = Column(String, ForeignKey("conversation_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String, nullable=False)
