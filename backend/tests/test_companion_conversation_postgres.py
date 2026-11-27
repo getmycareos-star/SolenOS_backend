@@ -991,7 +991,7 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
             session_id=bodies[0]["session_id"],
         ).count() == 2
         expected_lock_keys = [
-            "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest(),
+            collaboration._companion_idempotency_lock_key(person_id, caregiver_id, turn_id),
             "conversation:" + hashlib.sha256(bodies[0]["session_id"].encode("utf-8")).hexdigest(),
         ]
         assert db.query(CompanionTurnLease).filter(
@@ -1128,7 +1128,7 @@ def test_revoked_caregiver_grant_during_inference_prevents_companion_response_pe
         ).count() == 0
         assert db.query(CompanionTurnLease).filter(
             CompanionTurnLease.lock_key == (
-                "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest()
+                collaboration._companion_idempotency_lock_key(person_id, caregiver_id, turn_id)
             )
         ).count() == 0
 
@@ -1186,7 +1186,7 @@ def test_expired_bearer_session_during_inference_prevents_companion_response_per
         ).count() == 0
         assert db.query(CompanionTurnLease).filter(
             CompanionTurnLease.lock_key == (
-                "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest()
+                collaboration._companion_idempotency_lock_key(person_id, caregiver_id, turn_id)
             )
         ).count() == 0
 
@@ -1296,7 +1296,7 @@ def test_failed_first_companion_turn_removes_empty_session_and_releases_leases(m
             person_id=person_id, caregiver_id=caregiver_id,
         ).count() == 0
         lock_keys = [
-            "idempotency:" + hashlib.sha256(turn_id.encode("utf-8")).hexdigest(),
+            collaboration._companion_idempotency_lock_key(person_id, caregiver_id, turn_id),
         ]
         assert db.query(CompanionTurnLease).filter(
             CompanionTurnLease.lock_key.in_(lock_keys),
@@ -1722,3 +1722,18 @@ def test_companion_replay_query_never_materializes_another_recipients_turn():
         )
 
     assert replay is None
+
+
+
+def test_companion_idempotency_lease_key_is_recipient_and_caregiver_scoped():
+    turn_id = str(uuid.uuid4())
+    first = collaboration._companion_idempotency_lock_key("person-a", "caregiver-a", turn_id)
+    same_scope = collaboration._companion_idempotency_lock_key("person-a", "caregiver-a", turn_id)
+    other_recipient = collaboration._companion_idempotency_lock_key("person-b", "caregiver-a", turn_id)
+    other_caregiver = collaboration._companion_idempotency_lock_key("person-a", "caregiver-b", turn_id)
+
+    assert first == same_scope
+    assert first.startswith("idempotency:")
+    assert len(first) <= 160
+    assert first != other_recipient
+    assert first != other_caregiver
