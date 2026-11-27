@@ -593,7 +593,8 @@ _SEARCH_STOPWORDS = {
     # Generic requests to understand or inspect the saved record are intent
     # framing, not topic terms. Treat them as broad retrieval so they do not
     # suppress historical records whose source text uses different wording.
-    "understand", "understanding", "information", "saved", "save", "record", "records", "help", "me", "you",
+    "understand", "understanding", "information", "saved", "save", "record", "recorded",
+    "records", "reported", "reporting", "help", "me", "you",
 }
 
 
