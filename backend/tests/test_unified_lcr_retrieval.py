@@ -182,7 +182,8 @@ def _sqlite_retrieval_db():
         Table("situations", metadata, Column("id", String, primary_key=True))
     connection.exec_driver_sql("CREATE TABLE situations (id VARCHAR PRIMARY KEY)")
     metadata.create_all(connection, tables=[
-        Person.__table__, Caregiver.__table__, CareEvent.__table__, Appointment.__table__,
+        Person.__table__, Caregiver.__table__, CareEvent.__table__, Evidence.__table__,
+        EvidenceUpload.__table__, Appointment.__table__,
         AppointmentWorkspaceRecord.__table__, AppointmentWorkspaceRevision.__table__,
         CareAssertion.__table__, CareStateRevision.__table__, CareActionOutcome.__table__, CaptureAnalysis.__table__,
         ConversationSession.__table__, ConversationMessage.__table__,
