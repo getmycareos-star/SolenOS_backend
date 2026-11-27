@@ -3493,6 +3493,13 @@ def test_medication_entity_exposes_only_matching_unresolved_assertion_conflicts(
                     "resolution_status": "unresolved",
                     "description": "Unrelated field disagreement.",
                 },
+                {
+                    "id": "conflict-other-subject", "subject_type": "medication",
+                    "subject_id": "medication-elsewhere", "field": "medication_name",
+                    "source_assertion_ids": ["assertion-med-name"],
+                    "resolution_status": "unresolved",
+                    "description": "Unrelated subject disagreement.",
+                },
             ]},
         },
     )
