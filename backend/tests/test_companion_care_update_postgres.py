@@ -15,7 +15,7 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 
 from app.core.database import Base, get_db
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
-from app.models.care import CareEvent
+from app.models.care import CareEvent, Caregiver
 from app.models.care_continuity import CareAssertion
 from app.models.collaboration import ConversationMessage, ConversationSession
 main_module = importlib.import_module("app.main")
@@ -183,6 +183,13 @@ def test_postgres_companion_care_report_requires_explicit_review_and_retrieves_i
 
     try:
         first = create_session(client, "PostgreSQL caregiver")
+        # This journey deliberately asks about "yesterday" below. Relative
+        # dates are only interpreted after the caregiver has an explicit zone.
+        with TestingSessionLocal() as db:
+            caregiver = db.query(Caregiver).filter_by(id=first["caregiver"]["id"]).one()
+            caregiver.timezone = "America/New_York"
+            caregiver.timezone_configured = True
+            db.commit()
         headers = {"Authorization": f"Bearer {first['access_token']}"}
         source = "Her sleep has been worse since last Friday."
         response = send(client, first, source, "companion-care-postgres-0001")
