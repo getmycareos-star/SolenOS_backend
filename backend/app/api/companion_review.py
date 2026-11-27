@@ -1,7 +1,10 @@
 """Caregiver review endpoints for Companion proposals stored in shared AI governance records."""
 import json
+import logging
 import uuid
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
