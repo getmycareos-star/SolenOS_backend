@@ -803,10 +803,23 @@ def _information_status(source_name: str, item: dict[str, Any]) -> tuple[str, st
                 "The document is saved, but an extraction result is not available. Do not treat the missing text as evidence that the document contains no care information.",
             )
         if metadata.get("binary_integrity_verified") is False:
-            return (
-                "document_source_integrity_unverified",
-                "The saved original file could not be matched to the extracted text. Treat this text as unverified and do not rely on it as a complete source.",
+            integrity_limit = (
+                "The saved original file could not be matched to the extracted text. "
+                "Treat this text as unverified and do not rely on it as a complete source."
             )
+            unreadable_pages = metadata.get("unreadable_page_numbers") or []
+            unprocessed_pages = metadata.get("unprocessed_page_numbers") or []
+            if unreadable_pages:
+                integrity_limit += " Unreadable pages: " + ", ".join(
+                    str(page) for page in unreadable_pages
+                ) + "."
+            if unprocessed_pages:
+                integrity_limit += " Unprocessed pages: " + ", ".join(
+                    str(page) for page in unprocessed_pages
+                ) + "."
+            if metadata.get("page_count_verified") is False:
+                integrity_limit += " The original PDF page total is also unverified."
+            return ("document_source_integrity_unverified", integrity_limit)
         if metadata.get("source_text_integrity_verified") is False:
             return (
                 "document_extraction_text_integrity_unverified",
