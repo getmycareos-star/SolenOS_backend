@@ -12945,7 +12945,7 @@ async def companion_message(
         CaregiverAccessGrant.caregiver_id == caregiver_id,
         CaregiverAccessGrant.status == "active",
         CaregiverAccessGrant.revoked_at.is_(None),
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if current_grant is None:
         db.rollback()
         raise HTTPException(status_code=403, detail="Caregiver access changed before this response could be saved")
