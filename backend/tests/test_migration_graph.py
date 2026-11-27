@@ -45,9 +45,12 @@ def test_handoff_draft_persistence_migration_is_reachable_from_canonical_head():
     config.set_main_option("script_location", str(backend_dir / "alembic"))
     script = ScriptDirectory.from_config(config)
     heads = script.get_heads()
-    assert heads == ["20261124_03_timezone_notification_provenance"]
+    assert heads == ["20261126_03_companion_proposal_idempotency"]
     reachable = {revision.revision for revision in script.walk_revisions(head=heads[0])}
     assert "20261107_05_appt_idempotency" in reachable
+    assert "20261126_01_companion_turn_leases" in reachable
+    assert "20261126_02_companion_conversation_permission" in reachable
+    assert "20261126_03_companion_proposal_idempotency" in reachable
 
 
 
