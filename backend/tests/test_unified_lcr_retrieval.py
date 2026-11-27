@@ -3031,3 +3031,59 @@ def test_care_entity_resolution_leaves_unrelated_questions_unresolved():
     )
     assert result["status"] == "not_requested"
     assert result["candidates"] == []
+
+
+def test_postgres_entity_resolution_never_reads_another_recipients_medication():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        with Session(bind=connection) as db:
+            person_a = Person(id="entity-scope-person-a", name="Care recipient A")
+            person_b = Person(id="entity-scope-person-b", name="Care recipient B")
+            db.add_all([person_a, person_b])
+            db.flush()
+            caregiver_a = Caregiver(
+                id="entity-scope-caregiver-a", name="Caregiver A",
+                relationship="family", person_id=person_a.id,
+            )
+            caregiver_b = Caregiver(
+                id="entity-scope-caregiver-b", name="Caregiver B",
+                relationship="family", person_id=person_b.id,
+            )
+            db.add_all([caregiver_a, caregiver_b])
+            db.flush()
+            db.add_all([
+                CareAssertion(
+                    id="entity-scope-medication-a", person_id=person_a.id,
+                    subject_type="medication", subject_id="medication-a",
+                    field="medication_name", asserted_value="Medication: donepezil 5 mg",
+                    source_label="Caregiver report", source_text="Donepezil 5 mg",
+                    evidence_ids=[], assertion_status="accepted",
+                    epistemic_state="reported", created_by_caregiver_id=caregiver_a.id,
+                ),
+                CareAssertion(
+                    id="entity-scope-medication-b", person_id=person_b.id,
+                    subject_type="medication", subject_id="medication-b",
+                    field="medication_name", asserted_value="Medication: memantine 10 mg",
+                    source_label="Caregiver report", source_text="Memantine 10 mg",
+                    evidence_ids=[], assertion_status="accepted",
+                    epistemic_state="reported", created_by_caregiver_id=caregiver_b.id,
+                ),
+            ])
+            db.commit()
+            context = build_unified_lcr_context(
+                db, person_a.id, caregiver_a.id,
+                query="What medication is she taking?",
+                only_sources={"assertions"},
+                limit_per_source=20,
+            )
+        resolution = context["entity_resolution"]
+        assert resolution["status"] == "resolved"
+        assert resolution["candidate_count"] == 1
+        assert [item["source_id"] for item in resolution["candidates"]] == [
+            "entity-scope-medication-a",
+        ]
+        assert "memantine" not in json.dumps(resolution).casefold()
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)
