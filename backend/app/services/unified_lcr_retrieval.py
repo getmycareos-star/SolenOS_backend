@@ -51,9 +51,9 @@ def _is_temporal_lookup_request(query: str | None) -> bool:
     # "Her sleep has been worse since last Friday" into a timezone-dependent
     # lookup. Short topic phrases such as "sleep yesterday" remain lookups.
     if re.search(
-        r"\\b(?:did|does|do|has|have|had|is|are|was|were|fell|ate|slept|refused|"
+        r"\b(?:did|does|do|has|have|had|is|are|was|were|fell|ate|slept|refused|"
         r"finished|missed|changed|worsened|improved|started|stopped|reported|"
-        r"noticed|felt|became|seemed|looked|showed|took|gave|went|came|needed|asked)\\b",
+        r"noticed|felt|became|seemed|looked|showed|took|gave|went|came|needed|asked)\b",
         text,
         re.IGNORECASE,
     ):
