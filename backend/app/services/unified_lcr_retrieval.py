@@ -755,7 +755,14 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                             or conflict_field in fields_by_candidate.get(candidate_key, set())
                         )
                     )
-                    if not (linked_assertions.intersection(candidate_assertions) or same_subject):
+                    field_matches = (
+                        not conflict_field
+                        or conflict_field in fields_by_candidate.get(candidate_key, set())
+                    )
+                    linked_to_candidate = bool(
+                        linked_assertions.intersection(candidate_assertions)
+                    )
+                    if not field_matches or not (linked_to_candidate or same_subject):
                         continue
                     conflict_ref = {
                         "source_type": "contradictions",
