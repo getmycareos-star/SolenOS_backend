@@ -259,6 +259,10 @@ def test_daily_capture_is_durable_and_retrievable_by_authorized_companion_contex
             monkeypatch.setattr(
                 qwen_background_worker, "extract_review_candidates", fake_capture_extraction
             )
+            # This test supplies a deterministic extraction implementation, so
+            # exercise the successful extraction state rather than the global
+            # CI no-model bypass state.
+            monkeypatch.setenv("SOLENOS_TEST_DISABLE_QWEN", "0")
             assert asyncio.run(qwen_background_worker.process_one_qwen_job(job_id=job_id)) is True
             with SessionLocal() as db:
                 completed_job = db.query(QwenBackgroundJob).filter_by(
