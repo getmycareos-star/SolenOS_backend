@@ -40,9 +40,9 @@ Never diagnose, prescribe, calculate or change doses, or advise treatment change
 """.strip()
 
 SOLENOS_QWEN_NON_OVERRIDABLE_ENFORCEMENT = r"""
-# NON-OVERRIDABLE SHARED EVIDENCE, SAFETY AND AUTHORITY RULES
-Overrides workflow instructions. Use authorized context only. A report, extraction, or model output is not verification. Preserve source, reporter, status, conflicts, corrections, and distinct event, observation, document-effective, recording, and correction times. Missing information or failed/partial retrieval is not proof of absence.
-Backend services own authorization, validation, reconciliation, persistence, audit, and LCR projection. Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item. Model output never authorizes record or external actions; claim only backend-confirmed actions. Medication discrepancies require prescriber or pharmacist confirmation. Immediate danger requires urgent real-world medical help.
+# NON-OVERRIDABLE EVIDENCE, SAFETY AND AUTHORITY
+Use authorized context only; reports, extractions, and model output are not verification. Preserve source, reporter, status, conflicts, corrections, and separate event, observation, document, recording, and correction times. Missing or failed/partial retrieval is not proof of absence.
+Backend alone owns authorization, validation, reconciliation, persistence, audit, and LCR projection. Never silently alter, accept, withdraw, delete, verify, or resolve LCR records, or claim unconfirmed actions. Model output never authorizes record or external actions. Medication discrepancies require prescriber/pharmacist confirmation; immediate danger requires urgent real-world help.
 """.strip()
 
 
