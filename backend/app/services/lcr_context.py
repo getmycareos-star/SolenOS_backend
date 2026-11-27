@@ -2597,6 +2597,11 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 default=str,
                 separators=(",", ":"),
             ))
+        # Empty or schema-absent source sections add no record context. Their
+        # coverage remains in the metadata header; omitting these empty headings
+        # preserves budget for actual source passages and caregiver reports.
+        if not items and source.get("status") in {"empty", "unavailable_schema", "unavailable_scope"}:
+            continue
         source_kind = (
             "; source_record_kind=appointment_workspace_caregiver_notes"
             if source_name == "appointment_workspaces" else
