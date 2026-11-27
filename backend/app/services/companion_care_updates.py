@@ -182,8 +182,11 @@ def process_companion_care_update_message(
             id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
             status="active",
         ).first()
-        grant = db.query(CaregiverAccessGrant).filter_by(
-            person_id=person_id, caregiver_id=caregiver_id, status="active",
+        grant = db.query(CaregiverAccessGrant).filter(
+            CaregiverAccessGrant.person_id == person_id,
+            CaregiverAccessGrant.caregiver_id == caregiver_id,
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
         ).first()
         original_message = db.query(ConversationMessage).filter_by(
             id=message_id, session_id=conversation_id, role="user",
@@ -223,8 +226,11 @@ def process_companion_care_update_message(
         )
         # Recheck the grant after inference and hold its row lock through the
         # proposal commit. A revoked caregiver cannot leave a late proposal.
-        current_grant = db.query(CaregiverAccessGrant).filter_by(
-            person_id=person_id, caregiver_id=caregiver_id, status="active",
+        current_grant = db.query(CaregiverAccessGrant).filter(
+            CaregiverAccessGrant.person_id == person_id,
+            CaregiverAccessGrant.caregiver_id == caregiver_id,
+            CaregiverAccessGrant.status == "active",
+            CaregiverAccessGrant.revoked_at.is_(None),
         ).with_for_update().first()
         if current_grant is None or not caregiver_has_permission(current_grant, "view_conversations"):
             db.rollback()
