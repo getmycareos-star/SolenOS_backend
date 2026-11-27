@@ -3501,3 +3501,31 @@ def test_medication_entity_exposes_only_matching_unresolved_assertion_conflicts(
     assert candidate["state"] == "conflicting_assertions"
     assert [item["source_id"] for item in candidate["conflicts"]] == ["conflict-name"]
     assert candidate["conflicts"][0]["evidence_ids"] == ["evidence-1", "evidence-2"]
+
+
+def test_care_entity_resolution_marks_status_disagreement_on_same_field_only():
+    result = resolve_care_entity_reference(
+        "What medication is she taking?",
+        {
+            "assertions": {"items": [
+                {
+                    "id": "assertion-name-reported",
+                    "subject_type": "medication", "subject_id": "medication-2",
+                    "field": "medication_name", "asserted_value": "donepezil",
+                    "epistemic_status": "reported",
+                },
+                {
+                    "id": "assertion-name-verified",
+                    "subject_type": "medication", "subject_id": "medication-2",
+                    "field": "medication_name", "asserted_value": "donepezil",
+                    "epistemic_status": "verified",
+                },
+            ]},
+        },
+    )
+
+    candidate = result["candidates"][0]
+    assert candidate["state"] == "mixed_source_status"
+    assert candidate["status_by_field"] == {
+        "care_record_state:medication_name": ["reported", "verified"],
+    }
