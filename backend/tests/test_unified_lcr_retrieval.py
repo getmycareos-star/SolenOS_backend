@@ -20,7 +20,7 @@ from app.models.care_continuity import CareActionOutcome, CareAssertion, CareRec
 from app.models.collaboration import ConversationMessage, ConversationSession, EvidenceUpload
 from app.models.ai_output_governance import AIOutputLCRProposal, AIOutputLCRDecision
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput
-from app.services.lcr_context import _document_extraction_metadata, _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt
+from app.services.lcr_context import _document_extraction_metadata, _apply_text_search_filter, _expanded_search_terms, _information_status, _load_source_schema, _query_search_terms, _retrieval_score, build_lcr_context, format_lcr_context_for_prompt, _temporal_window_predicate
 from app.api.collaboration import _lcr_retrieval_incomplete_notice
 from app.services.unified_lcr_retrieval import (
     _conversation_context,
@@ -2829,3 +2829,44 @@ def test_relative_care_history_requires_an_explicit_caregiver_timezone():
     finally:
         connection.close()
         engine.dispose()
+
+
+def test_temporal_filter_prefers_event_time_over_later_recording_time():
+    """A delayed report belongs to its event date, not its later entry date."""
+    from sqlalchemy import MetaData, select
+
+    engine = create_engine("sqlite://")
+    metadata = MetaData()
+    rows = Table(
+        "temporal_precedence_rows",
+        metadata,
+        Column("id", String, primary_key=True),
+        Column("occurred_at", DateTime(timezone=True)),
+        Column("recorded_at", DateTime(timezone=True)),
+    )
+    metadata.create_all(engine)
+    yesterday = datetime(2026, 11, 26, 10, 0, tzinfo=UTC)
+    today = datetime(2026, 11, 27, 10, 0, tzinfo=UTC)
+    with engine.begin() as connection:
+        connection.execute(rows.insert(), [
+            {"id": "delayed-report", "occurred_at": yesterday, "recorded_at": today},
+            {"id": "today-event", "occurred_at": today, "recorded_at": today},
+            {"id": "undated-event", "occurred_at": None, "recorded_at": today},
+        ])
+        yesterday_ids = connection.execute(
+            select(rows.c.id).where(_temporal_window_predicate(
+                [rows.c.occurred_at, rows.c.recorded_at],
+                datetime(2026, 11, 26, 0, 0, tzinfo=UTC),
+                datetime(2026, 11, 26, 23, 59, 59, tzinfo=UTC),
+            ))
+        ).scalars().all()
+        today_ids = connection.execute(
+            select(rows.c.id).where(_temporal_window_predicate(
+                [rows.c.occurred_at, rows.c.recorded_at],
+                datetime(2026, 11, 27, 0, 0, tzinfo=UTC),
+                datetime(2026, 11, 27, 23, 59, 59, tzinfo=UTC),
+            ))
+        ).scalars().all()
+    engine.dispose()
+    assert yesterday_ids == ["delayed-report"]
+    assert today_ids == ["today-event"]
