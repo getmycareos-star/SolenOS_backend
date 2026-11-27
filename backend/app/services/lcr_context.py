@@ -1250,6 +1250,18 @@ def _mark_source_enrichment_partial(
     })
 
 
+def _temporal_clock_intent(query: str | None) -> str:
+    """Choose the clock the caregiver asked about, not a model-inferred date."""
+    value = (query or "").casefold()
+    if re.search(r"\b(?:processed|processing|finished|completed)\b", value):
+        return "processing"
+    if re.search(r"\b(?:recorded|entered|added|saved|uploaded|logged|documented)\b", value):
+        return "recorded"
+    if re.search(r"\b(?:reported|told|said|mentioned)\b", value):
+        return "reported"
+    return "event"
+
+
 def _temporal_window_predicate(columns, start_value: datetime, end_value: datetime):
     """Match a row using its highest-priority available timestamp.
 
@@ -1277,6 +1289,7 @@ def build_lcr_context(
     caregiver_id: str | None = None,
     limit_per_source: int = 20,
     query: str | None = None,
+    temporal_query: str | None = None,
     temporal_window: dict[str, str] | None = None,
     include_all_history: bool = False,
     source_offsets: dict[str, int] | None = None,
@@ -1553,6 +1566,8 @@ def build_lcr_context(
                     }
                 document_upload_hash_cache_loaded = True
         if temporal_window:
+            calendar_query = temporal_query if temporal_query is not None else query
+            temporal_intent = _temporal_clock_intent(calendar_query)
             temporal_fields = {
                 "events": ("occurred_at", "recorded_at", "created_at"),
                 "evidence": ("occurred_at", "reported_at", "collected_at", "uploaded_at", "ingested_at", "created_at"),
@@ -1582,6 +1597,28 @@ def build_lcr_context(
                 "uncertainties": ("created_at",),
                 "missing_information": ("created_at",),
             }.get(source_name, ("occurred_at", "observed_at", "effective_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at", "updated_at"))
+            if temporal_intent == "recorded":
+                temporal_fields = {
+                    "events": ("recorded_at", "created_at"),
+                    "evidence": ("reported_at", "uploaded_at", "ingested_at", "created_at"),
+                    "evidence_observations": ("reported_at", "recorded_at", "created_at"),
+                    "facts": ("recorded_at", "created_at"),
+                    "assertions": ("recorded_at", "created_at"),
+                    "document_extractions": ("created_at",),
+                    "corrections": ("created_at",),
+                }.get(source_name, temporal_fields)
+            elif temporal_intent == "reported":
+                temporal_fields = {
+                    "events": ("recorded_at", "created_at"),
+                    "evidence": ("reported_at", "collected_at", "created_at"),
+                    "evidence_observations": ("reported_at", "recorded_at", "created_at"),
+                    "corrections": ("created_at",),
+                }.get(source_name, temporal_fields)
+            elif temporal_intent == "processing":
+                temporal_fields = {
+                    "corrections": ("processed_at", "created_at"),
+                    "document_extractions": ("created_at",),
+                }.get(source_name, temporal_fields)
             temporal_columns = [table.c[name] for name in temporal_fields if name in table.c]
             if temporal_columns:
                 start_value = datetime.fromisoformat(temporal_window["start"])
@@ -1620,12 +1657,15 @@ def build_lcr_context(
                     # person-scoped evidence source date as an independent clock.
                     evidence_table = metadata.tables.get("evidence")
                     if evidence_table is not None and {"id", "person_id"}.issubset(evidence_table.c.keys()):
+                        linked_evidence_date_fields = {
+                            "recorded": ("reported_at", "uploaded_at", "ingested_at", "created_at"),
+                            "reported": ("reported_at", "collected_at", "created_at"),
+                            "processing": ("created_at",),
+                            "event": ("occurred_at", "reported_at", "collected_at"),
+                        }[temporal_intent]
                         evidence_date_columns = [
                             evidence_table.c[name]
-                            for name in (
-                                "occurred_at", "reported_at", "collected_at",
-                                "uploaded_at", "ingested_at", "created_at",
-                            )
+                            for name in linked_evidence_date_fields
                             if name in evidence_table.c
                         ]
                         if evidence_date_columns:
