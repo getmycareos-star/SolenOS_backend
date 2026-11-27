@@ -3151,3 +3151,58 @@ def test_postgres_lcr_event_window_uses_occurrence_time_before_recording_time():
     finally:
         _load_source_schema.cache_clear()
         _close_postgres_conversation_db(engine, connection, schema)
+
+
+def test_postgres_companion_retrieval_withholds_document_sources_without_document_permission():
+    engine, connection, schema = _postgres_conversation_db()
+    try:
+        _load_source_schema.cache_clear()
+        with Session(bind=connection) as db:
+            person = Person(id="document-permission-person", name="Care recipient")
+            db.add(person)
+            db.flush()
+            caregiver = Caregiver(
+                id="document-permission-caregiver", name="Caregiver",
+                relationship="family", person_id=person.id,
+            )
+            db.add(caregiver)
+            db.flush()
+            document = Evidence(
+                id="document-permission-upload", person_id=person.id,
+                type="document", evidence_kind="uploaded_document",
+                epistemic_status="unverified",
+                source_text="Private discharge document excerpt.",
+                uploaded_by_caregiver_id=caregiver.id,
+            )
+            daily_capture = Evidence(
+                id="document-permission-daily", person_id=person.id,
+                type="daily_care", evidence_kind="caregiver_report",
+                epistemic_status="reported",
+                source_text="Caregiver reported reduced appetite today.",
+                uploaded_by_caregiver_id=caregiver.id,
+            )
+            db.add_all([document, daily_capture])
+            db.commit()
+            restricted = build_unified_lcr_context(
+                db, person.id, caregiver.id,
+                query="appetite discharge document",
+                only_sources={"evidence", "document_extractions"},
+                can_view_documents=False,
+            )
+            permitted = build_unified_lcr_context(
+                db, person.id, caregiver.id,
+                query="appetite discharge document",
+                only_sources={"evidence", "document_extractions"},
+                can_view_documents=True,
+            )
+        restricted_evidence = restricted["sources"]["evidence"]["items"]
+        permitted_evidence = permitted["sources"]["evidence"]["items"]
+        assert [item["id"] for item in restricted_evidence] == ["document-permission-daily"]
+        assert {item["id"] for item in permitted_evidence} == {
+            "document-permission-upload", "document-permission-daily",
+        }
+        assert restricted["sources"]["document_extractions"]["status"] == "not_authorized"
+        assert permitted["sources"]["document_extractions"]["status"] != "not_authorized"
+    finally:
+        _load_source_schema.cache_clear()
+        _close_postgres_conversation_db(engine, connection, schema)

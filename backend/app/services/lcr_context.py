@@ -1295,6 +1295,7 @@ def build_lcr_context(
     source_offsets: dict[str, int] | None = None,
     only_sources: set[str] | None = None,
     event_ids: set[str] | None = None,
+    can_view_documents: bool = True,
 ) -> dict[str, Any]:
     """Return a person-scoped LCR projection with explicit retrieval coverage.
 
@@ -1375,6 +1376,45 @@ def build_lcr_context(
             field_names.insert(0, "id")
         selected_columns = [table.c[name] for name in field_names]
         statement = select(*selected_columns).where(table.c.person_id == str(person_id))
+        if not can_view_documents and source_name == "document_extractions":
+            sources[source_name] = {
+                "status": "not_authorized",
+                "table": table_name,
+                "items": [],
+                "returned_count": 0,
+                "candidate_count": 0,
+                "candidate_scan_complete": False,
+                "returned_history_complete": False,
+                "has_more": False,
+                "limit": limit,
+                "interpretation_limit": "Document access is not included in this caregiver's active permission grant.",
+            }
+            continue
+        if not can_view_documents and source_name in {"evidence", "evidence_observations"}:
+            evidence_table = metadata.tables.get("evidence")
+            if evidence_table is not None and {"id", "person_id"}.issubset(evidence_table.c.keys()):
+                document_conditions = []
+                if "type" in evidence_table.c:
+                    document_conditions.append(func.lower(cast(evidence_table.c.type, String)) == "document")
+                if "source_type" in evidence_table.c:
+                    document_conditions.append(func.lower(cast(evidence_table.c.source_type, String)) == "document")
+                if "evidence_kind" in evidence_table.c:
+                    document_conditions.append(
+                        func.lower(cast(evidence_table.c.evidence_kind, String)).in_(
+                            ("uploaded_document", "document_extraction")
+                        )
+                    )
+                if document_conditions:
+                    document_evidence = or_(*document_conditions)
+                    if source_name == "evidence":
+                        statement = statement.where(~document_evidence)
+                    elif "evidence_id" in table.c:
+                        linked_document_exists = select(1).select_from(evidence_table).where(
+                            evidence_table.c.id == table.c.evidence_id,
+                            evidence_table.c.person_id == str(person_id),
+                            document_evidence,
+                        ).exists()
+                        statement = statement.where(~linked_document_exists)
         if source_name in {"caregiver_observations", "caregiver_perspectives"}:
             visibility_column = table.c.get("information_visibility")
             promoted_column = table.c.get("is_promoted_to_shared")
@@ -1762,6 +1802,19 @@ def build_lcr_context(
                     if not query_scan and candidate_count > limit:
                         continue
                     item = {key: _safe_value(value, key) for key, value in row_values.items()}
+                    if not can_view_documents and source_name == "assertions":
+                        source_context = item.get("source_context")
+                        document_derived = (
+                            "document" in str(item.get("assertion_kind") or "").casefold()
+                            or (
+                                isinstance(source_context, dict)
+                                and isinstance(source_context.get("document_candidate"), dict)
+                            )
+                        )
+                        if document_derived:
+                            item["source_text"] = None
+                            item["source_context"] = {"document_source_redacted": True}
+                            item["document_source_redacted"] = True
                     if source_name == "assertions" and isinstance(row_values.get("source_text"), str):
                         # A caregiver-reviewed document assertion stores the
                         # exact accepted quotation. Do not apply the smaller

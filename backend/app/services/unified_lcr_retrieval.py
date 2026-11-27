@@ -555,6 +555,7 @@ def build_unified_lcr_context(
     source_offsets: dict[str, int] | None = None,
     only_sources: set[str] | None = None,
     event_ids: set[str] | None = None,
+    can_view_documents: bool = True,
 ) -> dict[str, Any]:
     """Compose canonical care sources and authorized prior Companion dialogue.
 
@@ -610,6 +611,7 @@ def build_unified_lcr_context(
         source_offsets=source_offsets,
         only_sources=only_sources,
         event_ids=event_ids,
+        can_view_documents=can_view_documents,
     )
     entity_resolution = resolve_care_entity_reference(
         calendar_query,
@@ -633,6 +635,7 @@ def build_unified_lcr_context(
         "engine": "shared_lcr_context",
         "person_scope": str(person_id),
         "caregiver_scope_applied": True,
+        "document_permission_applied": bool(can_view_documents),
         "conversation_is_evidence": False,
         "authoritative_record": "care_assertions_and_canonical_lcr_sources",
         "retrieval_is_bounded": True,

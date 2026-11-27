@@ -3350,6 +3350,7 @@ def _collect_full_lcr_context_pages(
     temporal_query: str | None = None,
     limit_per_source: int = 50,
     max_pages: int = 4,
+    can_view_documents: bool = True,
 ) -> dict[str, Any]:
     """Collect deterministic per-source pages for a broad care-journey request.
 
@@ -3390,6 +3391,7 @@ def _collect_full_lcr_context_pages(
                 include_all_history=True,
                 source_offsets=offsets,
                 only_sources=set(active_source_names),
+                can_view_documents=can_view_documents,
             )
         except SQLAlchemyError:
             logger.exception("Companion LCR history page retrieval failed")
@@ -10174,6 +10176,7 @@ async def companion_message(
                 include_all_history=care_journey_request,
                 conversation_limit=0 if social_only else MAX_CONVERSATION_CONTEXT_ITEMS,
                 only_sources=set() if social_only else None,
+                can_view_documents=can_view_documents,
             )
             # An explicit date window is a complete scan of that requested
             # period, not a request for only the first ranked page. Fetch
@@ -10186,6 +10189,7 @@ async def companion_message(
                     temporal_query=user_text,
                     limit_per_source=200 if care_journey_request else 50,
                     max_pages=_lcr_history_page_limit(care_journey_request),
+                    can_view_documents=can_view_documents,
                 )
             if not social_only:
                 shared_lcr_context = _attach_caregiver_question_queue(db, person_id, shared_lcr_context)
