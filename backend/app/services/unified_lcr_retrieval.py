@@ -407,6 +407,140 @@ def _conversation_context(
     }
 
 
+_ENTITY_DOMAIN_PATTERNS = {
+    "medication": re.compile(r"\b(?:medication|medicine|medicines|drug|drugs|dose|dosage|prescription|tablet|pill)\b", re.I),
+    "appointment": re.compile(r"\b(?:appointment|visit|clinic|doctor|provider|checkup)\b", re.I),
+    "mobility": re.compile(r"\b(?:mobility|walking|walk|gait|balance|transfer|moving)\b", re.I),
+    "nutrition": re.compile(r"\b(?:appetite|eating|food|meal|nutrition|weight)\b", re.I),
+    "vital": re.compile(r"\b(?:blood pressure|pressure|heart rate|pulse|temperature|oxygen|glucose|blood sugar)\b", re.I),
+    "fall": re.compile(r"\b(?:fall|falls|fell|slip|slipped)\b", re.I),
+    "document": re.compile(r"\b(?:document|discharge note|lab result|test result|report|scan|letter)\b", re.I),
+}
+
+
+def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) -> dict[str, Any]:
+    """Resolve explicit care-entity references only when source-backed and unique.
+
+    This is deliberately deterministic. It does not ask the language model to
+    invent entity IDs, and it never treats a caregiver's pronoun as permission
+    to search outside the already-authorized recipient scope.
+    """
+    text = " ".join(str(query or "").split())
+    domain = next(
+        (name for name, pattern in _ENTITY_DOMAIN_PATTERNS.items() if pattern.search(text)),
+        None,
+    )
+    recipient_reference = bool(re.search(r"\b(?:her|his|their|she|he|they)\b", text, re.I))
+    if domain is None:
+        return {
+            "status": "not_requested",
+            "domain": None,
+            "recipient_reference": "authenticated_recipient" if recipient_reference else None,
+            "candidates": [],
+            "interpretation": "No explicit care-entity category was present in the question.",
+        }
+
+    candidates: dict[str, dict[str, Any]] = {}
+
+    def add(source_name: str, item: dict[str, Any], key: str, label: str, state: str = "available"):
+        if not key or not label:
+            return
+        stable_key = f"{source_name}:{key}"
+        existing = candidates.get(stable_key)
+        candidate = {
+            "entity_ref": stable_key,
+            "source_type": source_name,
+            "source_id": str(item.get("id") or key),
+            "label": label[:180],
+            "state": state,
+        }
+        if existing is None:
+            candidates[stable_key] = candidate
+
+    for source_name, source in (sources or {}).items():
+        if not isinstance(source, dict):
+            continue
+        for item in source.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if domain == "medication":
+                field = " ".join(str(item.get(name) or "") for name in (
+                    "field", "fact_type", "attribute", "subject_label", "title",
+                    "asserted_value", "fact_value", "value_text",
+                ))
+                if not re.search(r"\b(?:medication|medicine|drug|dose|dosage|prescription|tablet|pill)\b", field, re.I):
+                    continue
+                entity_key = ":".join(str(item.get(name) or "") for name in (
+                    "subject_type", "subject_id", "field", "fact_type", "id",
+                ))
+                label = " — ".join(str(item.get(name) or "").strip() for name in (
+                    "field", "fact_type", "subject_label", "asserted_value", "fact_value", "value_text",
+                ) if str(item.get(name) or "").strip())
+                state = str(item.get("assertion_status") or item.get("epistemic_status") or item.get("epistemic_state") or "available")
+                if item.get("superseded_by_fact_id") or item.get("superseded_by_observation_id"):
+                    state = "superseded_historical"
+                add(source_name, item, entity_key, label, state)
+            elif domain == "appointment" and source_name in {"appointments", "appointment_workspaces"}:
+                label = " — ".join(str(item.get(name) or "").strip() for name in (
+                    "title", "provider", "healthcare_org", "scheduled_at", "status",
+                ) if str(item.get(name) or "").strip())
+                add(source_name, item, str(item.get("appointment_id") or item.get("id") or ""), label, str(item.get("status") or "available"))
+            elif domain in {"mobility", "nutrition", "vital"}:
+                field = " ".join(str(item.get(name) or "") for name in (
+                    "field", "fact_type", "attribute", "subject_label",
+                ))
+                aliases = {
+                    "mobility": r"\b(?:mobility|walking|gait|balance|transfer)\b",
+                    "nutrition": r"\b(?:appetite|eating|food|meal|nutrition|weight)\b",
+                    "vital": r"\b(?:blood pressure|pressure|heart rate|pulse|temperature|oxygen|glucose|blood sugar)\b",
+                }[domain]
+                if not re.search(aliases, field, re.I):
+                    continue
+                label = " — ".join(str(item.get(name) or "").strip() for name in (
+                    "attribute", "field", "fact_type", "subject_label", "value_text",
+                    "asserted_value", "fact_value",
+                ) if str(item.get(name) or "").strip())
+                key = ":".join(str(item.get(name) or "") for name in (
+                    "subject_type", "subject_id", "field", "fact_type", "id",
+                ))
+                state = str(item.get("assertion_status") or item.get("epistemic_status") or item.get("epistemic_state") or "available")
+                if item.get("superseded_by_fact_id") or item.get("supersedes_observation_id"):
+                    state = "historical_or_corrected"
+                add(source_name, item, key, label, state)
+            elif domain == "fall" and source_name == "events":
+                label = " — ".join(str(item.get(name) or "").strip() for name in (
+                    "event_type", "title", "description", "occurred_at",
+                ) if str(item.get(name) or "").strip())
+                if re.search(r"\b(?:fall|fell|slip|slipped)\b", label, re.I):
+                    add(source_name, item, str(item.get("id") or ""), label, str(item.get("information_status") or item.get("status") or "available"))
+            elif domain == "document" and source_name in {"evidence", "document_extractions"}:
+                label = " — ".join(str(item.get(name) or "").strip() for name in (
+                    "filename", "type", "source_text", "extraction_status",
+                ) if str(item.get(name) or "").strip())
+                add(source_name, item, str(item.get("id") or item.get("source_evidence_id") or ""), label, str(item.get("epistemic_status") or item.get("extraction_status") or "unreviewed"))
+
+    ordered = sorted(candidates.values(), key=lambda candidate: (
+        candidate["source_type"], candidate["source_id"], candidate["entity_ref"]
+    ))
+    if not ordered:
+        status = "no_match"
+        interpretation = "No matching source-backed entity was found in the retrieved recipient-scoped records."
+    elif len(ordered) == 1:
+        status = "resolved"
+        interpretation = "One source-backed candidate matched. Use only this candidate and preserve its stated information status."
+    else:
+        status = "ambiguous"
+        interpretation = "Multiple source-backed candidates matched. Ask the caregiver which one they mean; do not choose or merge candidates."
+    return {
+        "status": status,
+        "domain": domain,
+        "recipient_reference": "authenticated_recipient" if recipient_reference else None,
+        "candidate_count": len(ordered),
+        "candidates": ordered[:8],
+        "interpretation": interpretation,
+    }
+
+
 def build_unified_lcr_context(
     db: Session,
     person_id: str,
@@ -477,6 +611,11 @@ def build_unified_lcr_context(
         only_sources=only_sources,
         event_ids=event_ids,
     )
+    entity_resolution = resolve_care_entity_reference(
+        query,
+        context.get("sources", {}),
+    )
+    context["entity_resolution"] = entity_resolution
     conversation = _conversation_context(
         db,
         person_id=str(person_id),
