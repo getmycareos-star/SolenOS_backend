@@ -1406,6 +1406,24 @@ def test_postgres_document_topic_retrieval_returns_verbatim_passage_beyond_previ
             )
             db.add(caregiver)
             db.flush()
+            original_bytes = b"Original long clinic letter upload"
+            original_sha256 = hashlib.sha256(original_bytes).hexdigest()
+            db.add(Evidence(
+                id="long-document-evidence",
+                person_id=person.id,
+                type="document",
+                source_text=source_text,
+                uploaded_by_caregiver_id=caregiver.id,
+            ))
+            db.flush()
+            db.add(EvidenceUpload(
+                evidence_id="long-document-evidence",
+                filename="long-clinic-letter.txt",
+                mime_type="text/plain",
+                content=original_bytes,
+                size_bytes=len(original_bytes),
+                sha256=original_sha256,
+            ))
             db.add(CaptureAnalysis(
                 id="long-document-passage",
                 person_id=person.id,
@@ -1416,6 +1434,9 @@ def test_postgres_document_topic_retrieval_returns_verbatim_passage_beyond_previ
                 candidates={
                     "kind": "document_extraction_v1",
                     "filename": "long-clinic-letter.txt",
+                    "mime_type": "text/plain",
+                    "binary_sha256": original_sha256,
+                    "source_text_sha256": hashlib.sha256(source_text.strip().encode("utf-8")).hexdigest(),
                 },
                 review_history=[],
             ))
