@@ -1700,7 +1700,10 @@ def build_lcr_context(
                             "recorded": ("reported_at", "uploaded_at", "ingested_at", "created_at"),
                             "reported": ("reported_at", "collected_at", "created_at"),
                             "processing": ("created_at",),
-                            "event": ("occurred_at", "reported_at", "collected_at"),
+                            # A linked document may have no explicit event/reported/collection clock.
+                            # Use its persisted creation time only as the final fallback; never
+                            # replace a more specific source timestamp with the OCR job time.
+                            "event": ("occurred_at", "reported_at", "collected_at", "created_at"),
                         }[temporal_intent]
                         evidence_date_columns = [
                             evidence_table.c[name]
