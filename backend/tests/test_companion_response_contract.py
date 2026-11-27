@@ -5004,3 +5004,36 @@ def test_companion_conflict_guard_requires_occurrence_time_and_current_reports()
     assert collaboration._contradictory_event_evidence_response(
         "Do the records agree about whether a fall happened overnight?", corrected_reports
     ) is None
+
+
+def test_companion_prompt_budget_preserves_recent_and_historical_evidence():
+    import json
+
+    records = [
+        {"id": "event-2020", "occurred_at": "2020-01-01T10:00:00+00:00", "title": "Mobility observation"},
+        {"id": "event-2021", "occurred_at": "2021-01-01T10:00:00+00:00", "title": "Mobility observation"},
+        {"id": "event-2022", "occurred_at": "2022-01-01T10:00:00+00:00", "title": "Mobility observation"},
+        {"id": "event-2026", "occurred_at": "2026-01-01T10:00:00+00:00", "title": "Mobility observation"},
+    ]
+    lines = [
+        "Shared LCR context: " + json.dumps({
+            "source_type": "events",
+            "source_id": record["id"],
+            "record": record,
+        })
+        for record in records
+    ]
+    expected_budget = (
+        len(collaboration._humanize_model_context_line(lines[0]))
+        + len(collaboration._humanize_model_context_line(lines[-1]))
+        + 1
+    )
+    selected, _rendered, _chars, truncated = (
+        collaboration._fit_model_context_lines_across_sources(lines, expected_budget)
+    )
+    selected_ids = {
+        json.loads(line[line.index("{"):])["source_id"]
+        for line in selected
+    }
+    assert truncated is True
+    assert selected_ids == {"event-2020", "event-2026"}
