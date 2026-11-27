@@ -1351,7 +1351,7 @@ def _revalidate_companion_replay_access(
         CaregiverAccessGrant.caregiver_id == str(caregiver_id),
         CaregiverAccessGrant.status == "active",
         CaregiverAccessGrant.revoked_at.is_(None),
-    ).with_for_update().first()
+    ).populate_existing().with_for_update().first()
     if grant is None:
         raise HTTPException(status_code=403, detail="Caregiver access changed before this saved response could be returned")
     require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
