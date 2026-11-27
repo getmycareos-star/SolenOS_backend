@@ -2579,9 +2579,12 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
             db.flush()
             historical_event_at = datetime(2025, 3, 4, 9, 30, tzinfo=UTC)
             uploaded_at = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
+            historical_document_text = "Discharge summary from March 4, 2025."
+            historical_document_bytes = b"Original discharge summary upload"
+            historical_document_sha256 = hashlib.sha256(historical_document_bytes).hexdigest()
             evidence = Evidence(
                 id="historical-document-evidence", person_id=person.id,
-                type="document", source_text="Discharge summary from March 4, 2025.",
+                type="document", source_text=historical_document_text,
                 uploaded_by_caregiver_id=caregiver.id,
                 occurred_at=historical_event_at,
                 uploaded_at=uploaded_at,
@@ -2589,12 +2592,26 @@ def test_document_extraction_temporal_search_uses_linked_source_date():
             )
             db.add(evidence)
             db.flush()
+            db.add(EvidenceUpload(
+                evidence_id=evidence.id,
+                filename="discharge-summary.txt",
+                mime_type="text/plain",
+                content=historical_document_bytes,
+                size_bytes=len(historical_document_bytes),
+                sha256=historical_document_sha256,
+            ))
             extraction = CaptureAnalysis(
                 id="historical-document-extraction", person_id=person.id,
                 caregiver_id=caregiver.id, source_evidence_id=evidence.id,
-                source_text="Discharge summary from March 4, 2025.",
+                source_text=historical_document_text,
                 extraction_status="available",
-                candidates={"kind": "document_extraction_v1"},
+                candidates={
+                    "kind": "document_extraction_v1",
+                    "filename": "discharge-summary.txt",
+                    "mime_type": "text/plain",
+                    "binary_sha256": historical_document_sha256,
+                    "source_text_sha256": hashlib.sha256(historical_document_text.strip().encode("utf-8")).hexdigest(),
+                },
                 created_at=uploaded_at,
             )
             db.add(extraction)
