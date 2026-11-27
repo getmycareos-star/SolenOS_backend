@@ -3325,3 +3325,39 @@ def test_care_entity_resolution_deduplicates_document_and_extraction_by_evidence
         "evidence-1": "care_record_state",
         "extraction-1": "processing_lifecycle",
     }
+
+
+def test_care_entity_resolution_marks_disagreement_within_same_status_family():
+    result = resolve_care_entity_reference(
+        "What medication is she taking?",
+        {
+            "assertions": {"items": [
+                {
+                    "id": "medication-reported",
+                    "subject_type": "medication",
+                    "subject_id": "stable-medication",
+                    "field": "medication_name",
+                    "asserted_value": "Medication: donepezil",
+                    "assertion_status": "accepted",
+                    "epistemic_status": "reported",
+                },
+                {
+                    "id": "medication-verified",
+                    "subject_type": "medication",
+                    "subject_id": "stable-medication",
+                    "field": "medication_dose",
+                    "asserted_value": "5 mg",
+                    "assertion_status": "accepted",
+                    "epistemic_status": "verified",
+                },
+            ]},
+        },
+    )
+
+    assert result["status"] == "resolved"
+    candidate = result["candidates"][0]
+    assert candidate["state"] == "mixed_source_status"
+    assert candidate["status_families"] == ["care_record_state"]
+    assert candidate["status_by_family"] == {
+        "care_record_state": ["reported", "verified"],
+    }
