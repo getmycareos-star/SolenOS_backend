@@ -3302,4 +3302,12 @@ def test_care_entity_resolution_deduplicates_document_and_extraction_by_evidence
     assert {item["source_id"] for item in candidate["source_refs"]} == {
         "evidence-1", "extraction-1",
     }
+    source_statuses = {
+        item["source_id"]: item["information_status"]
+        for item in candidate["source_refs"]
+    }
+    assert source_statuses == {
+        "evidence-1": "verified",
+        "extraction-1": "completed",
+    }
     assert candidate["state"] == "mixed_source_status"
