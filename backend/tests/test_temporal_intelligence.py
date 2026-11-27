@@ -32,6 +32,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base
 from app.models.care import Person, Caregiver
 from app.models.temporal import TemporalFact as TemporalFactModel
+from app.models.care_continuity import CareStateRevision
 from app.schemas.temporal import (
     TemporalFactCreate,
     TemporalFactUpdate,
@@ -203,6 +204,21 @@ def test_update_temporal_fact():
         assert updated.asserted_point.day == 5
         assert updated.precision == TemporalPrecision.DAY
         assert updated.time_provenance == "corrected"
+        revision = (
+            db.query(CareStateRevision)
+            .filter(
+                CareStateRevision.person_id == "person-3",
+                CareStateRevision.target_type == "temporal_facts",
+                CareStateRevision.target_id == fact.id,
+            )
+            .order_by(CareStateRevision.revision_number.desc())
+            .first()
+        )
+        assert revision is not None
+        assert revision.change_kind == "updated"
+        assert '"2026-03-04T12:00:00+00:00"' in revision.before_state
+        assert '"2026-03-05T12:00:00+00:00"' in revision.after_state
+        assert '"corrected"' in revision.after_state
     finally:
         teardown_db()
 
