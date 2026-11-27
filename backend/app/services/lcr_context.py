@@ -2521,34 +2521,49 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             caveat.get("source_type") == "assertions" and not isinstance(caveat.get("page_number"), int),
         )
     )
+    lineage = context.get("evidence_lineage")
+    lineage = lineage if isinstance(lineage, dict) else {}
+    entity_resolution = context.get("entity_resolution")
+    entity_resolution = entity_resolution if isinstance(entity_resolution, dict) else {}
     header = (
         "LCR context metadata: "
         + json.dumps({
             "schema_status": context.get("schema_status"),
+            # Keep the metadata envelope bounded so it cannot crowd out the
+            # source records it is supposed to qualify.
             "source_limits": [
                 {
                     "source_type": name,
                     "status": source.get("status"),
-                    "interpretation_limit": source.get("interpretation_limit"),
+                    "interpretation_limit": str(source.get("interpretation_limit") or "")[:180],
                 }
                 for name, source in context.get("sources", {}).items()
                 if source.get("status") in {"failed", "partial", "unsearchable"}
                 and source.get("interpretation_limit")
-            ][:20],
-            "source_caveats": source_caveats[:20],
+            ][:8],
+            "source_caveats": source_caveats[:10],
             "history_coverage": context.get("history_coverage"),
             "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
             "retrieval_projection_complete": context.get("retrieval_projection_complete", False),
-            "missing_required_sources": context.get("missing_required_sources", []),
-            "missing_optional_sources": context.get("missing_optional_sources", []),
-            "evidence_lineage": context.get("evidence_lineage", {
-                "status": "not_assessed",
-                "interpretation_limit": "No source-lineage assessment was supplied.",
-            }),
-            "assertion_conflicts": (
-                context.get("entity_resolution", {}).get("assertion_conflicts", [])
-                if isinstance(context.get("entity_resolution"), dict) else []
-            ),
+            "missing_required_sources": context.get("missing_required_sources", [])[:12],
+            "missing_optional_sources": context.get("missing_optional_sources", [])[:12],
+            "evidence_lineage": {
+                "status": lineage.get("status", "not_assessed"),
+                "interpretation_limit": str(lineage.get(
+                    "interpretation_limit", "No source-lineage assessment was supplied."
+                ))[:220],
+                "evidence_ids_considered_count": len(lineage.get("evidence_ids_considered", []))
+                if isinstance(lineage.get("evidence_ids_considered"), list) else 0,
+                "independent_source_pair_count": len(lineage.get("independent_source_pairs", []))
+                if isinstance(lineage.get("independent_source_pairs"), list) else 0,
+                "shared_origin_pair_count": len(lineage.get("shared_origin_pairs", []))
+                if isinstance(lineage.get("shared_origin_pairs"), list) else 0,
+                "failed_corroboration_pair_count": len(lineage.get("failed_corroboration_pairs", []))
+                if isinstance(lineage.get("failed_corroboration_pairs"), list) else 0,
+                "independent_corroboration_established": lineage.get("independent_corroboration_established", False),
+                "review_required": lineage.get("review_required", False),
+            },
+            "assertion_conflicts": entity_resolution.get("assertion_conflicts", [])[:6],
         }, ensure_ascii=False, separators=(",", ":"))
     )
 
