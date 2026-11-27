@@ -1060,6 +1060,12 @@ def test_postgres_companion_history_recall_does_not_let_undated_rows_evict_dated
         db.rollback()
         db.query(CareEvent).filter(CareEvent.person_id == person_id).delete(synchronize_session=False)
         db.query(Caregiver).filter(Caregiver.person_id == person_id).delete(synchronize_session=False)
+        # Care-state audit revisions intentionally retain a person FK and are
+        # append-only during normal operation. Remove only this disposable
+        # integration fixture's revisions before deleting its person.
+        db.query(CareStateRevision).filter(
+            CareStateRevision.person_id == person_id
+        ).delete(synchronize_session=False)
         db.query(Person).filter(Person.id == person_id).delete(synchronize_session=False)
         db.commit()
         db.close()
