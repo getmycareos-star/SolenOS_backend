@@ -3356,10 +3356,14 @@ def test_care_entity_resolution_marks_disagreement_within_same_status_family():
 
     assert result["status"] == "resolved"
     candidate = result["candidates"][0]
-    assert candidate["state"] == "mixed_source_status"
+    assert candidate["state"] == "source_specific_statuses"
     assert candidate["status_families"] == ["care_record_state"]
     assert candidate["status_by_family"] == {
         "care_record_state": ["reported", "verified"],
+    }
+    assert candidate["status_by_field"] == {
+        "care_record_state:medication_name": ["reported"],
+        "care_record_state:medication_dose": ["verified"],
     }
 
 
@@ -3445,3 +3449,55 @@ def test_entity_resolution_exposes_assertion_conflicts_even_without_entity_categ
     assert result["status"] == "not_requested"
     assert len(result["assertion_conflicts"]) == 1
     assert result["assertion_conflicts"][0]["field"] == "mobility"
+
+
+def test_medication_entity_exposes_only_matching_unresolved_assertion_conflicts():
+    result = resolve_care_entity_reference(
+        "What medication is she taking?",
+        {
+            "assertions": {"items": [
+                {
+                    "id": "assertion-med-name",
+                    "subject_type": "medication", "subject_id": "medication-1",
+                    "field": "medication_name", "asserted_value": "donepezil",
+                    "epistemic_status": "verified",
+                },
+                {
+                    "id": "assertion-med-dose",
+                    "subject_type": "medication", "subject_id": "medication-1",
+                    "field": "medication_dose", "asserted_value": "5 mg",
+                    "epistemic_status": "verified",
+                },
+            ]},
+            "contradictions": {"items": [
+                {
+                    "id": "conflict-name", "subject_type": "medication",
+                    "subject_id": "medication-1", "field": "medication_name",
+                    "source_assertion_ids": ["assertion-med-name"],
+                    "resolution_status": "unresolved",
+                    "description": "Medication name disagreement.",
+                    "evidence_ids": ["evidence-1", "evidence-2"],
+                },
+                {
+                    "id": "conflict-resolved", "subject_type": "medication",
+                    "subject_id": "medication-1", "field": "medication_name",
+                    "source_assertion_ids": ["assertion-med-name"],
+                    "resolution_status": "resolved",
+                    "description": "Resolved disagreement.",
+                },
+                {
+                    "id": "conflict-other-field", "subject_type": "medication",
+                    "subject_id": "medication-1", "field": "allergy",
+                    "source_assertion_ids": ["assertion-med-name"],
+                    "resolution_status": "unresolved",
+                    "description": "Unrelated field disagreement.",
+                },
+            ]},
+        },
+    )
+
+    candidate = result["candidates"][0]
+    assert candidate["has_unresolved_conflict"] is True
+    assert candidate["state"] == "conflicting_assertions"
+    assert [item["source_id"] for item in candidate["conflicts"]] == ["conflict-name"]
+    assert candidate["conflicts"][0]["evidence_ids"] == ["evidence-1", "evidence-2"]
