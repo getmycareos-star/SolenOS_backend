@@ -52,3 +52,46 @@ def test_relative_date_resolution_does_not_depend_on_wall_clock_when_injected():
     assert window is not None
     assert window["start"].startswith("2024-02-19T00:00:00")
     assert window["end"].startswith("2024-02-25T23:59:59")
+
+
+def test_prior_companion_date_phrase_does_not_become_current_calendar_filter(monkeypatch):
+    """Relevance may include prior turns; only the current question sets a date window."""
+    from app.services import unified_lcr_retrieval as retrieval
+
+    class FakeQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def first(self):
+            return ("UTC", False)
+
+    class FakeDB:
+        def query(self, *args, **kwargs):
+            return FakeQuery()
+
+    captured = {}
+
+    def fake_build_lcr_context(db, person_id, **kwargs):
+        captured.update(kwargs)
+        return {"sources": {}, "history_coverage": "empty"}
+
+    monkeypatch.setattr(retrieval, "build_lcr_context", fake_build_lcr_context)
+    monkeypatch.setattr(
+        retrieval,
+        "_conversation_context",
+        lambda *args, **kwargs: {"status": "empty", "items": []},
+    )
+
+    current_question = "What have I told you about her sleep?"
+    relevance_query = current_question + " Her sleep has been worse since last Friday."
+    result = retrieval.build_unified_lcr_context(
+        FakeDB(),
+        "person-1",
+        "caregiver-1",
+        query=relevance_query,
+        temporal_query=current_question,
+    )
+
+    assert result["retrieval_contract"]["caregiver_timezone_status"] == "not_configured"
+    assert captured["temporal_window"] is None
+    assert captured["query"] == relevance_query
