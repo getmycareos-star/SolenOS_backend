@@ -1051,10 +1051,36 @@ def test_hybrid_retrieval_four_sources_and_status_gate_on_local_sqlite():
                     "created_by_caregiver_id": "caregiver-local",
                 },
             ])
+            local_document_text = "Clinic letter reports sleep disturbance."
+            local_document_bytes = b"Original local clinic letter bytes"
+            local_document_sha256 = hashlib.sha256(local_document_bytes).hexdigest()
+            connection.execute(Evidence.__table__.insert(), {
+                "id": "document-evidence-local",
+                "person_id": "person-local",
+                "type": "document",
+                "source_text": local_document_text,
+                "uploaded_by_caregiver_id": "caregiver-local",
+                "reported_by_caregiver_id": "caregiver-local",
+                "evidence_status": "active",
+            })
+            connection.execute(EvidenceUpload.__table__.insert(), {
+                "evidence_id": "document-evidence-local",
+                "filename": "clinic-letter.txt",
+                "mime_type": "text/plain",
+                "content": local_document_bytes,
+                "size_bytes": len(local_document_bytes),
+                "sha256": local_document_sha256,
+            })
             connection.execute(CaptureAnalysis.__table__.insert(), {
                 "id": "document-local", "person_id": "person-local", "caregiver_id": "caregiver-local",
-                "source_evidence_id": "document-evidence-local", "source_text": "Clinic letter reports sleep disturbance.",
-                "extraction_status": "available", "candidates": {"kind": "document_extraction_v1"}, "review_history": [],
+                "source_evidence_id": "document-evidence-local", "source_text": local_document_text,
+                "extraction_status": "available", "candidates": {
+                    "kind": "document_extraction_v1",
+                    "filename": "clinic-letter.txt",
+                    "mime_type": "text/plain",
+                    "binary_sha256": local_document_sha256,
+                    "source_text_sha256": hashlib.sha256(local_document_text.strip().encode("utf-8")).hexdigest(),
+                }, "review_history": [],
             })
             connection.execute(ConversationSession.__table__.insert(), {
                 "id": "old-session-local", "person_id": "person-local", "caregiver_id": "caregiver-local", "status": "archived",
