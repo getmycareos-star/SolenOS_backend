@@ -4577,20 +4577,30 @@ def _trend_uncertainty_response(assessment: dict) -> str:
     topic = assessment["topic"]
     period = assessment["period_label"]
     direction = assessment["direction"]
-    count = assessment["record_count"]
+    count = int(assessment.get("record_count") or 0)
+    distinct_days = int(assessment.get("distinct_days") or 0)
+    minimum_days = int(assessment.get("minimum_distinct_days") or 3)
+
+    if assessment.get("retrieval_complete") is False or assessment.get("prompt_context_complete") is False:
+        return (
+            f"I can't reliably assess {topic} {period} because the record search or supplied history was incomplete. "
+            "That is a limit of the available information, not evidence that nothing changed."
+        )
     if count == 0:
         return (
-            f"The available record contains no dated {topic} observations {period}, "
-            f"so it cannot establish whether {topic} has been {direction}."
+            f"I couldn't find dated {topic} observations {period}. "
+            "That does not mean the change did not happen; it means the available record cannot establish it."
         )
-    if count == 1:
+    if distinct_days < minimum_days:
         return (
-            f"The available record contains only one dated {topic} observation {period}. "
-            f"That is not enough to establish whether {topic} has been {direction}."
+            f"The available record contains {count} dated {topic} observation"
+            f"{'' if count == 1 else 's'} across {distinct_days} distinct day"
+            f"{'' if distinct_days == 1 else 's'} {period}. "
+            f"At least {minimum_days} separate days are needed before I can assess whether {topic} has been {direction}."
         )
     return (
-        f"The available {topic} entries are not dated across at least two separate days {period}. "
-        f"They are not enough to establish whether {topic} has been {direction}."
+        f"The available record contains {count} dated {topic} observations across {distinct_days} separate days {period}, "
+        f"but it does not show a clear, source-recorded direction. I can't conclude that {topic} has been {direction}."
     )
 
 
