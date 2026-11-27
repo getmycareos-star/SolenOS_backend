@@ -1990,10 +1990,15 @@ def build_lcr_context(
                         if str(correction.get("processing_status") or "legacy_unverified").casefold()
                         not in active_correction_statuses | {"completed"}
                     ]
+                    # Active corrections are expected to exist before the
+                    # asynchronous worker creates their completed lineage edge.
+                    # Treating a pending correction as an orphan makes the
+                    # original event's currentness "unknown" and hides the
+                    # explicit pending-correction state from Companion.
                     unlinked_corrections = [
                         correction for correction in all_corrections
                         if str(correction.get("processing_status") or "legacy_unverified").casefold()
-                        in active_correction_statuses | {"completed"}
+                        == "completed"
                         and str(correction.get("id")) not in linked_ids
                     ]
                     if unlinked_corrections or unknown_corrections:
