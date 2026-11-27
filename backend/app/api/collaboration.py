@@ -1260,6 +1260,26 @@ def _resolve_anonymous_session_id(request: Request, db: Session, person_id: str,
     request.state.anonymous_session_id = str(session.id)
     return str(session.id)
 
+_DOCUMENT_DERIVED_RECORD_TYPES = frozenset({
+    "document",
+    "document_extraction",
+    "document_extractions",
+    "document_analysis",
+    "document_analyses",
+    "capture_analysis",
+    "capture_analyses",
+    "document_upload",
+    "document_uploads",
+    "uploaded_document",
+})
+
+
+def _is_document_derived_record_type(value: Any) -> bool:
+    """Normalize source-type aliases before enforcing document access."""
+    normalized = str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    return normalized in _DOCUMENT_DERIVED_RECORD_TYPES
+
+
 def _companion_response_requires_document_permission(
     db: Session, *, person_id: str, response: dict,
 ) -> bool:
@@ -1269,8 +1289,7 @@ def _companion_response_requires_document_permission(
     refs = response.get("source_record_refs")
     if isinstance(refs, list) and any(
         isinstance(item, dict)
-        and str(item.get("record_type") or "").casefold()
-        in {"document", "document_extraction", "document_analysis", "capture_analysis"}
+        and _is_document_derived_record_type(item.get("record_type"))
         for item in refs
     ):
         return True
@@ -13054,8 +13073,7 @@ def conversation_history(
                     raise ValueError("Invalid source reference list")
                 if any(
                     isinstance(item, dict)
-                    and str(item.get("record_type") or "").casefold()
-                    in {"document", "document_extraction", "document_analysis", "capture_analysis"}
+                    and _is_document_derived_record_type(item.get("record_type"))
                     for item in refs
                 ):
                     document_restricted_message_ids.add(str(row.id))
