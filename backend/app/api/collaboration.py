@@ -12925,6 +12925,14 @@ def conversation_history(
     Ordering by both fields prevents ties from duplicating or dropping messages.
     """
     person_id, caregiver_id = _companion_scope(request, db)
+    grant = db.query(CaregiverAccessGrant.id).filter(
+        CaregiverAccessGrant.person_id == str(person_id),
+        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if grant is None:
+        raise HTTPException(status_code=403, detail="Caregiver access changed before conversation history could be returned")
     bearer_session_id = getattr(request.state, "anonymous_session_id", None)
     bearer = db.query(AnonymousSession.id).filter(
         AnonymousSession.id == str(bearer_session_id or ""),
@@ -12935,14 +12943,6 @@ def conversation_history(
     ).with_for_update().first()
     if bearer is None:
         raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before conversation history could be returned")
-    grant = db.query(CaregiverAccessGrant.id).filter(
-        CaregiverAccessGrant.person_id == str(person_id),
-        CaregiverAccessGrant.caregiver_id == str(caregiver_id),
-        CaregiverAccessGrant.status == "active",
-        CaregiverAccessGrant.revoked_at.is_(None),
-    ).with_for_update().first()
-    if grant is None:
-        raise HTTPException(status_code=403, detail="Caregiver access changed before conversation history could be returned")
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     can_view_lcr = True
     try:
