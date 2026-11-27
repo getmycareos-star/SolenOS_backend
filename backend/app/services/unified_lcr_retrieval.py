@@ -704,6 +704,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
     # or its exact subject/field scope.
     if domain == "medication":
         assertion_ids_by_candidate: dict[str, set[str]] = {}
+        assertion_fields_by_candidate: dict[str, dict[str, str]] = {}
         fields_by_candidate: dict[str, set[str]] = {}
         for source_name, source in (sources or {}).items():
             if not isinstance(source, dict):
@@ -717,11 +718,14 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                     continue
                 candidate_key = f"medication:{subject_type}:{subject_id}"
                 if candidate_key in candidates:
-                    if item.get("id") is not None:
-                        assertion_ids_by_candidate.setdefault(candidate_key, set()).add(str(item["id"]))
                     item_field = str(
                         item.get("field") or item.get("fact_type") or item.get("attribute") or ""
                     ).strip().casefold()
+                    if item.get("id") is not None:
+                        assertion_id = str(item["id"])
+                        assertion_ids_by_candidate.setdefault(candidate_key, set()).add(assertion_id)
+                        if item_field:
+                            assertion_fields_by_candidate.setdefault(candidate_key, {})[assertion_id] = item_field
                     if item_field:
                         fields_by_candidate.setdefault(candidate_key, set()).add(item_field)
 
@@ -753,12 +757,21 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                             or conflict_field in fields_by_candidate.get(candidate_key, set())
                         )
                     )
+                    linked_candidate_assertions = linked_assertions.intersection(candidate_assertions)
+                    linked_to_candidate = bool(linked_candidate_assertions)
+                    # When the contradiction names source assertions, its field
+                    # must match those exact assertions. A different assertion
+                    # on the same medication must not make an unrelated field
+                    # conflict appear on this candidate.
+                    linked_fields = assertion_fields_by_candidate.get(candidate_key, {})
                     field_matches = (
                         not conflict_field
-                        or conflict_field in fields_by_candidate.get(candidate_key, set())
-                    )
-                    linked_to_candidate = bool(
-                        linked_assertions.intersection(candidate_assertions)
+                        or (
+                            any(linked_fields.get(assertion_id) == conflict_field
+                                for assertion_id in linked_candidate_assertions)
+                            if linked_assertions
+                            else conflict_field in fields_by_candidate.get(candidate_key, set())
+                        )
                     )
                     # A source-assertion link alone cannot override a subject or
                     # field mismatch. Legacy conflicts without assertion links
