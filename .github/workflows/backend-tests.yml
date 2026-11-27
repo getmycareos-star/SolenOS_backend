@@ -48,6 +48,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   # Keep one active disposable-database test run alive until it finishes.
@@ -56,7 +57,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validation-start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish backend validation pending status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: "pending",
+              context: "backend-tests-main-validation",
+              description: "Full backend and PostgreSQL migration validation is running",
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+
   test:
+    needs: validation-start
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -70,6 +89,7 @@ jobs:
         run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace solenos-backend-ci-tests bash /workspace/ci/run-backend-tests.sh
 
   postgres-migration:
+    needs: validation-start
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -553,6 +573,29 @@ jobs:
       - name: Verify evidence-grounded historical reconstruction and source isolation on PostgreSQL
         run: python -m pytest backend/tests/test_messy_care_1000_api_postgres.py::test_postgres_as_of_reconstruction_uses_recorded_change_time_not_event_time backend/tests/test_messy_care_1000_api_postgres.py::test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_history -q -vv
 
+  publish-validation-status:
+    if: always()
+    needs: [test, postgres-migration]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish combined backend and PostgreSQL validation result
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const results = {
+              backend: "${{ needs.test.result }}",
+              postgres_migration: "${{ needs.postgres-migration.result }}",
+            };
+            const success = Object.values(results).every(value => value === "success");
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.sha,
+              state: success ? "success" : "failure",
+              context: "backend-tests-main-validation",
+              description: `backend=${results.backend}; postgres_migration=${results.postgres_migration}`,
+              target_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
   qwen-image-build:
     # Keep the heavyweight live-Qwen image/inference check manual; core release gates
     # run the PostgreSQL integration, backend tests, migration and recovery workflows.
