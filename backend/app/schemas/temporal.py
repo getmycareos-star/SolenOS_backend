@@ -1,6 +1,14 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
 from typing import Optional, List
+
+
+def _require_aware_datetime(value):
+    """Reject naive API timestamps instead of silently treating local time as UTC."""
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError("Provide a timezone offset for every date and time.")
+    return value
+
 from app.core.temporal_enums import (
     TemporalPrecision,
     TemporalMode,
@@ -11,6 +19,11 @@ from app.core.temporal_enums import (
 
 
 class TemporalFactBase(BaseModel):
+    @field_validator("asserted_point", "asserted_start", "asserted_end", "lower_bound", "upper_bound", "document_time", "effective_time")
+    @classmethod
+    def validate_temporal_timezone(cls, value):
+        return _require_aware_datetime(value)
+
     person_id: str
     subject_type: str
     subject_id: str
@@ -36,6 +49,11 @@ class TemporalFactCreate(TemporalFactBase):
 
 
 class TemporalFactUpdate(BaseModel):
+    @field_validator("asserted_point", "asserted_start", "asserted_end", "lower_bound", "upper_bound", "document_time", "effective_time")
+    @classmethod
+    def validate_temporal_timezone(cls, value):
+        return _require_aware_datetime(value)
+
     temporal_mode: Optional[TemporalMode] = None
     asserted_point: Optional[datetime] = None
     asserted_start: Optional[datetime] = None
@@ -64,6 +82,11 @@ class TemporalFact(TemporalFactBase):
 
 
 class TemporalReferenceFrameBase(BaseModel):
+    @field_validator("reference_time")
+    @classmethod
+    def validate_reference_timezone(cls, value):
+        return _require_aware_datetime(value)
+
     person_id: str
     name: str
     reference_time: Optional[datetime] = None
