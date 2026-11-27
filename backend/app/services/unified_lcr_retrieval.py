@@ -463,7 +463,8 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
             "value": value,
             "assertions": [],
         })
-        value_group["assertions"].append({
+        if len(value_group["assertions"]) < 3:
+            value_group["assertions"].append({
             "assertion_id": str(item.get("id") or ""),
             "epistemic_state": str(item.get("epistemic_state") or "unknown"),
             "assertion_status": str(item.get("assertion_status") or "unknown"),
@@ -471,8 +472,8 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
             "observed_at": item.get("observed_at"),
             "recorded_at": item.get("recorded_at"),
             "source_event_id": item.get("source_event_id"),
-            "evidence_ids": list(item.get("evidence_ids") or []),
-            "source_label": str(item.get("source_label") or ""),
+            "evidence_ids": list(item.get("evidence_ids") or [])[:5],
+            "source_label": str(item.get("source_label") or "")[:120],
         })
     conflicts = []
     for group in groups.values():
@@ -487,7 +488,7 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
             "values": sorted(
                 group["values"].values(),
                 key=lambda entry: entry["value"].casefold(),
-            ),
+            )[:4],
             "interpretation": (
                 "Saved reports disagree about this field. Preserve each source and "
                 "its timing; do not select a value or describe either as confirmed."
@@ -496,7 +497,7 @@ def _assertion_conflict_groups(sources: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(
         conflicts,
         key=lambda item: (item["subject_type"], item["subject_id"], item["field"], item["assertion_kind"]),
-    )
+    )[:8]
 
 
 def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) -> dict[str, Any]:
