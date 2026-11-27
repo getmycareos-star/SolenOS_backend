@@ -494,7 +494,7 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                     "field", "fact_type", "attribute", "subject_label", "title",
                     "asserted_value", "fact_value", "value_text",
                 ))
-                if not re.search(r"\b(?:medication|medicine|drug|dose|dosage|prescription|tablet|pill)\b", field, re.I):
+                if not re.search(r"(?<![a-z0-9])(?:medication|medicine|drug|dose|dosage|prescription|tablet|pill)(?![a-z0-9])", field, re.I):
                     continue
                 subject_type = str(item.get("subject_type") or "medication").strip().casefold()
                 subject_id = str(item.get("subject_id") or "").strip()
