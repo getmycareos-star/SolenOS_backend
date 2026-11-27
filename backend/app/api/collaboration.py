@@ -3050,14 +3050,16 @@ def _companion_replay_response(
         .filter(
             ConversationMessage.client_turn_id == client_turn_id,
             ConversationMessage.role == "assistant",
+            ConversationSession.person_id == str(person_id),
+            ConversationSession.caregiver_id == str(caregiver_id),
         )
         .first()
     )
     if pair is None:
         return None
     assistant, saved_session = pair
-    if saved_session.person_id != person_id or saved_session.caregiver_id != caregiver_id:
-        raise HTTPException(status_code=409, detail="This turn ID cannot be reused in this care-record session")
+    # Recipient and caregiver ownership are enforced in the join predicate above;
+    # no cross-recipient response row is materialized for application-level checks.
     if saved_session.status != "active":
         raise HTTPException(status_code=409, detail="This turn ID belongs to an inactive conversation")
     if requested_session_id and requested_session_id != saved_session.id:
