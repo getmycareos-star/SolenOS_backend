@@ -98,6 +98,7 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
             "source_evidence_ids": ["evidence-1"],
             "source_handoff_ids": ["handoff-1"],
             "source_notification_ids": ["notification-1"],
+            "source_contradiction_ids": ["conflict-1", "conflict-1"],
             "source_refs": ["appointments:visit-1", "care_events:event-2"],
             "retrieval_coverage": {
                 "status": "partial_or_unknown",
@@ -126,6 +127,7 @@ def test_qwen_inference_audit_metadata_preserves_only_trusted_source_references(
         "source_evidence_ids": ["evidence-1"],
         "source_handoff_ids": ["handoff-1"],
         "source_notification_ids": ["notification-1"],
+        "source_contradiction_ids": ["conflict-1"],
     }
     assert metadata["source_refs"] == ["appointments:visit-1", "care_events:event-2"]
     assert metadata["retrieval_coverage"] == {
