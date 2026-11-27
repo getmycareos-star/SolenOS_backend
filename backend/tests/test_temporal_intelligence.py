@@ -1,3 +1,5 @@
+import pytest
+from pydantic import ValidationError
 from datetime import datetime, timedelta, timezone
 from app.services.temporal_intelligence import (
     create_temporal_fact,
@@ -1414,3 +1416,18 @@ def test_relative_time_requires_an_explicit_duration_for_exact_resolution():
         assert approximate_duration.resolved_point == datetime(2026, 1, 10, 9, 0, tzinfo=timezone.utc)
     finally:
         teardown_db()
+
+
+def test_temporal_api_schema_rejects_timezone_naive_event_times():
+    with pytest.raises(ValidationError, match="Provide a timezone offset"):
+        TemporalFactCreate(
+            person_id="person-timezone",
+            subject_type="event",
+            subject_id="event-timezone",
+            asserted_point=datetime(2026, 4, 10, 9, 0),
+        )
+
+    with pytest.raises(ValidationError, match="Provide a timezone offset"):
+        TemporalFactUpdate(
+            asserted_start=datetime(2026, 4, 10, 9, 0),
+        )
