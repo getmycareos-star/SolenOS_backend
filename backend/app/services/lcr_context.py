@@ -2536,6 +2536,10 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 "status": "not_assessed",
                 "interpretation_limit": "No source-lineage assessment was supplied.",
             }),
+            "assertion_conflicts": (
+                context.get("entity_resolution", {}).get("assertion_conflicts", [])
+                if isinstance(context.get("entity_resolution"), dict) else []
+            ),
         }, ensure_ascii=False, separators=(",", ":"))
     )
 
