@@ -27,6 +27,7 @@ from app.services.unified_lcr_retrieval import (
     _temporal_window,
     build_unified_lcr_context,
     resolve_care_entity_reference,
+    _assertion_conflict_groups,
 )
 
 
@@ -3360,3 +3361,87 @@ def test_care_entity_resolution_marks_disagreement_within_same_status_family():
     assert candidate["status_by_family"] == {
         "care_record_state": ["reported", "verified"],
     }
+
+
+def test_assertion_conflicts_are_grouped_by_subject_field_and_preserve_source_lineage():
+    sources = {
+        "assertions": {
+            "items": [
+                {
+                    "id": "assertion-a", "subject_type": "medication",
+                    "subject_id": "med-1", "field": "dose",
+                    "assertion_kind": "current_state", "asserted_value": "5 mg",
+                    "assertion_status": "reported", "epistemic_state": "reported",
+                    "event_time_text": "Monday morning", "source_event_id": "event-a",
+                    "evidence_ids": ["evidence-a"], "source_label": "Caregiver note",
+                },
+                {
+                    "id": "assertion-b", "subject_type": "medication",
+                    "subject_id": "med-1", "field": "dose",
+                    "assertion_kind": "current_state", "asserted_value": "10 mg",
+                    "assertion_status": "reported", "epistemic_state": "reported",
+                    "event_time_text": "Tuesday morning", "source_event_id": "event-b",
+                    "evidence_ids": ["evidence-b"], "source_label": "Discharge summary",
+                },
+                {
+                    # Superseded history remains available but is not treated
+                    # as a live disagreement against the current assertions.
+                    "id": "assertion-old", "subject_type": "medication",
+                    "subject_id": "med-1", "field": "dose",
+                    "assertion_kind": "current_state", "asserted_value": "2.5 mg",
+                    "assertion_status": "superseded",
+                    "evidence_ids": ["evidence-old"],
+                },
+                {
+                    # Same field on a different subject is a separate entity.
+                    "id": "assertion-other", "subject_type": "medication",
+                    "subject_id": "med-2", "field": "dose",
+                    "assertion_kind": "current_state", "asserted_value": "20 mg",
+                    "assertion_status": "reported",
+                },
+                {
+                    # Different fields are not contradictions.
+                    "id": "assertion-frequency", "subject_type": "medication",
+                    "subject_id": "med-1", "field": "frequency",
+                    "assertion_kind": "current_state", "asserted_value": "daily",
+                    "assertion_status": "reported",
+                },
+            ],
+        },
+    }
+
+    conflicts = _assertion_conflict_groups(sources)
+
+    assert len(conflicts) == 1
+    conflict = conflicts[0]
+    assert conflict["conflict_type"] == "assertion_value_disagreement"
+    assert (conflict["subject_type"], conflict["subject_id"], conflict["field"]) == (
+        "medication", "med-1", "dose",
+    )
+    assert {item["value"] for item in conflict["values"]} == {"5 mg", "10 mg"}
+    by_value = {item["value"]: item["assertions"][0] for item in conflict["values"]}
+    assert by_value["5 mg"]["evidence_ids"] == ["evidence-a"]
+    assert by_value["10 mg"]["source_event_id"] == "event-b"
+    assert by_value["5 mg"]["event_time_text"] == "Monday morning"
+
+
+def test_entity_resolution_exposes_assertion_conflicts_even_without_entity_category():
+    result = resolve_care_entity_reference(
+        "Can you summarize the saved care information?",
+        {"assertions": {"items": [
+            {
+                "id": "a1", "subject_type": "person", "subject_id": "person-1",
+                "field": "mobility", "asserted_value": "Walks independently",
+                "assertion_status": "reported",
+            },
+            {
+                "id": "a2", "subject_type": "person", "subject_id": "person-1",
+                "field": "mobility", "asserted_value": "Needs a walker",
+                "assertion_status": "reported",
+            },
+        ]}},
+    )
+
+    assert result["status"] == "not_requested"
+    assert len(result["assertion_conflicts"]) == 1
+    assert result["assertion_conflicts"][0]["field"] == "mobility"
