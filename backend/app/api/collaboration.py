@@ -11192,7 +11192,7 @@ async def companion_message(
                 or value.get("has_more")
                 or value.get("returned_history_complete") is False
             )
-        ]
+        ][:8]
         # The full receipt stays in the API response. The model gets only the
         # coverage facts needed to qualify its answer, not repeated per-source
         # counters and internal completeness fields.
@@ -11200,11 +11200,11 @@ async def companion_message(
             "retrieval_completeness": retrieval_receipt.get("retrieval_completeness"),
             "answer_restriction": retrieval_receipt.get("answer_restriction"),
             "context_truncated": context_truncated,
-            "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or []),
-            "missing_optional_sources": list(lcr_context_coverage.get("missing_optional_sources") or []),
-            "failed_sources": failed_source_names,
-            "more_available_sources": more_available_source_names,
-            "selection_truncated_sources": selection_truncated_source_names,
+            "missing_required_sources": list(lcr_context_coverage.get("missing_required_sources") or [])[:8],
+            "missing_optional_sources": list(lcr_context_coverage.get("missing_optional_sources") or [])[:8],
+            "failed_sources": failed_source_names[:8],
+            "more_available_sources": more_available_source_names[:8],
+            "selection_truncated_sources": selection_truncated_source_names[:8],
             "source_limits": source_limit_details,
         }
         if identity_question or social_only:
