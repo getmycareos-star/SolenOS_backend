@@ -8271,6 +8271,8 @@ def _care_history_recall_context_lines(
 
     event_lines: list[str] = []
     evidence_lineage_by_id: dict[str, tuple[str, str]] = {}
+    caregiver_by_evidence_id: dict[str, str] = {}
+    event_status_by_evidence_id: dict[str, str] = {}
     linked_evidence_ids: list[str] = []
     for row in rows:
         caregiver_report = _care_history_event_text({"description": row.description})
@@ -8281,6 +8283,9 @@ def _care_history_recall_context_lines(
             continue
         evidence_ids = [str(value) for value in (row.evidence_ids or []) if value]
         linked_evidence_ids.extend(evidence_ids)
+        for evidence_id in evidence_ids:
+            caregiver_by_evidence_id[evidence_id] = str(row.created_by_caregiver_id or "")
+            event_status_by_evidence_id[evidence_id] = str(row.status or "")
         linked_corrections = corrections_by_event.get(str(row.id), [])
         completed_unlinked = [
             item for item in linked_corrections
@@ -8375,6 +8380,12 @@ def _care_history_recall_context_lines(
                             "evidence_kind": evidence.evidence_kind,
                             "epistemic_status": evidence.epistemic_status,
                             "evidence_status": getattr(evidence, "evidence_status", None),
+                            "caregiver_attributed": bool(
+                                evidence.reported_by_caregiver_id
+                                and str(evidence.reported_by_caregiver_id)
+                                == caregiver_by_evidence_id.get(str(evidence.id), "")
+                            ),
+                            "status": event_status_by_evidence_id.get(str(evidence.id), ""),
                             "information_status": evidence_lineage_by_id.get(
                                 str(evidence.id), ("source_evidence", "")
                             )[0],
@@ -8461,6 +8472,23 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
             }:
                 continue
             description = _care_history_event_text(record)
+        elif source_type == "evidence":
+            # Original caregiver-entered source text is the verbatim record of
+            # what was reported. It is eligible only when the linked event and
+            # evidence both retain explicit caregiver attribution and current
+            # lifecycle status; derived summaries are never quoted here.
+            if payload.get("caregiver_attributed") is not True:
+                continue
+            if str(payload.get("status") or "").strip().casefold() != "recorded":
+                continue
+            if str(payload.get("information_status") or "").casefold() in {
+                "historical_event", "event_correction_pending", "event_currentness_unknown",
+            }:
+                continue
+            description = _care_history_event_text({
+                "description": (payload.get("record") or {}).get("source_text")
+                if isinstance(payload.get("record"), dict) else ""
+            })
         elif source_type in {"assertions", "care_assertions"}:
             # The caller emits this source type only after a person-scoped query
             # for accepted/reviewed assertions. Require explicit caregiver
@@ -8496,7 +8524,9 @@ def _care_history_extractive_answer(user_text: str, context_lines: list[str]) ->
         candidates.append((
             len(matched_topics),
             len(terms & query_terms),
-            1 if source_type in {"assertions", "care_assertions"} else 0,
+            2 if source_type == "evidence" else (
+                1 if source_type in {"assertions", "care_assertions"} else 0
+            ),
             order,
             re.sub(r"\s+", " ", description).strip(),
             matched_topics,
