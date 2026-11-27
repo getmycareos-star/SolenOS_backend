@@ -11494,6 +11494,8 @@ async def companion_message(
                 "Offer at most one low-pressure invitation, such as how you can help; do not ask multiple questions, launch a care assessment, introduce a care issue, reveal care-recipient details, or claim a record was updated. "
                 "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
+        # Capture the conversation key while the ORM object is still attached.
+        conversation_session_id = str(session.id)
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
@@ -11588,7 +11590,7 @@ async def companion_message(
             "request_id": companion_request_id,
             "person_id": person_id,
             "caregiver_id": caregiver_id,
-            "conversation_session_id": str(session.id),
+            "conversation_session_id": conversation_session_id,
             "source_event_ids": list(source_event_ids),
             "source_evidence_ids": list(source_evidence_ids),
             "source_document_analysis_ids": list(source_document_analysis_ids),
