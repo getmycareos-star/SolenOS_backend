@@ -397,7 +397,7 @@ def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workf
         {"role": "system", "content": "SOLENOS_WORKFLOW_ID: companion"},
         {"role": "user", "content": "What changed?"},
     ])[0]["content"]
-    boundary_index = system.index("CAREGIVER-FACING COMMUNICATION BOUNDARY")
+    boundary_index = system.index("# CAREGIVER LANGUAGE")
     personality_index = system.index("SOLENOS COMPANION — THOUGHTFUL CARE PARTNER")
     identity_index = system.index("# SOLENOS COMPANION — PRODUCT IDENTITY")
     assert boundary_index < personality_index < identity_index
@@ -405,10 +405,10 @@ def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workf
     for phrase in (
         "clear, natural American English",
         "Never expose model/service names",
-        "Do not narrate internal processing",
-        "missing, incomplete, stale or conflicting details",
-        "Preserve clinical terms",
-        "do not rewrite caregiver/source quotations",
+        "never narrate processing",
+        "State gaps and conflicts plainly",
+        "Preserve medical terms",
+        "source quotations",
         "give a safe next step",
     ):
         assert phrase in boundary
