@@ -188,7 +188,7 @@ def _inference_audit_metadata(messages: list[dict], audit_context: dict | None =
     source_keys = (
         "source_event_ids", "source_evidence_ids", "source_document_analysis_ids",
         "source_appointment_ids", "source_handoff_ids", "source_notification_ids",
-        "source_assertion_ids", "source_lcr_context_ids", "source_freshness_assessment_ids",
+        "source_assertion_ids", "source_contradiction_ids", "source_lcr_context_ids", "source_freshness_assessment_ids",
     )
     source_refs = {}
     for key in source_keys:
