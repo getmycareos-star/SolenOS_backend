@@ -1624,12 +1624,15 @@ def build_lcr_context(
         if temporal_window:
             calendar_query = temporal_query if temporal_query is not None else query
             temporal_intent = _temporal_clock_intent(calendar_query)
+            # Event-time questions use event/effective clocks only. Report,
+            # upload, recording, and creation clocks are separate query intents
+            # and must not make an undated event appear to have happened in-window.
             temporal_fields = {
-                "events": ("occurred_at", "recorded_at", "created_at"),
-                "evidence": ("occurred_at", "reported_at", "collected_at", "uploaded_at", "ingested_at", "created_at"),
-                "evidence_observations": ("occurred_at", "observed_at", "reported_at", "recorded_at", "created_at"),
-                "facts": ("effective_at", "recorded_at", "created_at"),
-                "assertions": ("observed_at", "recorded_at", "created_at"),
+                "events": ("occurred_at",),
+                "evidence": ("occurred_at",),
+                "evidence_observations": ("occurred_at",),
+                "facts": ("effective_at",),
+                "assertions": ("observed_at",),
                 "document_extractions": ("created_at",),
                 "evidence_reviews": ("created_at",),
                 "claim_assessments": ("created_at",),
@@ -1637,22 +1640,22 @@ def build_lcr_context(
                 "evidence_freshness_policies": ("created_at",),
                 "evidence_completeness_assessments": ("assessed_at",),
                 "evidence_completeness_policies": ("created_at",),
-                "corrections": ("created_at", "processed_at"),
-                "decisions": ("decided_at", "created_at"),
-                "decision_outcomes": ("observed_at", "created_at"),
+                "corrections": ("created_at",),
+                "decisions": ("decided_at",),
+                "decision_outcomes": ("observed_at",),
                 "care_state_revisions": ("changed_at",),
-                "change_analyses": ("event_date", "created_at"),
-                "timeline": ("occurred_at", "created_at"),
-                "caregiver_observations": ("event_time", "report_time", "created_at"),
-                "caregiver_contexts": ("effective_start", "created_at"),
-                "caregiver_perspectives": ("timestamp", "created_at"),
-                "appointments": ("scheduled_at", "created_at"),
-                "living_record": ("updated_at", "created_at"),
-                "open_questions": ("asked_at", "created_at"),
-                "open_loop_records": ("updated_at", "created_at"),
+                "change_analyses": ("event_date",),
+                "timeline": ("occurred_at",),
+                "caregiver_observations": ("event_time",),
+                "caregiver_contexts": ("effective_start",),
+                "caregiver_perspectives": ("timestamp",),
+                "appointments": ("scheduled_at",),
+                "living_record": ("updated_at",),
+                "open_questions": ("asked_at",),
+                "open_loop_records": ("updated_at",),
                 "uncertainties": ("created_at",),
                 "missing_information": ("created_at",),
-            }.get(source_name, ("occurred_at", "observed_at", "effective_at", "scheduled_at", "recorded_at", "uploaded_at", "created_at", "updated_at"))
+            }.get(source_name, ("occurred_at", "observed_at", "effective_at", "scheduled_at"))
             if temporal_intent == "recorded":
                 temporal_fields = {
                     "events": ("recorded_at", "created_at"),
@@ -1715,10 +1718,7 @@ def build_lcr_context(
                             "recorded": ("reported_at", "uploaded_at", "ingested_at", "created_at"),
                             "reported": ("reported_at", "collected_at", "created_at"),
                             "processing": ("created_at",),
-                            # A linked document may have no explicit event/reported/collection clock.
-                            # Use its persisted creation time only as the final fallback; never
-                            # replace a more specific source timestamp with the OCR job time.
-                            "event": ("occurred_at", "reported_at", "collected_at", "uploaded_at", "created_at"),
+                            "event": ("occurred_at",),
                         }[temporal_intent]
                         evidence_date_columns = [
                             evidence_table.c[name]
@@ -1726,16 +1726,15 @@ def build_lcr_context(
                             if name in evidence_table.c
                         ]
                         if evidence_date_columns:
-                            linked_source_in_window = select(1).select_from(evidence_table).where(
-                                and_(
-                                    evidence_table.c.id == table.c.source_evidence_id,
-                                    evidence_table.c.person_id == str(person_id),
-                                    _temporal_window_predicate(
-                                        evidence_date_columns, start_value, end_value,
-                                    ),
+                            # document_extractions already joins the linked,
+                            # person-scoped evidence row above. Apply its own
+                            # event clock directly rather than a second correlated
+                            # subquery, preserving the source event-time semantics.
+                            temporal_predicates.append(
+                                _temporal_window_predicate(
+                                    evidence_date_columns, start_value, end_value,
                                 )
-                            ).exists()
-                            temporal_predicates.append(linked_source_in_window)
+                            )
                 if temporal_predicates:
                     statement = statement.where(or_(*temporal_predicates))
                 else:
