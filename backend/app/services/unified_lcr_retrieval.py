@@ -414,6 +414,7 @@ def build_unified_lcr_context(
     *,
     limit_per_source: int = 20,
     query: str | None = None,
+    temporal_query: str | None = None,
     reference_time: datetime | None = None,
     conversation_limit: int = MAX_CONVERSATION_CONTEXT_ITEMS,
     include_all_history: bool = False,
@@ -445,17 +446,22 @@ def build_unified_lcr_context(
     trusted_reference_time = reference_time or datetime.now(UTC)
     if trusted_reference_time.tzinfo is None or trusted_reference_time.utcoffset() is None:
         raise ValueError("Temporal retrieval requires a timezone-aware trusted reference time.")
-    if _is_temporal_lookup_request(query):
+    # Search relevance may include prior conversation turns, but calendar
+    # interpretation must use only the caregiver's current question. Otherwise a
+    # date phrase in an earlier message (for example, "since last Friday") can
+    # accidentally turn a later general recall question into a relative-date query.
+    calendar_query = temporal_query if temporal_query is not None else query
+    if _is_temporal_lookup_request(calendar_query):
         if timezone_configured:
             try:
                 ZoneInfo(caregiver_timezone)
             except (ZoneInfoNotFoundError, ValueError) as exc:
                 raise ValueError("Your saved time zone is not valid. Update it in Settings before asking about dates.") from exc
-            temporal_window = _temporal_window(query, now=trusted_reference_time, timezone_name=caregiver_timezone)
+            temporal_window = _temporal_window(calendar_query, now=trusted_reference_time, timezone_name=caregiver_timezone)
         else:
             # Never use UTC as a substitute for the caregiver's unknown local
             # calendar when answering a relative-date history question.
-            requested_window = _temporal_window(query, now=trusted_reference_time, timezone_name="UTC")
+            requested_window = _temporal_window(calendar_query, now=trusted_reference_time, timezone_name="UTC")
             if requested_window is not None:
                 raise ValueError("Set your time zone in Settings before asking about yesterday or another date range.")
             temporal_window = None
