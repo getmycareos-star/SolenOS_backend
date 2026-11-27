@@ -47,7 +47,7 @@ def test_empty_generated_response_is_rejected():
 def test_companion_validator_runs_language_guard_independently_of_formatting_checks():
     from pathlib import Path
 
-    source = Path("backend/app/api/collaboration.py").read_text(encoding="utf-8")
+    source = Path("app/api/collaboration.py").read_text(encoding="utf-8")
     start = source.index("    def response_rejection_reasons(candidate: str)")
     end = source.index("\n    rejection_reasons = response_rejection_reasons(reply)", start)
     validator = source[start:end]
