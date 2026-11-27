@@ -26,8 +26,8 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"\b(?:epistemic(?: status| state)?|provenance|reconciliation|"
             r"assertion(?: record| candidate)?|source[_ -]?id|record[_ -]?id|"
             r"evidence[_ -]?id|claim[_ -]?id|request[_ -]?id|response[_ -]?body|"
-            r"session token|bearer token|confidence score|audit trail|"
-            r"diagnostic (?:trace|log|payload)|machine-readable metadata)\b",
+            r"session token|bearer token|confidence scores?|hash(?:es)?|audit trail|"
+            r"diagnostic (?:traces?|logs?|payloads?)|machine-readable metadata)\b",
             re.IGNORECASE,
         ),
     ),
