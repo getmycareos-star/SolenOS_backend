@@ -136,6 +136,47 @@ def test_qwen_context_budget_reduces_output_reservation_before_discarding_contex
     assert rendered
     assert truncated is False
 
+def test_qwen_context_budget_retries_at_96_tokens_when_128_still_exceeds_fixed_prompt(monkeypatch):
+    context_lines = [
+        "Canonical source: " + json.dumps({
+            "source_type": "events",
+            "record": {
+                "title": "Saved caregiver observation",
+                "description": "Mum refused lunch yesterday.",
+                "information_status": "caregiver_reported",
+            },
+        })
+    ]
+    attempts = []
+
+    def fake_qwen_chat(messages, *, options=None, audit_context=None):
+        attempts.append({
+            "prompt": messages[0]["content"],
+            "num_predict": options["num_predict"],
+        })
+        if options["num_predict"] >= 128:
+            raise HTTPException(status_code=413, detail="fixed instructions exceed input budget")
+        return "The saved caregiver note reports that Mum refused lunch yesterday."
+
+    monkeypatch.setattr(collaboration, "qwen_chat", fake_qwen_chat)
+    reply, selected_raw, rendered, truncated = asyncio.run(
+        collaboration._qwen_chat_with_bounded_context(
+            "Shared SolenOS instructions. Authorized context:\\n",
+            "What was recorded about lunch?",
+            context_lines,
+            options={"temperature": 0, "num_predict": 256},
+        )
+    )
+
+    assert {attempt["num_predict"] for attempt in attempts} >= {256, 128, 96}
+    assert attempts[-1]["num_predict"] == 96
+    assert "Saved caregiver observation" in attempts[-1]["prompt"]
+    assert reply == "The saved caregiver note reports that Mum refused lunch yesterday."
+    assert selected_raw == context_lines
+    assert rendered
+    assert truncated is False
+
+
 def test_qwen_context_budget_never_reduces_safety_response_reservation(monkeypatch):
     attempts = []
 
