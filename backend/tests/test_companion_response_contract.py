@@ -5164,3 +5164,45 @@ def test_paged_entity_resolution_does_not_hide_later_ambiguous_appointment(monke
     assert {
         item["source_id"] for item in merged["entity_resolution"]["candidates"]
     } == {"appointment-first", "appointment-second"}
+
+
+@pytest.mark.parametrize(
+    ("items", "expected_initial_status"),
+    [
+        ([{"id": "appointment-visible", "title": "Neurology visit", "status": "scheduled"}], "resolved"),
+        ([], "no_match"),
+    ],
+)
+def test_entity_resolution_is_incomplete_when_history_paging_stops_early(
+    monkeypatch, items, expected_initial_status,
+):
+    initial = {
+        "sources": {
+            "appointments": {
+                "status": "available",
+                "items": items,
+                "candidate_count": 2,
+                "candidate_scan_complete": True,
+                "has_more": True,
+                "next_offset": 1,
+            },
+        },
+        "missing_required_sources": [],
+        "missing_optional_sources": [],
+        "retrieval_contract": {},
+    }
+    monkeypatch.setattr(
+        collaboration,
+        "build_unified_lcr_context",
+        lambda *args, **kwargs: pytest.fail("Page ceiling must not trigger another read"),
+    )
+
+    merged = collaboration._collect_full_lcr_context_pages(
+        object(), "person-1", "caregiver-1",
+        "When is her appointment?", initial, limit_per_source=1, max_pages=1,
+    )
+
+    assert expected_initial_status in {"resolved", "no_match"}
+    assert merged["entity_resolution"]["status"] == "incomplete"
+    assert merged["entity_resolution"]["resolution_complete"] is False
+    assert merged["retrieval_projection_complete"] is False
