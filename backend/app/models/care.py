@@ -29,6 +29,7 @@ class Caregiver(Base):
     date_format = Column(String(24), nullable=True)
     measurement_system = Column(String(24), nullable=True)
     communication_style = Column(String(24), nullable=True)
+    first_use_orientation_completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
