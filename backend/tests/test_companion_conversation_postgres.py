@@ -1606,3 +1606,74 @@ def test_companion_conversation_list_has_deterministic_order_when_timestamps_col
         if item["session_id"] in set(session_ids)
     ]
     assert tied == sorted(session_ids)
+
+
+def test_companion_idempotent_replay_rechecks_revoked_membership_before_disclosure(monkeypatch):
+    """A saved answer is still protected when membership is revoked after request entry."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Revoked replay recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    session_id = f"revoked-replay-session-{suffix}"
+    turn_id = str(uuid.uuid4())
+    text = "What does the saved care record say?"
+    request_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        db.add(ConversationSession(
+            id=session_id, person_id=person_id, caregiver_id=caregiver_id,
+            title="Saved response", status="active", created_at=now,
+        ))
+        db.flush()
+        user_id = f"revoked-replay-user-{suffix}"
+        db.add(ConversationMessage(
+            id=user_id, session_id=session_id, role="user", content=text,
+            created_at=now,
+        ))
+        db.add(ConversationMessage(
+            id=f"revoked-replay-assistant-{suffix}",
+            session_id=session_id, role="assistant",
+            content="A previously saved care-history response.",
+            client_turn_id=turn_id,
+            response_metadata_json=json.dumps({
+                "request_sha256": request_sha256,
+                "source_message_id": user_id,
+                "ai_generated": True,
+            }),
+            created_at=now + timedelta(microseconds=1),
+        ))
+        db.commit()
+
+    original_replay = collaboration._companion_replay_response
+    revoked = {"value": False}
+
+    def revoke_after_lookup(*args, **kwargs):
+        replay = original_replay(*args, **kwargs)
+        if replay is not None and not revoked["value"]:
+            with Session() as db:
+                grant = db.query(CaregiverAccessGrant).filter_by(
+                    person_id=person_id, caregiver_id=caregiver_id,
+                ).one()
+                grant.status = "revoked"
+                grant.revoked_at = datetime.now(timezone.utc)
+                db.commit()
+            revoked["value"] = True
+        return replay
+
+    monkeypatch.setattr(collaboration, "_companion_replay_response", revoke_after_lookup)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": person_id,
+            "text": text,
+            "session_id": session_id,
+            "client_turn_id": turn_id,
+        },
+    )
+
+    assert revoked["value"] is True
+    assert response.status_code == 403, response.text
+    assert "previously saved care-history response" not in response.text
