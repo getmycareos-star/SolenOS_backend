@@ -957,10 +957,16 @@ def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monke
     calls_lock = threading.Lock()
 
     def fake_qwen(base, model, messages, options=None, audit_context=None):
-        # The endpoint must not hold a PostgreSQL connection while Qwen runs.
-        assert application_engine.pool.checkedout() == 0
         with calls_lock:
             calls.append(messages)
+        # A concurrent duplicate first completes its short authorization read,
+        # then waits on the durable idempotency lease. Allow that request to
+        # reach the lease loop and release its connection before checking that
+        # inference itself runs without a checked-out PostgreSQL connection.
+        deadline = time.monotonic() + 2.0
+        while application_engine.pool.checkedout() != 0 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert application_engine.pool.checkedout() == 0
         time.sleep(0.25)
         return "I cannot confirm that from the records retrieved for this response."
 
@@ -1886,6 +1892,9 @@ def test_companion_proposal_extraction_rechecks_revoked_at_after_model(monkeypat
             id=conversation_id, person_id=person_id, caregiver_id=caregiver_id,
             title="Proposal revocation", status="active",
         ))
+        # Flush the referenced conversation before adding its child message;
+        # this keeps the PostgreSQL FK fixture order explicit.
+        db.flush()
         db.add(ConversationMessage(
             id=message_id, session_id=conversation_id, role="user",
             content=source_text,
