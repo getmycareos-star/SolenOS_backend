@@ -6551,6 +6551,9 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
     source_evidence_ids: list[str] = []
     source_document_analysis_ids: list[str] = []
     source_assertion_ids: list[str] = []
+    # This assist endpoint does not retrieve contradiction rows; keep its audit
+    # source list explicitly empty rather than referencing an unbound variable.
+    source_contradiction_ids: list[str] = []
     source_lcr_context_ids: list[str] = []
     source_document_status = "not_authorized"
     source_appointment_ids: list[str] = []
