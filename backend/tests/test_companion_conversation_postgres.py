@@ -812,6 +812,53 @@ def test_companion_discards_inference_when_caregiver_access_is_revoked_mid_reque
         ).count() == 0
 
 
+def test_companion_document_access_revoked_during_inference_blocks_response(monkeypatch):
+    """Document-derived answers are re-authorized after inference, before persistence."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Revoked document access recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    inference_called = {"value": False}
+
+    monkeypatch.setattr(
+        collaboration,
+        "_companion_response_requires_document_permission",
+        lambda db, *, person_id, response: True,
+    )
+
+    def fake_qwen(base, model, messages, options=None, audit_context=None):
+        inference_called["value"] = True
+        with Session() as revoke_db:
+            grant = revoke_db.query(CaregiverAccessGrant).filter_by(
+                person_id=person_id, caregiver_id=caregiver_id,
+            ).one()
+            grant.permissions = [
+                permission for permission in (grant.permissions or [])
+                if permission != "view_documents"
+            ]
+            revoke_db.commit()
+        return "This document-derived answer must not be delivered."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://qwen.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_ollama_chat", fake_qwen)
+    response = client.post(
+        "/api/v1/conversation/message",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={"person_id": person_id, "text": "What did the document say?"},
+    )
+
+    assert inference_called["value"] is True
+    assert response.status_code == 403, response.text
+    with Session() as db:
+        assert db.query(ConversationMessage).join(
+            ConversationSession, ConversationMessage.session_id == ConversationSession.id,
+        ).filter(
+            ConversationSession.person_id == person_id,
+            ConversationSession.caregiver_id == caregiver_id,
+        ).count() == 0
+
+
 def test_companion_history_uses_stable_scoped_cursor_pages():
     """Older history pages neither duplicate nor omit tied recipient messages."""
     suffix = uuid.uuid4().hex[:10]
