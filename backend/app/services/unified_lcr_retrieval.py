@@ -593,6 +593,77 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                     identity_key=f"document:{evidence_id}" if evidence_id else None,
                 )
 
+    # Attach persisted assertion-level contradictions to the care entity they
+    # actually reference. A conflict is not inferred from different values or
+    # model wording: it must be backed by the contradiction row's assertion IDs
+    # or its exact subject/field scope.
+    if domain == "medication":
+        assertion_ids_by_candidate: dict[str, set[str]] = {}
+        for source_name, source in (sources or {}).items():
+            if not isinstance(source, dict):
+                continue
+            for item in source.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                subject_type = str(item.get("subject_type") or "medication").strip().casefold()
+                subject_id = str(item.get("subject_id") or "").strip()
+                if not subject_id:
+                    continue
+                candidate_key = f"medication:{subject_type}:{subject_id}"
+                if candidate_key in candidates and item.get("id") is not None:
+                    assertion_ids_by_candidate.setdefault(candidate_key, set()).add(str(item["id"]))
+
+        contradiction_source = (sources or {}).get("contradictions", {})
+        if isinstance(contradiction_source, dict):
+            active_conflict_states = {
+                "unresolved", "reopened", "partially_resolved", "qualified",
+            }
+            for conflict in contradiction_source.get("items", []):
+                if not isinstance(conflict, dict):
+                    continue
+                if str(conflict.get("resolution_status") or "").casefold() not in active_conflict_states:
+                    continue
+                conflict_subject_type = str(conflict.get("subject_type") or "medication").strip().casefold()
+                conflict_subject_id = str(conflict.get("subject_id") or "").strip()
+                conflict_field = str(conflict.get("field") or "").strip().casefold()
+                linked_assertions = {
+                    str(value) for value in (
+                        conflict.get("source_assertion_ids")
+                        or conflict.get("matching_candidate_ids")
+                        or []
+                    ) if value
+                }
+                for candidate_key, candidate in candidates.items():
+                    candidate_assertions = assertion_ids_by_candidate.get(candidate_key, set())
+                    same_subject = (
+                        candidate_key == f"medication:{conflict_subject_type}:{conflict_subject_id}"
+                        and bool(conflict_subject_id)
+                        and (
+                            not conflict_field
+                            or any(
+                                str(ref.get("source_id") or "") in candidate_assertions
+                                for ref in candidate.get("source_refs", [])
+                            )
+                        )
+                    )
+                    if not (linked_assertions.intersection(candidate_assertions) or same_subject):
+                        continue
+                    conflict_ref = {
+                        "source_type": "contradictions",
+                        "source_id": str(conflict.get("id") or ""),
+                        "resolution_status": str(conflict.get("resolution_status") or ""),
+                        "field": conflict.get("field"),
+                        "description": str(conflict.get("description") or "")[:500],
+                        "effective_from": conflict.get("effective_from"),
+                        "effective_to": conflict.get("effective_to"),
+                        "evidence_ids": list(conflict.get("evidence_ids") or []),
+                    }
+                    conflicts = candidate.setdefault("conflicts", [])
+                    if conflict_ref not in conflicts:
+                        conflicts.append(conflict_ref)
+                    candidate["has_unresolved_conflict"] = True
+                    candidate["state"] = "conflicting_assertions"
+
     ordered = sorted(candidates.values(), key=lambda candidate: (
         candidate["source_type"], candidate["source_id"], candidate["entity_ref"]
     ))
