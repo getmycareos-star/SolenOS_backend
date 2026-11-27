@@ -11495,7 +11495,7 @@ async def companion_message(
                 "Follow the selected response-length target and hard maximum. Generate wording for this exact message."
             )
         # Capture the conversation key while the ORM object is still attached.
-        conversation_session_id = str(session.id)
+        conversation_session_id = str(conversation_session_id)
         # All ORM data needed for this prompt has been copied into JSON/plain
         # strings. Release the read transaction before slow Qwen inference so
         # concurrent Companion requests cannot pin the finite DB pool while
@@ -12971,7 +12971,7 @@ async def companion_message(
         db.rollback()
         raise HTTPException(status_code=401, detail="Your SolenOS session expired or was revoked before this response could be saved")
     current_conversation = db.query(ConversationSession.id).filter(
-        ConversationSession.id == session.id,
+        ConversationSession.id == conversation_session_id,
         ConversationSession.person_id == person_id,
         ConversationSession.caregiver_id == caregiver_id,
         ConversationSession.status == "active",
@@ -12982,7 +12982,7 @@ async def companion_message(
 
     turn_timestamp = datetime.now(timezone.utc)
     user_row = ConversationMessage(
-        session_id=session.id, role="user", content=user_text,
+        session_id=conversation_session_id, role="user", content=user_text,
         guard_verdict=None, safety_note=None, evidence_ids_json="[]",
         source_record_refs_json="[]", created_at=turn_timestamp,
     )
@@ -12993,7 +12993,7 @@ async def companion_message(
         db.flush()
         response_metadata["source_message_id"] = str(user_row.id)
         assistant_row = ConversationMessage(
-            session_id=session.id, role="assistant", content=reply,
+            session_id=conversation_session_id, role="assistant", content=reply,
             guard_verdict=verdict, safety_note=safety_note,
             evidence_ids_json=json.dumps(evidence_ids),
             source_record_refs_json=json.dumps(source_record_refs, ensure_ascii=False),
@@ -13059,7 +13059,7 @@ async def companion_message(
         db, background_tasks, request,
         person_id=person_id,
         caregiver_id=caregiver_id,
-        conversation_id=str(session.id),
+        conversation_id=str(conversation_session_id),
         message_id=str(user_row.id),
         source_text=user_text,
     )
@@ -13069,7 +13069,7 @@ async def companion_message(
     history = [user_row, assistant_row]
     _release_companion_turn_leases(db, request)
     return {
-        "session_id": session.id,
+        "session_id": conversation_session_id,
         "person_id": person_id,
         "source_message_id": str(user_row.id),
         "reply": reply,
@@ -13194,7 +13194,7 @@ def list_conversations(
         next_cursor = {
             "before_last_message_at": last_message_at.isoformat() if last_message_at else None,
             "before_created_at": last_session.created_at.isoformat() if last_session.created_at else None,
-            "before_session_id": last_session.id,
+            "before_session_id": last_conversation_session_id,
         }
     return {
         "person_id": person_id,
@@ -13203,7 +13203,7 @@ def list_conversations(
         "next_cursor": next_cursor,
         "items": [
             {
-                "session_id": session.id,
+                "session_id": conversation_session_id,
                 "person_id": person_id,
                 "title": session.title,
                 "status": session.status,
@@ -13273,7 +13273,7 @@ def conversation_history(
     if (before is None) != (before_id is None):
         raise HTTPException(status_code=422, detail="Both before and before_id are required for history pagination")
 
-    query = db.query(ConversationMessage).filter_by(session_id=session.id)
+    query = db.query(ConversationMessage).filter_by(session_id=conversation_session_id)
     if before is not None and before_id is not None:
         query = query.filter(or_(
             ConversationMessage.created_at < before,
@@ -13399,7 +13399,7 @@ def conversation_history(
         }
 
     return {
-        "session_id": session.id,
+        "session_id": conversation_session_id,
         "person_id": person_id,
         "messages": [serialize_history_message(row) for row in rows],
         "has_more": has_more,
