@@ -7834,7 +7834,12 @@ async def _qwen_chat_with_bounded_context(
         requested_output_tokens = 96
     output_budgets = [requested_output_tokens]
     if allow_output_budget_fallback and requested_output_tokens > 128:
-        output_budgets.append(128)
+        # Preserve the full source-balanced context before returning 413. A
+        # 128-token reservation can still leave the fixed system contract a
+        # few tokens over a 4,096-token runtime's safe input budget. Retry at
+        # the normal 96-token response target, then the 64-token hard floor;
+        # critical-safety turns opt out of this fallback at the call site.
+        output_budgets.extend((128, 96, 64))
 
     last_budget_error: HTTPException | None = None
     for output_tokens in output_budgets:
