@@ -442,20 +442,46 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
 
     candidates: dict[str, dict[str, Any]] = {}
 
-    def add(source_name: str, item: dict[str, Any], key: str, label: str, state: str = "available"):
+    def add(
+        source_name: str,
+        item: dict[str, Any],
+        key: str,
+        label: str,
+        state: str = "available",
+        *,
+        identity_key: str | None = None,
+    ):
         if not key or not label:
             return
-        stable_key = f"{source_name}:{key}"
+        # Multiple accepted assertions can describe different attributes or
+        # versions of one medication. Resolve the care entity by its stable
+        # subject identity, not by assertion-row identity. Keep every source
+        # reference so grouping never discards provenance.
+        stable_key = identity_key or f"{source_name}:{key}"
+        source_ref = {
+            "source_type": source_name,
+            "source_id": str(item.get("id") or key),
+        }
         existing = candidates.get(stable_key)
-        candidate = {
+        if existing is not None:
+            refs = existing.setdefault("source_refs", [])
+            if source_ref not in refs:
+                refs.append(source_ref)
+            labels = existing.setdefault("labels", [])
+            if label[:180] not in labels:
+                labels.append(label[:180])
+            if existing.get("state") != state:
+                existing["state"] = "mixed_source_status"
+            return
+        candidates[stable_key] = {
             "entity_ref": stable_key,
             "source_type": source_name,
             "source_id": str(item.get("id") or key),
+            "source_refs": [source_ref],
             "label": label[:180],
+            "labels": [label[:180]],
             "state": state,
         }
-        if existing is None:
-            candidates[stable_key] = candidate
 
     for source_name, source in (sources or {}).items():
         if not isinstance(source, dict):
@@ -470,16 +496,21 @@ def resolve_care_entity_reference(query: str | None, sources: dict[str, Any]) ->
                 ))
                 if not re.search(r"\b(?:medication|medicine|drug|dose|dosage|prescription|tablet|pill)\b", field, re.I):
                     continue
-                entity_key = ":".join(str(item.get(name) or "") for name in (
-                    "subject_type", "subject_id", "field", "fact_type", "id",
-                ))
+                subject_type = str(item.get("subject_type") or "medication").strip().casefold()
+                subject_id = str(item.get("subject_id") or "").strip()
+                entity_key = ":".join(value for value in (subject_type, subject_id) if value)
+                if not entity_key:
+                    entity_key = f"{source_name}:{item.get('id') or ''}"
                 label = " — ".join(str(item.get(name) or "").strip() for name in (
                     "field", "fact_type", "subject_label", "asserted_value", "fact_value", "value_text",
                 ) if str(item.get(name) or "").strip())
                 state = str(item.get("assertion_status") or item.get("epistemic_status") or item.get("epistemic_state") or "available")
                 if item.get("superseded_by_fact_id") or item.get("superseded_by_observation_id"):
                     state = "superseded_historical"
-                add(source_name, item, entity_key, label, state)
+                add(
+                    source_name, item, entity_key, label, state,
+                    identity_key=f"medication:{entity_key}",
+                )
             elif domain == "appointment" and source_name in {"appointments", "appointment_workspaces"}:
                 label = " — ".join(str(item.get(name) or "").strip() for name in (
                     "title", "provider", "healthcare_org", "scheduled_at", "status",
