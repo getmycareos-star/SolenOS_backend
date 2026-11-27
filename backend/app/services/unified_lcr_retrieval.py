@@ -471,8 +471,8 @@ def build_unified_lcr_context(
         temporal_window = None
     context = build_lcr_context(
         db, str(person_id), caregiver_id=str(caregiver_id),
-        limit_per_source=limit_per_source, query=query, temporal_window=temporal_window,
-        include_all_history=include_all_history,
+        limit_per_source=limit_per_source, query=query, temporal_query=calendar_query,
+        temporal_window=temporal_window, include_all_history=include_all_history,
         source_offsets=source_offsets,
         only_sources=only_sources,
         event_ids=event_ids,
