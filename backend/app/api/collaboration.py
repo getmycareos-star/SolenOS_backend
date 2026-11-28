@@ -76,6 +76,7 @@ from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, Q
 from app.models.ai_output_governance import AIOutputRejection, AISafetyCheck
 from app.services.qwen_system_prompt import SOLENOS_OPERATING_CONTRACT_VERSION
 from app.models.time_location import Appointment
+from app.models.appointment_workspace import AppointmentWorkspaceRecord, AppointmentWorkspaceRevision
 from app.services.qwen_workflows import QwenWorkflow
 from app.services.qwen_gateway import (
     extract_review_candidates,
@@ -13211,6 +13212,13 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "care_assertion": CareAssertion,
         "assertion": CareAssertion,
         "care_handoff": CaregiverHandoff,
+        "caregiver_handoff": CaregiverHandoff,
+        "evidence_observation": EvidenceObservation,
+        "contradiction": Contradiction,
+        "appointment_workspace": AppointmentWorkspaceRecord,
+        "appointment_workspace_stale": AppointmentWorkspaceRecord,
+        "appointment_workspace_currentness_unknown": AppointmentWorkspaceRecord,
+        "appointment_workspace_revision": AppointmentWorkspaceRevision,
         "notification": CareNotification,
         "care_notification": CareNotification,
         "freshness_assessment": EvidenceFreshnessAssessment,
