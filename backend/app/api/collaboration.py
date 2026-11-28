@@ -1,5 +1,6 @@
 import asyncio
 import time as _time
+_monotonic = _time.monotonic
 import base64
 import hashlib
 import io
@@ -1189,7 +1190,7 @@ async def _acquire_companion_turn_lease(
         owner_token = str(uuid.uuid4())
         request.state.companion_turn_lease_owner = owner_token
         request.state.companion_turn_leases = []
-    deadline = _time.monotonic() + max(1.0, wait_timeout_seconds)
+    deadline = _monotonic() + max(1.0, wait_timeout_seconds)
     while True:
         try:
             acquired = db.execute(
@@ -1221,7 +1222,7 @@ async def _acquire_companion_turn_lease(
         if acquired is not None:
             request.state.companion_turn_leases.append(lock_key)
             return
-        if _time.monotonic() >= deadline:
+        if _monotonic() >= deadline:
             raise HTTPException(
                 status_code=409,
                 detail="Another Companion response is still being saved. Please retry this message.",
