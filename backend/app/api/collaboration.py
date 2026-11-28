@@ -68,8 +68,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
-from app.models.uncertainty import OpenQuestion
-from app.models.uncertainty import OpenQuestionAnswerEvent
+from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent, InformationGap, Contradiction, UncertaintyAssessment
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -13191,6 +13190,127 @@ def list_conversations(
     }
 
 
+def _companion_history_source_restrictions(db: Session, person_id: str, rows: list[ConversationMessage]) -> set[str]:
+    """Redact saved assistant answers when any cited source is no longer available to this care recipient.
+
+    Conversation history is durable, but its source references are not an access
+    grant. Re-check every typed reference against the current same-recipient row
+    before returning the associated assistant text. Unknown source types fail
+    closed rather than allowing an unverified reference to disclose old content.
+    """
+    source_models = {
+        "care_event": CareEvent,
+        "event": CareEvent,
+        "care_evidence": EvidenceModel,
+        "evidence": EvidenceModel,
+        "document_extraction": CaptureAnalysis,
+        "document_analysis": CaptureAnalysis,
+        "capture_analysis": CaptureAnalysis,
+        "appointment": Appointment,
+        "care_assertion": CareAssertion,
+        "assertion": CareAssertion,
+        "care_handoff": CaregiverHandoff,
+        "notification": CareNotification,
+        "care_notification": CareNotification,
+        "freshness_assessment": EvidenceFreshnessAssessment,
+        "completeness_assessment": EvidenceCompletenessAssessment,
+        "care_evidence_observation": EvidenceObservation,
+        "care_decision_outcome": CareActionOutcome,
+        "care_correction": Correction,
+        "correction": Correction,
+        "open_question": OpenQuestion,
+        "information_gap": InformationGap,
+        "care_uncertainty": Contradiction,
+        "uncertainty_assessment": UncertaintyAssessment,
+        "care_state_revision": CareStateRevision,
+        "care_delta_run": CareDeltaRun,
+        "care_record_relationship": CareRecordRelationship,
+        "evidence_review": EvidenceReviewRecord,
+        "evidence_claim_assessment": EvidenceClaimAssessment,
+    }
+    metadata_fields = {
+        "source_event_ids": CareEvent,
+        "source_evidence_ids": EvidenceModel,
+        "source_document_analysis_ids": CaptureAnalysis,
+        "source_appointment_ids": Appointment,
+        "source_assertion_ids": CareAssertion,
+        "source_freshness_assessment_ids": EvidenceFreshnessAssessment,
+    }
+    restricted: set[str] = set()
+    references: dict[type, set[str]] = {}
+    references_by_message: dict[str, list[tuple[type, str]]] = {}
+
+    def add_reference(message_id: str, model: type | None, raw_id: object) -> None:
+        record_id = str(raw_id or "").strip()
+        if model is None or not record_id:
+            restricted.add(message_id)
+            return
+        references.setdefault(model, set()).add(record_id)
+        references_by_message.setdefault(message_id, []).append((model, record_id))
+
+    for row in rows:
+        if row.role != "assistant":
+            continue
+        message_id = str(row.id)
+        metadata = _stored_response_metadata(row)
+        try:
+            evidence_ids = json.loads(row.evidence_ids_json or "[]")
+            if not isinstance(evidence_ids, list):
+                raise ValueError("Invalid evidence reference list")
+            for evidence_id in evidence_ids:
+                add_reference(message_id, EvidenceModel, evidence_id)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            restricted.add(message_id)
+
+        for field, model in metadata_fields.items():
+            values = metadata.get(field) or []
+            if not isinstance(values, list):
+                restricted.add(message_id)
+                continue
+            for value in values:
+                add_reference(message_id, model, value)
+
+        try:
+            source_refs = json.loads(row.source_record_refs_json or "[]")
+            if not isinstance(source_refs, list):
+                raise ValueError("Invalid source reference list")
+            for reference in source_refs:
+                if not isinstance(reference, dict):
+                    restricted.add(message_id)
+                    continue
+                record_type = str(reference.get("record_type") or "").strip().casefold()
+                record_id = reference.get("record_id") or reference.get("source_id")
+                add_reference(message_id, source_models.get(record_type), record_id)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            restricted.add(message_id)
+
+    available_by_model: dict[type, set[str]] = {}
+    for model, ids in references.items():
+        try:
+            if model is EvidenceModel:
+                available_rows = _active_person_evidence_query(db, person_id).filter(
+                    EvidenceModel.id.in_(ids),
+                ).all()
+                available_by_model[model] = {str(item.id) for item in available_rows}
+                continue
+            if not hasattr(model, "person_id"):
+                available_by_model[model] = set()
+                continue
+            available_rows = db.query(model.id).filter(
+                model.person_id == str(person_id),
+                model.id.in_(ids),
+            ).all()
+            available_by_model[model] = {str(item[0]) for item in available_rows}
+        except SQLAlchemyError:
+            db.rollback()
+            available_by_model[model] = set()
+
+    for message_id, message_refs in references_by_message.items():
+        if any(record_id not in available_by_model.get(model, set()) for model, record_id in message_refs):
+            restricted.add(message_id)
+    return restricted
+
+
 @router.get("/conversation/{session_id}")
 def conversation_history(
     session_id: str,
@@ -13264,6 +13384,9 @@ def conversation_history(
     page_descending = descending_rows[:limit]
     oldest_in_page = page_descending[-1] if page_descending else None
     rows = list(reversed(page_descending))
+    unavailable_source_message_ids = _companion_history_source_restrictions(
+        db, str(person_id), rows,
+    )
     document_restricted_message_ids: set[str] = set()
     if not can_view_documents:
         candidate_evidence_ids: set[str] = set()
@@ -13323,6 +13446,8 @@ def conversation_history(
             restricted_reason = "This earlier response is unavailable because care-record access has changed."
         elif row.role == "assistant" and str(row.id) in document_restricted_message_ids:
             restricted_reason = "This earlier response is unavailable because document access has changed."
+        elif row.role == "assistant" and str(row.id) in unavailable_source_message_ids:
+            restricted_reason = "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
         if restricted_reason:
             return {
                 "id": row.id,
