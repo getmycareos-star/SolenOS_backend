@@ -69,7 +69,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
-from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent, UncertaintyAssessment
+from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent, UncertaintyAssessment, Contradiction
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
