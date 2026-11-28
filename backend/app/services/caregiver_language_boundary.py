@@ -77,6 +77,18 @@ def _contains_internal_detail(value: object) -> bool:
 
 def caregiver_safe_api_error_detail(status_code: int, detail: object) -> object:
     """Keep useful human validation copy; replace internal or opaque error detail."""
+    if isinstance(detail, dict) and detail.get("code") == "deletion_request_already_open":
+        request = detail.get("request")
+        request_id = request.get("id") if isinstance(request, dict) else None
+        safe_detail = {
+            "code": "deletion_request_already_open",
+            "message": "You already have an open deletion request. Check its status before submitting another.",
+        }
+        if isinstance(request_id, str) and request_id:
+            # Preserve only the opaque reference needed to find the existing
+            # request; do not return the full privacy-request payload.
+            safe_detail["request"] = {"id": request_id}
+        return safe_detail
     if not _contains_internal_detail(detail):
         return detail
     if status_code == 401:
