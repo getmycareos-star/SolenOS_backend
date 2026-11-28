@@ -2,6 +2,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, APIRouter, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail
 from sqlalchemy import text, or_, inspect
 import asyncio
 import hashlib
@@ -287,7 +291,56 @@ def _caregiver_question_text(question):
     prefix = prefixes.get(question.intended_answerer_role or "", "Care question")
     return f"{prefix}: {question.question}"
 
+
 app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def caregiver_http_error_boundary(request: Request, exc: StarletteHTTPException):
+    """Preserve HTTP status/contracts while preventing internal error detail leakage."""
+    safe_detail = caregiver_safe_api_error_detail(exc.status_code, exc.detail)
+    if safe_detail != exc.detail:
+        logger.warning(
+            "Caregiver error detail translated path=%s method=%s status=%s",
+            request.url.path,
+            request.method,
+            exc.status_code,
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=jsonable_encoder({"detail": safe_detail}),
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def caregiver_request_validation_boundary(request: Request, exc: RequestValidationError):
+    """Do not serialize Pydantic internals or submitted values into caregiver responses."""
+    logger.info(
+        "Caregiver request validation failed path=%s method=%s error_count=%s",
+        request.url.path,
+        request.method,
+        len(exc.errors()),
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": "Some information is missing or needs to be corrected. Please review it and try again."},
+    )
+
+
+@app.exception_handler(Exception)
+async def caregiver_unexpected_error_boundary(request: Request, exc: Exception):
+    """Log diagnostics internally and return a stable, non-technical response."""
+    logger.exception(
+        "Unhandled API request failure path=%s method=%s error_type=%s",
+        request.url.path,
+        request.method,
+        type(exc).__name__,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "We couldn’t complete that request. Please try again."},
+    )
 
 # Community is out of scope for the MVP. Enforce the suspension at the ASGI
 # boundary as well as excluding its router, so no duplicate/legacy registration
