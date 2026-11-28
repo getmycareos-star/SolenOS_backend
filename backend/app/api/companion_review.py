@@ -255,6 +255,7 @@ def create_companion_care_update_from_message(
     """Create a review-only care report from an exact caregiver message after explicit confirmation."""
     person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
+    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
     if payload.confirm_care_report is not True:
         raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
     source = (
