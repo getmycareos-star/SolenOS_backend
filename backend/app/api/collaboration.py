@@ -13295,6 +13295,9 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "source_appointment_ids": Appointment,
         "source_assertion_ids": CareAssertion,
         "source_freshness_assessment_ids": EvidenceFreshnessAssessment,
+        "source_contradiction_ids": Contradiction,
+        "source_handoff_ids": CaregiverHandoff,
+        "source_notification_ids": CareNotification,
     }
     restricted: set[str] = set()
     references: dict[type, set[str]] = {}
