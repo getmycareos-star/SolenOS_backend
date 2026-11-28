@@ -9905,15 +9905,6 @@ async def companion_message(
                 ConversationMessage.session_id == replay.get("session_id"),
                 ConversationMessage.role == "user",
             ).first()
-            if replay_message is not None:
-                _queue_companion_care_update_extraction(
-                    db, background_tasks, request,
-                    person_id=person_id,
-                    caregiver_id=caregiver_id,
-                    conversation_id=str(replay.get("session_id")),
-                    message_id=str(replay_message.id),
-                    source_text=replay_message.content,
-                )
             _release_companion_turn_leases(db, request)
             return replay
         # Access may have changed while this request waited behind another turn.
@@ -13075,18 +13066,10 @@ async def companion_message(
             status_code=503,
             detail="Companion response could not be confirmed as persisted. No saved response is confirmed; please retry.",
         ) from exc
-    # Identify possible care updates after the turn pair is committed. The
-    # background worker can create review-only proposals from exact source
-    # quotations; it cannot write a CareAssertion or mutate the LCR.
+    # Ordinary conversation is conversation-only. Caregivers must explicitly
+    # choose “Save as a care note” before the separate review-only extraction
+    # endpoint may create a proposal. A chat turn or retry never queues LCR work.
     care_update_candidates = []
-    _queue_companion_care_update_extraction(
-        db, background_tasks, request,
-        person_id=person_id,
-        caregiver_id=caregiver_id,
-        conversation_id=str(conversation_session_id),
-        message_id=str(user_row.id),
-        source_text=user_text,
-    )
     # The send endpoint returns the newly persisted turn, not an unbounded
     # replay of the complete thread. Older messages are read through the
     # paginated history endpoint.
