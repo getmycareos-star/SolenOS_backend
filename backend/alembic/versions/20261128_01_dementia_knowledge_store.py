@@ -139,7 +139,6 @@ def upgrade() -> None:
     op.create_index("ix_dementia_knowledge_item_source_item", "dementia_knowledge_item_sources", ["knowledge_item_id"])
     op.create_table(
         "dementia_knowledge_reviews",
-        "dementia_knowledge_source_reviews",
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("knowledge_item_id", sa.String(36), sa.ForeignKey("dementia_knowledge_items.id", ondelete="RESTRICT"), nullable=False),
         sa.Column("content_sha256", sa.String(64), nullable=False),
@@ -151,6 +150,19 @@ def upgrade() -> None:
         sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_dementia_knowledge_reviews_item_time", "dementia_knowledge_reviews", ["knowledge_item_id", "reviewed_at"])
+    op.create_table(
+        "dementia_knowledge_source_reviews",
+        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("source_revision_id", sa.String(36), sa.ForeignKey("dementia_knowledge_source_revisions.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column("content_sha256", sa.String(64), nullable=False),
+        sa.Column("decision", sa.String(24), nullable=False),
+        sa.Column("reviewer_id", sa.String(180), nullable=False),
+        sa.Column("reviewer_qualification", sa.String(180), nullable=False),
+        sa.Column("rationale", sa.Text(), nullable=False),
+        sa.Column("review_due_on", sa.Date(), nullable=True),
+        sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+    )
+    op.create_index("ix_dementia_knowledge_source_reviews_revision_time", "dementia_knowledge_source_reviews", ["source_revision_id", "reviewed_at"])
     op.execute("""
         CREATE FUNCTION reject_dementia_knowledge_review_mutation()
         RETURNS trigger AS $
