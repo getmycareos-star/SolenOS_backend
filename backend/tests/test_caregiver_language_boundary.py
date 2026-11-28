@@ -151,3 +151,18 @@ def test_situation_capture_api_does_not_forward_internal_value_errors():
     source = Path("app/main.py").read_text(encoding="utf-8")
     assert 'detail=str(exc)' not in source
     assert "We couldn’t add that update. Please check the information and try again." in source
+
+
+def test_fastapi_error_handlers_apply_the_caregiver_boundary_globally():
+    from pathlib import Path
+
+    source_path = Path("backend/app/main.py")
+    if not source_path.exists():
+        source_path = Path("app/main.py")
+    source = source_path.read_text(encoding="utf-8")
+    assert "@app.exception_handler(StarletteHTTPException)" in source
+    assert "safe_detail = caregiver_safe_api_error_detail(exc.status_code, exc.detail)" in source
+    assert "@app.exception_handler(RequestValidationError)" in source
+    assert '"detail": "Some information is missing or needs to be corrected. Please review it and try again."' in source
+    assert "@app.exception_handler(Exception)" in source
+    assert '"detail": "We couldn’t complete that request. Please try again."' in source
