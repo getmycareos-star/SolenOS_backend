@@ -2019,7 +2019,7 @@ async def post_situation(
     try:
         result = process_situation_input(db, payload)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="We couldn’t add that update. Please check the information and try again.") from exc
 
     # A new accepted care entry resumes only this interaction session, never the
     # underlying care situation lifecycle.
