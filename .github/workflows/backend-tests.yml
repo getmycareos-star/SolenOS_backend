@@ -78,6 +78,22 @@ jobs:
     needs: validation-start
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: solenos_test
+          POSTGRES_PASSWORD: solenos_test
+          POSTGRES_DB: solenos_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U solenos_test -d solenos_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg://solenos_test:solenos_test@127.0.0.1:5432/solenos_test
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -86,7 +102,7 @@ jobs:
         run: docker build -f ci/Dockerfile.backend-tests -t solenos-backend-ci-tests .
 
       - name: Run backend tests and measured benchmarks
-        run: docker run --rm --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace solenos-backend-ci-tests bash /workspace/ci/run-backend-tests.sh
+        run: docker run --rm --network host --env TEST_POSTGRES_URL="$TEST_POSTGRES_URL" --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace solenos-backend-ci-tests bash /workspace/ci/run-backend-tests.sh
 
   postgres-migration:
     needs: validation-start
