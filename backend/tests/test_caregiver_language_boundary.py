@@ -39,6 +39,7 @@ def test_internal_implementation_language_is_rejected(text):
         "The doctor recorded a diagnosis of dementia.",
         "You reported that she slept poorly last night.",
         "The original document says to take one tablet daily.",
+        "A companion visits your mother every afternoon.",
     ],
 )
 def test_legitimate_care_information_is_not_misclassified(text):
