@@ -173,7 +173,10 @@ def submit_privacy_request(
                 status_code=409,
                 detail={
                     "code": "deletion_request_already_open",
-                    "request": _serialize(existing),
+                    # Return only the public reference. The full serialized row
+                    # includes internal lifecycle status values that the global
+                    # caregiver error boundary correctly refuses to expose.
+                    "request": {"id": existing.id},
                     "message": "A care-record erasure request is already awaiting review or fulfilment assessment.",
                 },
             )
