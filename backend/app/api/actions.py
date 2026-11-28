@@ -235,7 +235,7 @@ def complete_action(action_id: str, evidence: ActionCompletionEvidence, db: Sess
     try:
         return lifecycle_service.record_completion(db_action, evidence, db)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t confirm that this action is complete. Check the saved care information and try again.") from exc
 
 
 @router.post("/actions/{action_id}/cancel", response_model=ActionSchema)
