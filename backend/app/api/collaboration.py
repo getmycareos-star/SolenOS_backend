@@ -6139,7 +6139,7 @@ def qwen_claim_extraction(payload: QwenClaimExtractionRequest, request: Request,
         )
         raw = qwen_chat(
             [{"role": "system", "content": system + " " + run_instruction},
-             {"role": "user", "content": "Original source text:\\n" + source}],
+             {"role": "user", "content": "Original source text:\n" + source}],
             response_format="json",
             options={"temperature": 0.2, "top_p": 0.9, "num_predict": 1200},
             audit_context={
@@ -6267,7 +6267,7 @@ def qwen_care_understanding(payload: QwenCareUnderstandingRequest, request: Requ
         "Never diagnose, advise, infer cause, or invent missing details. Empty arrays when unsupported."
     )
     raw = qwen_chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": "Original source text:\\n" + source}],
+        [{"role": "system", "content": system}, {"role": "user", "content": "Original source text:\n" + source}],
         response_format="json",
         options={"temperature": 0, "num_predict": 1600},
         audit_context={
@@ -11186,8 +11186,8 @@ async def companion_message(
             )
             if education_context:
                 system_prompt += (
-                    "\\n\\n" + education_context
-                    + "\\nKeep general education separate from this person's LCR evidence. "
+                    "\n\n" + education_context
+                    + "\nKeep general education separate from this person's LCR evidence. "
                     "If the education source does not answer the question, say what remains unknown. "
                     "When using an educational item, name its source in the caregiver-facing answer."
                 )
