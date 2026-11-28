@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.encoders import jsonable_encoder
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail
+from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail, contains_internal_caregiver_language
 from sqlalchemy import text, or_, inspect
 import asyncio
 import hashlib
@@ -1765,6 +1765,7 @@ async def generate_lcr_orientation(
             not candidate or (max_chars is not None and len(candidate) > max_chars) or (max_words is not None and word_count > max_words)
             or (max_sentences is not None and sentence_count > max_sentences)
             or (is_greeting and word_count < 8)
+            or contains_internal_caregiver_language(candidate)
             or re.search(r"(?i)\b(?:as an ai|language model|system prompt)\b", candidate)
         ):
             return None
@@ -1862,7 +1863,7 @@ async def generate_lcr_orientation(
             else:
                 raise HTTPException(
                     status_code=503,
-                    detail="LCR could not produce a safe, grounded response. Your message was not saved.",
+                    detail="We couldn’t prepare a clear answer just now. Your Care Record has not changed. Please try again.",
                 )
             return {
                 "reply": reply,
