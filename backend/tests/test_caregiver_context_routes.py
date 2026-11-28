@@ -486,7 +486,7 @@ def test_caregiver_perspective_and_observation_routes_are_writable_and_scoped():
     assert isinstance(current_body["source_coverage"], dict)
     current_observation = next(
         item for item in current_body["items"]
-        if item.get("id") == observation.json()["id"]
+        if item.get("id") == direct.json()["id"]
         and item.get("source_collection") == "caregiver_observations"
     )
     assert current_observation["description"] == "Caregiver directly observed the transfer.", (
