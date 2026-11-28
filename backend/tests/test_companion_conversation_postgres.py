@@ -2169,6 +2169,10 @@ def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
     session_id = f"deleted-source-history-{suffix}"
     event_id = f"deleted-source-event-{suffix}"
     assistant_id = f"deleted-source-assistant-{suffix}"
+    user_message_id = f"deleted-source-user-{suffix}"
+    turn_id = str(uuid.uuid4())
+    question = "What did I report about overnight sleep?"
+    request_sha256 = hashlib.sha256(question.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
 
     with Session() as db:
@@ -2191,10 +2195,10 @@ def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
         ))
         db.flush()
         db.add(ConversationMessage(
-            id=f"deleted-source-user-{suffix}",
+            id=user_message_id,
             session_id=session_id,
             role="user",
-            content="What did I report about overnight sleep?",
+            content=question,
             created_at=now,
         ))
         db.add(ConversationMessage(
@@ -2202,11 +2206,18 @@ def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
             session_id=session_id,
             role="assistant",
             content="You reported a change in overnight sleep.",
+            client_turn_id=turn_id,
+            evidence_ids_json="[]",
             source_record_refs_json=json.dumps([{
                 "record_type": "care_event",
                 "record_id": event_id,
                 "relationship": "supports",
             }]),
+            response_metadata_json=json.dumps({
+                "request_sha256": request_sha256,
+                "source_message_id": user_message_id,
+                "ai_generated": True,
+            }),
             created_at=now + timedelta(microseconds=1),
         ))
         db.commit()
@@ -2222,4 +2233,18 @@ def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
     assistant = next(item for item in history.json()["messages"] if item["role"] == "assistant")
     assert assistant["text"] == "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
     assert assistant["source_record_refs"] == []
+
+    replay = client.post(
+        "/api/v1/conversation/message",
+        headers=headers,
+        json={
+            "person_id": person_id,
+            "text": question,
+            "session_id": session_id,
+            "client_turn_id": turn_id,
+        },
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["reply"] == "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+    assert replay.json()["source_record_refs"] == []
 
