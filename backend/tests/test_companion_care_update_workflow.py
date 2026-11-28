@@ -274,7 +274,11 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
                 source_event_ids_json=json.dumps(event_ids),
                 source_evidence_ids_json="[]",
             ))
+            # The generated model output is an independently persisted source
+            # record. Commit it before creating review/proposal rows that carry
+            # restrictive PostgreSQL foreign keys to its ID.
             db.flush()
+            db.commit()
             db.add(QwenSafetyEvaluation(
                 output_id=output_id,
                 job_id=job_id,
