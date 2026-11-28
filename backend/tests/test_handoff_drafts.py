@@ -1385,9 +1385,9 @@ def test_qwen_appointment_briefing_uses_only_lcr_snapshot_and_appointment_contex
     assert request_payload["authoritative_source"] == "Living Care Record"
     assert request_payload["sources"][0]["source_ref"] == "appointments:visit-1"
     assert "appointment briefing" in system_prompt.lower()
-    assert "do not use model memory" in system_prompt.lower()
+    assert "no model memory" in system_prompt.lower()
     assert "target: 150 words; hard maximum: 250" in system_prompt
-    assert observed["options"]["num_predict"] == 768
+    assert observed["options"]["num_predict"] == 160
     assert observed["audit_context"]["person_id"] == "person-1"
     assert observed["audit_context"]["source_refs"] == ["appointments:visit-1"]
     assert result["sections"][0]["supporting_quote"] == "Follow-up visit scheduled."
@@ -1814,7 +1814,7 @@ def test_qwen_handoff_generation_bounds_context_and_attaches_only_selected_sourc
     prompt_sources = json.loads(observed["messages"][1]["content"])["sources"]
     assert result["status"] == "generated"
     assert result["sources_available"] == 10
-    assert result["sources_considered"] == 6
+    assert result["sources_considered"] == 3
     assert len(prompt_sources) == 6
     assert all(len(item["source_text"]) <= 600 for item in prompt_sources)
     assert prompt_sources[0]["source_ref"] == "care_events:event-9"
