@@ -65,6 +65,28 @@ def _proposal_json(proposal: AIOutputLCRProposal) -> dict:
     }
 
 
+def _lock_caregiver_permissions(
+    db: Session,
+    person_id: str,
+    caregiver_id: str,
+    *permissions: str,
+) -> CaregiverAccessGrant:
+    """Lock the active grant while a Companion proposal or decision is committed."""
+    grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    for permission in permissions:
+        if not caregiver_has_permission(grant, permission):
+            raise HTTPException(
+                status_code=403,
+                detail=f"This caregiver does not have permission to {permission.replace('_', ' ')}.",
+            )
+    return grant
+
+
 @router.post("/qwen/{proposal_id}/review")
 def review_qwen_assistance_proposal(
     proposal_id: str,
@@ -255,17 +277,7 @@ def create_companion_care_update_from_message(
 ):
     """Create a review-only care report from an exact caregiver message after explicit confirmation."""
     person_id, caregiver_id = _companion_scope(request, db)
-    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
-    # Serialize proposal creation against concurrent access revocation. The
-    # grant remains locked until the pending proposal is committed.
-    write_grant = db.query(CaregiverAccessGrant).filter(
-        CaregiverAccessGrant.person_id == person_id,
-        CaregiverAccessGrant.caregiver_id == caregiver_id,
-        CaregiverAccessGrant.status == "active",
-        CaregiverAccessGrant.revoked_at.is_(None),
-    ).with_for_update().first()
-    if not caregiver_has_permission(write_grant, "add_evidence"):
-        raise HTTPException(status_code=403, detail="This caregiver does not have permission to add evidence.")
+    _lock_caregiver_permissions(db, person_id, caregiver_id, "view_conversations", "add_evidence")
     if payload.confirm_care_report is not True:
         raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
     source = (
@@ -427,14 +439,14 @@ def review_companion_care_update(
     db: Session = Depends(get_db),
 ):
     person_id, caregiver_id = _companion_scope(request, db)
-    require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
     decision = (payload.decision or "").strip().lower()
     if decision not in {"accept", "correct", "reject", "withdraw"}:
         raise HTTPException(status_code=422, detail="Decision must be accept, correct, reject, or withdraw")
 
+    required_permissions = ["view_conversations"]
     if decision == "accept":
-        require_caregiver_permission(db, person_id, caregiver_id, "view_lcr")
-        require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
+        required_permissions.extend(["view_lcr", "add_evidence"])
+    _lock_caregiver_permissions(db, person_id, caregiver_id, *required_permissions)
     proposal = db.query(AIOutputLCRProposal).filter(
         AIOutputLCRProposal.id == proposal_id,
         AIOutputLCRProposal.person_id == person_id,
