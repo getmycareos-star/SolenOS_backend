@@ -2623,6 +2623,16 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 **({"interpretation_limit": str(lineage["interpretation_limit"])[:220]} if lineage.get("interpretation_limit") else {}),
                 "evidence_ids_considered_count": len(lineage.get("evidence_ids_considered", []))
                 if isinstance(lineage.get("evidence_ids_considered"), list) else 0,
+                "source_groups": [
+                    {
+                        "evidence_ids": [str(value)[:120] for value in group.get("evidence_ids", [])[:8]],
+                        "origin_group_keys": [str(value)[:120] for value in group.get("origin_group_keys", [])[:8]],
+                        "source_independence_status": str(group.get("source_independence_status") or "")[:60],
+                        "basis": str(group.get("basis") or "")[:60],
+                    }
+                    for group in lineage.get("groups", [])[:12]
+                    if isinstance(group, dict)
+                ],
                 "independent_source_pair_count": len(lineage.get("independent_source_pairs", []))
                 if isinstance(lineage.get("independent_source_pairs"), list) else 0,
                 "shared_origin_pair_count": len(lineage.get("shared_origin_pairs", []))
