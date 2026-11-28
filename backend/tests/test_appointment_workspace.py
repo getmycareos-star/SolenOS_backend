@@ -1053,7 +1053,7 @@ def test_structured_source_observation_appears_in_current_care_projection(client
                 'reported_observation', 'caregiver_reported', 'care recipient',
                 'sleep', 'woke twice overnight', 'woke twice overnight',
                 20, 40, 'After the usual evening routine', 'family caregiver',
-                'caregiver report', 0, 'reported as', 'Count not independently verified',
+                'caregiver report', FALSE, 'reported as', 'Count not independently verified',
                 'test_fixture_manual_annotation', 'test-fixture-v1', :caregiver_id
             )
         """), {
@@ -3049,19 +3049,19 @@ def test_current_care_projection_exposes_persisted_outcomes_outside_attention_li
                 person_id VARCHAR(255) NOT NULL,
                 decision_id VARCHAR(255) NOT NULL,
                 outcome_status VARCHAR(80) NOT NULL,
-                observed_at DATETIME,
+                observed_at TIMESTAMP WITH TIME ZONE,
                 description TEXT,
                 evidence_ids JSON,
                 is_intended_outcome BOOLEAN,
-                created_at DATETIME
+                created_at TIMESTAMP WITH TIME ZONE
             )
         """)
         connection.execute(text("""
             INSERT INTO decision_outcomes
               (id, person_id, decision_id, outcome_status, description, evidence_ids, is_intended_outcome, created_at)
             VALUES
-              (:decision_outcome_id, :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', 0, CURRENT_TIMESTAMP),
-              (:other_outcome_id, :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', 0, CURRENT_TIMESTAMP)
+              (:decision_outcome_id, :owner_id, 'owner-decision', 'outcome_reported', 'Caregiver recorded the result', '[]', FALSE, CURRENT_TIMESTAMP),
+              (:other_outcome_id, :other_id, 'other-decision', 'outcome_reported', 'PRIVATE OTHER PERSON RESULT', '[]', FALSE, CURRENT_TIMESTAMP)
         """), {"owner_id": owner["person"]["id"], "other_id": other["person"]["id"], "decision_outcome_id": decision_outcome_id, "other_outcome_id": other_outcome_id})
         connection.execute(text("""
             INSERT INTO care_action_outcomes
