@@ -110,7 +110,7 @@ def test_runtime_contract_preserves_product_boundaries_and_precedence():
         "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item",
         "Never diagnose",
         "Community functionality is disabled",
-        "Use plain American English",
+        "Use plain, natural American English",
     )
     normalized_system = system.casefold()
     for rule in required:
@@ -134,6 +134,9 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
     assembled = apply_solenos_system_contract([])[0]["content"]
     assert "The Living Care Record (LCR) is the application's authoritative record" in assembled
     assert "never bypass access controls or disclose information to unauthorized people" in assembled.casefold()
+    assert "never expose internal service names" in assembled.casefold()
+    assert "machine-readable status values" in assembled.casefold()
+    assert "preserve the exact meaning of reported, observed, confirmed, uncertain, conflicting, missing, corrected, and withdrawn information" in assembled.casefold()
     assert "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item" in assembled
 
 
@@ -189,7 +192,7 @@ def test_personality_precedence_makes_identity_and_traits_invariant_against_spec
 
 
 def test_aggregate_contract_manifest_pins_all_constitution_versions():
-    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.7"
+    assert SOLENOS_OPERATING_CONTRACT_VERSION == "1.8"
     assert "Identity constitution: 2.5" in SOLENOS_OPERATING_CONTRACT_MANIFEST
     assert SOLENOS_PERSONALITY_CONSTITUTION_VERSION == "2.4"
     assert "Personality constitution: 2.4" in SOLENOS_OPERATING_CONTRACT_MANIFEST
