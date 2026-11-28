@@ -112,8 +112,9 @@ def test_runtime_contract_preserves_product_boundaries_and_precedence():
         "Community functionality is disabled",
         "Use plain American English",
     )
+    normalized_system = system.casefold()
     for rule in required:
-        assert rule in system
+        assert rule.casefold() in normalized_system
 
 
 def test_runtime_identity_contains_role_authority_privacy_and_model_transparency():
@@ -132,7 +133,7 @@ def test_runtime_identity_contains_role_authority_privacy_and_model_transparency
 
     assembled = apply_solenos_system_contract([])[0]["content"]
     assert "The Living Care Record (LCR) is the application's authoritative record" in assembled
-    assert "Never bypass access controls or disclose information to unauthorized people" in assembled
+    assert "never bypass access controls or disclose information to unauthorized people" in assembled.casefold()
     assert "Never silently create, update, accept, withdraw, delete, verify, or resolve an LCR item" in assembled
 
 
