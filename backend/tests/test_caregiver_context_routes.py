@@ -771,7 +771,7 @@ def test_change_item_appends_same_person_fact_revision():
     assert [row["revision_number"] for row in revisions.json()] == [3, 2, 1]
     assert revisions.json()[0]["current_payload"]["fact_value"] == "needs daily support with supervision"
     assert revisions.json()[0]["current_payload"]["fact_type"] == "care_need"
-    assert revisions.json()[1]["previous_payload"]["fact_value"] == "needs daily support"
+    assert revisions.json()[0]["previous_payload"]["fact_value"] == "needs daily support"
     assert revisions.json()[1]["previous_payload"]["fact_type"] == "care_need"
     assert revisions.json()[2]["current_payload"]["fact_value"] == "needs support"
     timeline = client.get("/api/v1/care-continuity/record-revisions", headers=headers)
