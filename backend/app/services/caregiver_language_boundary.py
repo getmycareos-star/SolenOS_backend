@@ -17,7 +17,7 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"ollama|qwen(?: model)?|(?:ai|solenos) companion|ask solenos|companion (?:chat|conversation|feature|page)|fastapi|sqlalchemy|alembic|tika|tesseract|"
             r"backend|frontend|endpoint|payload|schema|api|json|ocr|"
             r"database|postgres(?:ql)?|sqlite|telemetry|inference pipeline|"
-            r"retrieval pipeline|extraction pipeline|migration|idempotent)\b",
+            r"retrieval pipeline|extraction pipeline|migration|idempotent|traceback|stack trace|internal server error|sqlalchemy error|psycopg|asyncpg|sqlstate|constraint violation|syntax error|connection refused|connection reset|relation does not exist|column does not exist|file not found|permission denied|exception(?: type)?|attributeerror|typeerror|valueerror|keyerror|runtimeerror|modulenotfounderror)\b",
             re.IGNORECASE,
         ),
     ),
@@ -63,3 +63,30 @@ def caregiver_language_violations(text: str) -> tuple[str, ...]:
 def contains_internal_caregiver_language(text: str) -> bool:
     """Whether generated caregiver-facing text contains known internal language."""
     return bool(caregiver_language_violations(text))
+
+
+def _contains_internal_detail(value: object) -> bool:
+    if isinstance(value, str):
+        return contains_internal_caregiver_language(value)
+    if isinstance(value, dict):
+        return any(_contains_internal_detail(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_contains_internal_detail(item) for item in value)
+    return False
+
+
+def caregiver_safe_api_error_detail(status_code: int, detail: object) -> object:
+    """Keep useful human validation copy; replace internal or opaque error detail."""
+    if not _contains_internal_detail(detail):
+        return detail
+    if status_code == 401:
+        return "Your session may have expired. Please sign in again."
+    if status_code == 403:
+        return "You don’t have access to that information."
+    if status_code == 404:
+        return "We couldn’t find that information."
+    if status_code == 413:
+        return "The files are too large. Choose fewer or smaller files and try again."
+    if status_code == 422:
+        return "We couldn’t process that information. Please check it and try again."
+    return "We couldn’t complete that request. Please try again."
