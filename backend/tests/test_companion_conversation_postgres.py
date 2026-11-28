@@ -969,9 +969,19 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
     turn_id = str(uuid.uuid4())
     source_message_id = f"source-{suffix}"
     assistant_message_id = f"assistant-{suffix}"
+    evidence_id = f"replay-evidence-{suffix}"
+    question = "Current caregiver question"
+    request_sha256 = hashlib.sha256(question.encode("utf-8")).hexdigest()
     now = datetime.now(timezone.utc)
 
     with Session() as db:
+        db.add(Evidence(
+            id=evidence_id,
+            person_id=person_id,
+            type="note",
+            source_text="The original source cited by the saved assistant answer.",
+            uploaded_by_caregiver_id=caregiver_id,
+        ))
         db.add(ConversationSession(
             id=session_id, person_id=person_id, caregiver_id=caregiver_id,
             title="Replay bounded history", status="active", created_at=now,
@@ -985,14 +995,20 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
             ))
         db.add(ConversationMessage(
             id=source_message_id, session_id=session_id, role="user",
-            content="Current caregiver question", created_at=now + timedelta(seconds=26),
+            content=question, created_at=now + timedelta(seconds=26),
         ))
         db.add(ConversationMessage(
             id=assistant_message_id, session_id=session_id, role="assistant",
             content="Current grounded response", client_turn_id=turn_id,
+            evidence_ids_json=json.dumps([evidence_id]),
+            source_record_refs_json=json.dumps([{
+                "record_type": "evidence",
+                "record_id": evidence_id,
+            }]),
             response_metadata_json=json.dumps({
-                "request_sha256": "stable-request-fingerprint",
+                "request_sha256": request_sha256,
                 "source_message_id": source_message_id,
+                "source_evidence_ids": [evidence_id],
                 "ai_generated": True,
             }),
             created_at=now + timedelta(seconds=26, microseconds=1),
@@ -1002,7 +1018,7 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
         replay = collaboration._companion_replay_response(
             db,
             client_turn_id=turn_id,
-            request_sha256="stable-request-fingerprint",
+            request_sha256=request_sha256,
             person_id=person_id,
             caregiver_id=caregiver_id,
             requested_session_id=session_id,
@@ -1013,6 +1029,32 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
             "Current caregiver question",
             "Current grounded response",
         ]
+
+    with Session() as db:
+        deleted_evidence = db.query(Evidence).filter_by(id=evidence_id).one()
+        deleted_evidence.evidence_status = "deleted_by_caregiver"
+        db.commit()
+
+    replay_response = client.post(
+        "/api/v1/conversation/message",
+        headers={"Authorization": f"Bearer {created['access_token']}"},
+        json={
+            "person_id": person_id,
+            "text": question,
+            "session_id": session_id,
+            "client_turn_id": turn_id,
+        },
+    )
+    assert replay_response.status_code == 200, replay_response.text
+    replay_body = replay_response.json()
+    assert replay_body["idempotent_replay"] is True
+    assert replay_body["reply"] == (
+        "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+    )
+    assert replay_body["guard_verdict"] == "access_restricted"
+    assert replay_body["evidence_ids"] == []
+    assert replay_body["source_record_refs"] == []
+    assert replay_body["source_evidence_ids"] == []
 
 
 def test_concurrent_companion_retries_with_same_turn_id_run_inference_once(monkeypatch):
