@@ -165,6 +165,12 @@ def validate_knowledge_item(item: KnowledgeItem) -> tuple[str, ...]:
     if not item.title.strip() or not item.content.strip():
         defects.append("empty_content")
     if item.status == KnowledgeStatus.APPROVED:
+        if any(
+            SOURCE_BY_ID[source_id].status != SourceStatus.REVIEWED
+            for source_id in item.source_ids
+            if source_id in SOURCE_BY_ID
+        ):
+            defects.append("source_not_reviewed")
         if not item.reviewed_by or not item.reviewed_on:
             defects.append("approval_without_reviewer")
         if not item.review_due_on:
