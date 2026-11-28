@@ -81,3 +81,34 @@ def test_ordinary_companion_conversation_checks_every_final_reply():
     assert "if contains_internal_caregiver_language(reply):" in companion_message
     assert "Companion final response rejected by caregiver-language boundary" in companion_message
     assert "No reply was saved; please retry." in companion_message
+
+
+@pytest.mark.parametrize(
+    ("status_code", "detail", "expected"),
+    [
+        (401, "JWT signature verification failed", "Your session may have expired. Please sign in again."),
+        (403, "caregiver_access_grant_id is missing", "You don’t have access to that information."),
+        (404, "SQLAlchemy: relation does not exist", "We couldn’t find that information."),
+        (413, "Upload provider returned a payload error", "The files are too large. Choose fewer or smaller files and try again."),
+        (422, "Pydantic validation failed for person_id", "We couldn’t process that information. Please check it and try again."),
+        (500, "psycopg connection refused", "We couldn’t complete that request. Please try again."),
+    ],
+)
+def test_api_error_boundary_replaces_internal_details_without_changing_status(status_code, detail, expected):
+    from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail
+
+    assert caregiver_safe_api_error_detail(status_code, detail) == expected
+
+
+def test_api_error_boundary_preserves_plain_caregiver_validation_copy():
+    from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail
+
+    detail = "Please choose a date before continuing."
+    assert caregiver_safe_api_error_detail(422, detail) == detail
+
+
+def test_api_error_boundary_scans_nested_error_details():
+    from app.services.caregiver_language_boundary import caregiver_safe_api_error_detail
+
+    detail = {"message": "The request failed", "context": ["Missing person_id", "SQLSTATE 23505"]}
+    assert caregiver_safe_api_error_detail(500, detail) == "We couldn’t complete that request. Please try again."
