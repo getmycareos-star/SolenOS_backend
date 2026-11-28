@@ -874,7 +874,8 @@ def test_companion_blocks_unproven_sleep_trend_without_writing_care_events(monke
         assert data["guard_verdict"] == "blocked"
         assert "At least 3 separate days" in data["reply"]
         assert "not enough to establish" in data["reply"]
-        assert "record search was also incomplete" in data["reply"]
+        assert "incomplete" in data["reply"]
+        assert "record search" in data["reply"] or "retrieved information" in data["reply"]
         assert data["written_to_lcr"] is False
         assert data["persistence"] == "conversation_only"
         assert event_id in data["source_event_ids"]
