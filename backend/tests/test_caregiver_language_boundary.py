@@ -16,7 +16,7 @@ from app.services.caregiver_language_boundary import (
         "The source_id is 12345.",
         "Confidence scores: 0.82.",
         "Hash: a9f1c2d3.",
-        "The Companion can answer questions about care.",
+        "The AI Companion can answer questions about care.",
         "FastAPI returned a response payload.",
         "The person_id is missing from the request.",
         "Document processing_failed.",
