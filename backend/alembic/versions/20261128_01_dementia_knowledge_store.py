@@ -151,6 +151,46 @@ def upgrade() -> None:
         sa.Column("reviewed_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
     )
     op.create_index("ix_dementia_knowledge_reviews_item_time", "dementia_knowledge_reviews", ["knowledge_item_id", "reviewed_at"])
+    op.execute("""
+        CREATE FUNCTION reject_dementia_knowledge_review_mutation()
+        RETURNS trigger AS $
+        BEGIN
+            RAISE EXCEPTION 'Dementia knowledge review records are append-only';
+        END;
+        $ LANGUAGE plpgsql
+    """)
+    op.execute("""
+        CREATE TRIGGER trg_dementia_knowledge_reviews_immutable
+        BEFORE UPDATE OR DELETE ON dementia_knowledge_reviews
+        FOR EACH ROW EXECUTE FUNCTION reject_dementia_knowledge_review_mutation()
+    """)
+    op.execute("""
+        CREATE TRIGGER trg_dementia_knowledge_source_reviews_immutable
+        BEFORE UPDATE OR DELETE ON dementia_knowledge_source_reviews
+        FOR EACH ROW EXECUTE FUNCTION reject_dementia_knowledge_review_mutation()
+    """)
+    op.execute("""
+        CREATE FUNCTION protect_dementia_knowledge_source_revision_content()
+        RETURNS trigger AS $
+        BEGIN
+            IF NEW.source_id IS DISTINCT FROM OLD.source_id
+               OR NEW.source_version IS DISTINCT FROM OLD.source_version
+               OR NEW.content_text IS DISTINCT FROM OLD.content_text
+               OR NEW.content_sha256 IS DISTINCT FROM OLD.content_sha256
+               OR NEW.extraction_method IS DISTINCT FROM OLD.extraction_method
+               OR NEW.retrieved_at IS DISTINCT FROM OLD.retrieved_at
+               OR NEW.publisher_published_on IS DISTINCT FROM OLD.publisher_published_on THEN
+                RAISE EXCEPTION 'Ingested dementia knowledge source content is immutable; ingest a new revision';
+            END IF;
+            RETURN NEW;
+        END;
+        $ LANGUAGE plpgsql
+    """)
+    op.execute("""
+        CREATE TRIGGER trg_dementia_knowledge_source_revision_content_immutable
+        BEFORE UPDATE ON dementia_knowledge_source_revisions
+        FOR EACH ROW EXECUTE FUNCTION protect_dementia_knowledge_source_revision_content()
+    """)
 
     domains = [dict(domain_id=x[0], title=x[1], description=x[2], display_order=x[3]) for x in DOMAINS]
     sources = [dict(source_id=x[0], publisher=x[1], title=x[2], canonical_url=x[3], evidence_class=x[4], jurisdiction=x[5], published_on=x[6], publisher_reviewed_on=x[7], status=x[8], scope=x[9]) for x in SOURCES]
@@ -163,6 +203,11 @@ def downgrade() -> None:
     if bind.dialect.name != "postgresql":
         return
     inspector = inspect(bind)
+    op.execute("DROP TRIGGER IF EXISTS trg_dementia_knowledge_source_revision_content_immutable ON dementia_knowledge_source_revisions")
+    op.execute("DROP FUNCTION IF EXISTS protect_dementia_knowledge_source_revision_content()")
+    op.execute("DROP TRIGGER IF EXISTS trg_dementia_knowledge_source_reviews_immutable ON dementia_knowledge_source_reviews")
+    op.execute("DROP TRIGGER IF EXISTS trg_dementia_knowledge_reviews_immutable ON dementia_knowledge_reviews")
+    op.execute("DROP FUNCTION IF EXISTS reject_dementia_knowledge_review_mutation()")
     for table in (
         "dementia_knowledge_reviews",
         "dementia_knowledge_item_sources",
