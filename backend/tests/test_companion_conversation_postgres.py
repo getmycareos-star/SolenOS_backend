@@ -262,6 +262,29 @@ def test_companion_history_and_source_references_survive_new_login_and_remain_sc
         assert stored_session.caregiver_id == caregiver_id
         assert json.loads(stored_message.source_record_refs_json) == source_refs
 
+    # A persisted conversation must not keep disclosing an assistant answer
+    # after one of the evidence records it cited has been deleted.
+    with Session() as db:
+        deleted_evidence = db.query(Evidence).filter_by(id=f"evidence-{suffix}").one()
+        deleted_evidence.evidence_status = "deleted_by_caregiver"
+        db.commit()
+
+    after_source_deletion = client.get(
+        f"/api/v1/conversation/{session_id}", headers=fresh_headers,
+    )
+    assert after_source_deletion.status_code == 200, after_source_deletion.text
+    redacted_message = next(
+        row for row in after_source_deletion.json()["messages"] if row["id"] == message_id
+    )
+    assert redacted_message["guard_verdict"] == "access_restricted"
+    assert redacted_message["text"] == (
+        "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+    )
+    assert redacted_message["evidence_ids"] == []
+    assert redacted_message["source_record_refs"] == []
+    assert redacted_message["source_event_ids"] == []
+    assert redacted_message["source_evidence_ids"] == []
+
 def test_companion_output_validation_audit_records_pass_and_rejection_without_raw_content():
     suffix = uuid.uuid4().hex[:10]
     client = TestClient(app)
