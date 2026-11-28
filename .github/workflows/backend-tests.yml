@@ -584,6 +584,9 @@ jobs:
       - name: Run persisted change-pattern lifecycle tests against PostgreSQL
         run: python -m pytest backend/tests/test_pattern_postgres_integration.py -q -vv
 
+      - name: Verify governed dementia knowledge lifecycle and Companion grounding on PostgreSQL
+        run: python -m pytest backend/tests/test_dementia_knowledge_postgres.py backend/tests/test_dementia_knowledge.py -q -vv
+
       - name: Verify document medication conflict questions are source-backed on PostgreSQL
         run: python -m pytest backend/tests/test_document_lifecycle_postgres.py::test_postgres_document_medication_conflict_creates_professional_question_without_changing_medication -q -vv
       - name: Verify evidence-grounded historical reconstruction and source isolation on PostgreSQL
