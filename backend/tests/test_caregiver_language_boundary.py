@@ -112,3 +112,18 @@ def test_api_error_boundary_scans_nested_error_details():
 
     detail = {"message": "The request failed", "context": ["Missing person_id", "SQLSTATE 23505"]}
     assert caregiver_safe_api_error_detail(500, detail) == "We couldn’t complete that request. Please try again."
+
+
+def test_read_only_lcr_orientation_rejects_internal_language_before_returning_reply():
+    from pathlib import Path
+
+    source_path = Path("backend/app/main.py")
+    if not source_path.exists():
+        source_path = Path("app/main.py")
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index('@situation_router.post("/lcr/orientation")')
+    end = source.index("\n@situation_router.", start + 1)
+    endpoint = source[start:end]
+    assert "or contains_internal_caregiver_language(candidate)" in endpoint
+    assert "We couldn’t prepare a clear answer just now." in endpoint
+    assert "LCR could not produce a safe, grounded response" not in endpoint
