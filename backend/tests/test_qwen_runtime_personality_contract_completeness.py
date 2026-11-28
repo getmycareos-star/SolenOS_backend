@@ -160,12 +160,12 @@ def test_all_enabled_qwen_workflows_receive_the_same_compact_identity_and_person
         for trait in SOLENOS_PERSONALITY_CHARACTERISTICS:
             anchors = SOLENOS_PERSONALITY_RUNTIME_ANCHORS[trait]
             assert f"## {SOLENOS_PERSONALITY_RUNTIME_HEADINGS[trait]}" in system, (workflow, trait)
+            # Detailed violation and verification cases remain in the
+            # machine-readable acceptance contract, not every model prompt.
             for field, label in (
                 ("observable_behaviors", "Behaviour: "),
                 ("required_context", "Context: "),
                 ("prohibited_behaviors", "Prohibited: "),
-                ("violation_conditions", "Violation: "),
-                ("verification_cases", "Test: "),
             ):
                 assert label + anchors[field] in system, (workflow, trait, field)
 
