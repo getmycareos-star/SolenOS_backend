@@ -462,8 +462,16 @@ def review_knowledge_item(
         if not linked:
             raise ValueError("approved_knowledge_requires_source_revisions")
         for link, revision, source in linked:
+            latest_revision = db.query(DementiaKnowledgeSourceRevision).filter(
+                DementiaKnowledgeSourceRevision.source_id == source.source_id
+            ).order_by(
+                DementiaKnowledgeSourceRevision.retrieved_at.desc(),
+                DementiaKnowledgeSourceRevision.id.desc(),
+            ).first()
             if (
-                revision.review_status != SourceStatus.REVIEWED
+                latest_revision is None
+                or latest_revision.id != revision.id
+                or revision.review_status != SourceStatus.REVIEWED
                 or revision.reviewed_at is None
                 or revision.reviewed_at > timestamp
                 or not revision.reviewer_qualification
@@ -548,8 +556,16 @@ def retrieve_approved_knowledge(
         sources = []
         valid = True
         for link, revision, source in linked:
+            latest_revision = db.query(DementiaKnowledgeSourceRevision).filter(
+                DementiaKnowledgeSourceRevision.source_id == source.source_id
+            ).order_by(
+                DementiaKnowledgeSourceRevision.retrieved_at.desc(),
+                DementiaKnowledgeSourceRevision.id.desc(),
+            ).first()
             if (
-                source.status != SourceStatus.REVIEWED
+                latest_revision is None
+                or latest_revision.id != revision.id
+                or source.status != SourceStatus.REVIEWED
                 or revision.review_status != SourceStatus.REVIEWED
                 or revision.reviewed_at is None
                 or revision.reviewed_at > datetime.now(timezone.utc)
