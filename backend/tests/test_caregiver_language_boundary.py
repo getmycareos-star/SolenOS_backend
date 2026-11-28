@@ -143,3 +143,11 @@ def test_action_completion_does_not_return_internal_lifecycle_exception_text():
     endpoint = source[start:end]
     assert "detail=str(exc)" not in endpoint
     assert "We couldn’t confirm that this action is complete." in endpoint
+
+
+def test_situation_capture_api_does_not_forward_internal_value_errors():
+    from pathlib import Path
+
+    source = Path("app/main.py").read_text(encoding="utf-8")
+    assert 'detail=str(exc)' not in source
+    assert "We couldn’t add that update. Please check the information and try again." in source
