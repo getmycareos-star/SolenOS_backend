@@ -557,6 +557,7 @@ def test_lcr_event_evidence_prefix_resolves_to_persisted_event_type():
         ),
         "record_status": None,
         "related_evidence_ids": [],
+        "person_id": None,
         "reported_by": None,
         "occurred_at": None,
         "recorded_at": None,
