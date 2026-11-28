@@ -13287,6 +13287,7 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "evidence_claim_assessment": EvidenceClaimAssessment,
     }
     dynamic_source_names = {
+        "care_record": "living_record",
         "lcr_record": "living_record",
         "living_care_record": "living_record",
         "care_fact": "facts",
