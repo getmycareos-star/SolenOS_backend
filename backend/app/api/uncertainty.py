@@ -50,7 +50,7 @@ def create_gap(gap: InformationGapCreate, engine: UncertaintyEngine = Depends(ge
     try:
         return engine.create_information_gap(gap)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
 
 
 @router.get("/gaps/{person_id}", response_model=List[InformationGap])
@@ -76,7 +76,7 @@ def update_gap(
     try:
         result = engine.update_information_gap(gap_id, update)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
     if not result:
         raise HTTPException(status_code=404, detail="Information gap not found")
     return result
@@ -87,7 +87,7 @@ def create_question(question: OpenQuestionCreate, engine: UncertaintyEngine = De
     try:
         return engine.create_open_question(question)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
 
 
 @router.get("/question-quality")
@@ -235,7 +235,7 @@ def update_question(
     try:
         result = engine.update_open_question(question_id, update)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
     if not result:
         raise HTTPException(status_code=404, detail="Open question not found")
     return result
@@ -489,7 +489,7 @@ def create_contradiction(
     try:
         return engine.create_contradiction(contradiction)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
 
 
 @router.get("/contradictions/{person_id}", response_model=List[Contradiction])
@@ -515,7 +515,7 @@ def update_contradiction(
     try:
         result = engine.update_contradiction(contradiction_id, update)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
     if not result:
         raise HTTPException(status_code=404, detail="Contradiction not found")
     return result
@@ -820,7 +820,7 @@ def analyze_and_persist_uncertainty(
             source_access="available",
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail="We couldn’t update that care information. Please check the details and try again.") from exc
 
     analysis["source_lineage_scope"] = {
         "status": "truncated" if lineage_scope["truncated"] else "bounded_closure_loaded",
