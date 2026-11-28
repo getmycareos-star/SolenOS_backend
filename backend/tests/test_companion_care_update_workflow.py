@@ -274,6 +274,7 @@ def test_source_backed_qwen_summary_requires_review_and_reconciles_all_sources(m
                 source_event_ids_json=json.dumps(event_ids),
                 source_evidence_ids_json="[]",
             ))
+            db.flush()
             db.add(QwenSafetyEvaluation(
                 output_id=output_id,
                 job_id=job_id,
