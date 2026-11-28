@@ -91,6 +91,7 @@ from app.services.unified_lcr_retrieval import (
     resolve_care_entity_reference,
 )
 from app.services.dementia_knowledge import (
+    build_companion_knowledge_provenance,
     format_approved_knowledge_for_companion,
     retrieve_approved_knowledge,
 )
@@ -3269,6 +3270,7 @@ def _companion_replay_response(
         "freshness_source_status": metadata.get("freshness_source_status", "not_recorded"),
         "source_record_refs": source_record_refs,
         "claim_provenance": metadata.get("claim_provenance", {"coverage": "not_recorded", "claims": []}),
+        "dementia_knowledge": metadata.get("dementia_knowledge", {"status": "not_recorded", "items": []}),
         "lcr_context_coverage": metadata.get("lcr_context_coverage", {}),
         "ai_generated": metadata.get("ai_generated", assistant.guard_verdict == "passed"),
         "response_mode": metadata.get("response_mode"),
@@ -9764,6 +9766,8 @@ async def companion_message(
         raise HTTPException(status_code=403, detail="This session is not authorised for that care record")
 
     user_text = payload.text.strip()
+    dementia_knowledge_items: list[dict] = []
+    dementia_knowledge_status = "not_included"
     # Always initialize optional prompt sections before any conditional retrieval path.
     conversation_context_lines: list[str] = []
     caregiver_question_queue_lines: list[str] = []
@@ -11159,14 +11163,7 @@ async def companion_message(
             caregiver_guidance = _caregiver_interaction_guidance(user_text)
             if caregiver_guidance:
                 system_prompt += " " + caregiver_guidance
-        dementia_knowledge_items = []
-        dementia_knowledge_status = "not_included"
-        if (
-            not identity_question
-            and not social_only
-            and not emergency
-            and payload.workflow in shared_lcr_workflows
-        ):
+        if not identity_question and not social_only and not emergency:
             if inspect(db.get_bind()).has_table("dementia_knowledge_items"):
                 try:
                     dementia_knowledge_items = list(
@@ -13012,6 +13009,10 @@ async def companion_message(
             if low_capacity_support_fallback_used else "model_or_grounded_fallback"
         ),
         "claim_provenance": claim_provenance,
+        "dementia_knowledge": build_companion_knowledge_provenance(
+            [] if response_was_grounding_fallback else dementia_knowledge_items,
+            status="not_included" if response_was_grounding_fallback else dementia_knowledge_status,
+        ),
     }
     # Lease ownership is a fencing token: a request whose lease expired
     # or was replaced must never commit a late response over a newer turn.
@@ -13162,6 +13163,7 @@ async def companion_message(
         "freshness_source_status": freshness_source_status,
         "source_record_refs": source_record_refs,
         "claim_provenance": claim_provenance,
+        "dementia_knowledge": response_metadata["dementia_knowledge"],
         "lcr_context_coverage": lcr_context_coverage,
         "retrieval_receipt": lcr_context_coverage.get("retrieval_receipt", {
             "schema_version": "1",
@@ -13691,6 +13693,7 @@ def conversation_history(
             "response_mode": metadata.get("response_mode"),
             "safety_note": row.safety_note,
             "claim_provenance": _stored_claim_provenance(row),
+            "dementia_knowledge": metadata.get("dementia_knowledge", {"status": "not_recorded", "items": []}),
         }
 
     return {
