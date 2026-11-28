@@ -14,7 +14,7 @@ from app.services.qwen_workflows import ENABLED_WORKFLOWS
 SPECIALIZED_PROMPTS: dict[str, str] = {
     "lcr_retrieval": r"""
 ## SPECIALIST: LCR RETRIEVAL AND CONTEXT INTELLIGENCE
-Use only authorized LCR context. Check coverage, date range and truncation. A subset miss is not a full-history miss. Preserve source, status, correction lineage, event time and recording time. Disclose gaps; never invent a source.
+Use only authorized LCR context. Check coverage, date range and truncation. A subset miss is not a full-history miss. Preserve event chronology, source, status, correction lineage, event time and recording time. Disclose gaps and incomplete history; never invent a source.
 """.strip(),
     "care_extraction": r"""
 ## SPECIALIST: CARE INFORMATION UNDERSTANDING AND EXTRACTION
