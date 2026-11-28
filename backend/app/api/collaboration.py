@@ -107,7 +107,7 @@ from app.services.document_binary_storage import (
 
 from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
-from app.services.companion_care_updates import proposal_payload, process_companion_care_update_message
+from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
 from app.services.evidence_lineage import build_evidence_lineage, load_evidence_lineage_scope
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
@@ -1403,45 +1403,6 @@ def _release_companion_turn_leases(db: Session, request: Request) -> None:
     except Exception:
         db.rollback()
         logger.exception("Companion turn lease release deferred to request teardown")
-
-
-def _queue_companion_care_update_extraction(
-    db: Session,
-    background_tasks: BackgroundTasks,
-    request: Request,
-    *,
-    person_id: str,
-    caregiver_id: str,
-    conversation_id: str,
-    message_id: str,
-    source_text: str,
-) -> None:
-    """Queue exact-source proposal extraction for a persisted caregiver message."""
-    text_value = (source_text or "").strip()
-    if (
-        not text_value
-        or is_critical_safety_message(text_value)
-        or _is_casual_greeting(text_value)
-        or _is_companion_identity_question(text_value)
-        or resolve_response_length_policy(text_value).intent == "simple_acknowledgement"
-    ):
-        return
-    anonymous_session_id = getattr(request.state, "anonymous_session_id", None)
-    if not anonymous_session_id:
-        return
-    try:
-        background_tasks.add_task(
-            process_companion_care_update_message,
-            db.get_bind(),
-            person_id=person_id,
-            caregiver_id=caregiver_id,
-            conversation_id=conversation_id,
-            message_id=message_id,
-            source_text=text_value,
-            anonymous_session_id=str(anonymous_session_id),
-        )
-    except Exception:
-        logger.exception("Companion care-update identification could not be queued")
 
 
 def _companion_scope(request: Request, db: Session) -> tuple[str, str]:
