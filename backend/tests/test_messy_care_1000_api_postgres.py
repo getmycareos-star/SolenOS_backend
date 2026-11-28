@@ -1446,10 +1446,17 @@ def test_postgres_as_of_projection_preserves_person_scoped_review_and_freshness_
             claim_rows = history["claim_assessments"]
             assert [row["assessment_id"] for row in claim_rows] == [
                 f"asof-claim-assessment-before-{suffix}",
+                f"asof-conflict-claim-assessment-{suffix}",
+                f"asof-foreign-reviewer-claim-assessment-{suffix}",
                 f"asof-claim-assessment-before-v2-{suffix}",
             ]
-            assert claim_rows[1]["supersedes_assessment_id"] == f"asof-claim-assessment-before-{suffix}"
-            assert claim_rows[1]["superseded_by_claim_id"] == claim_v2.id
+            # Same-person conflict history remains visible; a reviewer from a
+            # different care recipient is retained as unverified, not trusted.
+            assert claim_rows[1]["status"] == "conflicting"
+            assert claim_rows[2]["reviewed_by_caregiver_id"] is None
+            assert claim_rows[2]["reviewer_scope_validation"] == "reviewer_not_verified"
+            assert claim_rows[3]["supersedes_assessment_id"] == f"asof-claim-assessment-before-{suffix}"
+            assert claim_rows[3]["superseded_by_claim_id"] == claim_v2.id
             assert [link["evidence_id"] for link in claim_rows[0]["evidence_links"]] == [evidence.id]
 
             assert history["freshness_assessments_status"] == "available"
