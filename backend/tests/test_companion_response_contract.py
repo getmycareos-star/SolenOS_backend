@@ -961,7 +961,7 @@ def test_companion_reuses_prior_assistant_turns_as_non_evidence_context(monkeypa
         prompt = captured["messages"][-1]["content"]
         assert "Prior caregiver message from another Companion session" in prompt
         assert "We discussed Mum's sleep after the appointment." in prompt
-        assert "Prior SolenOS Companion reply from another session" in prompt
+        assert "Prior assistant conversation (conversation context only; not care evidence or an LCR record)" in prompt
         assert "I said the earlier discussion described Mum's sleep as unsettled." in prompt
         assert "conversation context only; not care evidence or an LCR record" in prompt
         assert response.json()["written_to_lcr"] is False
@@ -1381,7 +1381,7 @@ def test_companion_prompt_prioritizes_direct_answers_and_separates_chat_from_car
         )
         assert response.status_code == 200, response.text
         prompt = captured["messages"][0]["content"]
-        assert "Answer the caregiver's actual question first in plain, natural language." in prompt
+        assert "Answer the caregiver's actual question first" in prompt
         assert "never treat chat history as proof" in prompt.casefold()
         assert "This is the caregiver's first persisted Companion conversation." in prompt
         assert response.json()["written_to_lcr"] is False
@@ -1492,7 +1492,8 @@ def test_companion_withholds_unsupported_live_trend_claim_when_only_one_dated_ob
         data = response.json()
         assert data["ai_generated"] is False
         assert data["written_to_lcr"] is False
-        assert "no dated sleep observations within the last month" in data["reply"].casefold()
+        assert "couldn't verify that all relevant saved history was reviewed" in data["reply"].casefold()
+        assert "not enough information to establish a pattern" in data["reply"].casefold()
         assert event_id in data["source_event_ids"]
 
         db = TestingSessionLocal()
