@@ -2318,6 +2318,7 @@ def _source_only_handoff_fallback(records: list[dict], reason: str) -> dict:
             "source_table": item["source_table"],
             "epistemic_status": item["epistemic_status"],
             "record_status": item["record_status"],
+            "information_status": item.get("information_status"),
             "event_at": item["event_at"],
             "recorded_at": item["recorded_at"],
             "stale_warning": bool(item.get("stale_warning")),
