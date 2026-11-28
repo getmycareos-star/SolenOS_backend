@@ -640,7 +640,8 @@ def test_lcr_assertion_and_review_event_roll_back_together(monkeypatch):
             json=review_payload(analysis_id, 0, "accept"),
         )
         assert failed_review.status_code == 503, failed_review.text
-        assert "review was not committed" in failed_review.json()["detail"]
+        assert failed_review.json()["detail"] == "We couldn’t complete that request. Please try again."
+        assert "review was not committed" not in failed_review.json()["detail"]
 
         with Session() as db:
             assert db.query(CareAssertion).filter_by(person_id=caregiver["person"]["id"]).count() == 0
