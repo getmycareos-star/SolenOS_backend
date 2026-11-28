@@ -84,7 +84,7 @@ def test_turn_lease_conflict_retries_then_returns_conflict(monkeypatch):
     db = _Postgres([None, None, None])
     request = _request()
     ticks = iter([0.0, 2.0, 4.0, 6.0])
-    monkeypatch.setattr("app.api.collaboration._time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("app.api.collaboration._monotonic", lambda: next(ticks))
 
     async def no_wait(_seconds):
         return None
