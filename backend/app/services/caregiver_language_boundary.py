@@ -13,11 +13,11 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "internal_runtime",
         re.compile(
-            r"\b(?:system prompt|hidden reasoning|api key|provider configuration|"
+            r"\b(?:system prompt|hidden reasoning|api key|provider configuration|jwt|signature verification|pydantic|"
             r"ollama|qwen(?: model)?|(?:ai|solenos) companion|ask solenos|companion (?:chat|conversation|feature|page)|fastapi|sqlalchemy|alembic|tika|tesseract|"
             r"backend|frontend|endpoint|payload|schema|api|json|ocr|"
             r"database|postgres(?:ql)?|sqlite|telemetry|inference pipeline|"
-            r"retrieval pipeline|extraction pipeline|migration|idempotent|traceback|stack trace|internal server error|sqlalchemy error|psycopg|asyncpg|sqlstate|constraint violation|syntax error|connection refused|connection reset|relation does not exist|column does not exist|file not found|permission denied|exception(?: type)?|attributeerror|typeerror|valueerror|keyerror|runtimeerror|modulenotfounderror)\b",
+            r"retrieval pipeline|extraction pipeline|migration|idempotent|traceback|stack trace|internal server error|sqlalchemy error|psycopg|asyncpg|sqlstate|constraint violation|syntax error|connection refused|connection reset|relation does not exist|column does not exist|file not found|permission denied|caregiver_access_grant_id|person_id|exception(?: type)?|attributeerror|typeerror|valueerror|keyerror|runtimeerror|modulenotfounderror)\b",
             re.IGNORECASE,
         ),
     ),
