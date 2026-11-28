@@ -1048,6 +1048,7 @@ def test_companion_idempotent_replay_returns_only_the_persisted_turn_pair():
     assert replay_response.status_code == 200, replay_response.text
     replay_body = replay_response.json()
     assert replay_body["idempotent_replay"] is True
+    assert "_assistant_message_id" not in replay_body
     assert replay_body["reply"] == (
         "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
     )
