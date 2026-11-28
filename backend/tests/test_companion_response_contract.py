@@ -190,7 +190,9 @@ def test_direct_care_history_recall_preserves_correction_lineage_and_never_answe
             id="history-lineage-caregiver", name="Family caregiver",
             relationship="family", person_id=person.id,
         )
-        db.add_all([person, caregiver])
+        db.add(person)
+        db.flush()
+        db.add(caregiver)
         db.flush()
         original = CareEvent(
             id="history-lineage-corrected-event", person_id=person.id,
