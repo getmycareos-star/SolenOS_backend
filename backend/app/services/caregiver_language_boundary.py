@@ -14,7 +14,7 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         "internal_runtime",
         re.compile(
             r"\b(?:system prompt|hidden reasoning|api key|provider configuration|"
-            r"ollama|qwen(?: model)?|fastapi|sqlalchemy|alembic|tika|tesseract|"
+            r"ollama|qwen(?: model)?|companion|fastapi|sqlalchemy|alembic|tika|tesseract|"
             r"backend|frontend|endpoint|payload|schema|api|json|ocr|"
             r"database|postgres(?:ql)?|sqlite|telemetry|inference pipeline|"
             r"retrieval pipeline|extraction pipeline|migration|idempotent)\b",
