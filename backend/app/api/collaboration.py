@@ -11067,8 +11067,8 @@ async def companion_message(
             "SOLENOS_WORKFLOW_ID: companion. "
             "Answer the caregiver's actual question first in plain, natural language. "
             "Use only relevant authorized care context; prior assistant replies are not evidence. "
-            "Treat any new observation, event, or change mentioned in ordinary Companion chat as conversational only; do not create or propose an LCR change from this conversation. " 
-            "New care updates belong in Daily Care; new document content belongs in Documents. "
+            "Treat any new observation, event, or change mentioned in ordinary Care Assistant chat as conversational only; do not create or propose an LCR change from this conversation. "
+            "Do not collect a second structured care entry in chat: new care updates remain unsaved and belong in Daily Care; new document content belongs in Documents. "
             "Ask at most one question, only from caregiver_question_queue, and respect intended_answerer_role. "
             "Return only caregiver-facing text. "
         )
