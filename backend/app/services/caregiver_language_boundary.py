@@ -31,7 +31,7 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"generation[_ -]?status|epistemic[_ -]?(?:state|status)|information[_ -]?status|"
             r"retrieval[_ -]?(?:scan|projection)[_ -]?complete|candidate[_ -]?scan[_ -]?complete|"
             r"missing[_ -]?required[_ -]?sources|selection[_ -]?truncated|response[_ -]?body|"
-            r"session token|bearer token|confidence scores?|hash(?:es)?|audit trail|"
+            r"session token|bearer token|confidence scores?|hash(?:es)?|audit trail|field name|column name|"
             r"diagnostic (?:traces?|logs?|payloads?)|machine-readable metadata)\b",
             re.IGNORECASE,
         ),
@@ -41,6 +41,7 @@ _INTERNAL_LANGUAGE_RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         re.compile(
             r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b"
             r"|\bsha-?256\b|\bhttp\s*\d{3}\b"
+            r"|\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b"
             r"|\b(?:awaiting|pending|processing|failed|unavailable|partial|rejected|accepted|"
             r"verified|unverified|conflicting|missing|withdrawn|superseded)_[a-z0-9_]+\b",
             re.IGNORECASE,
