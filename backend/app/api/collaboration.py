@@ -13335,6 +13335,9 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "evidence_review": EvidenceReviewRecord,
         "evidence_claim_assessment": EvidenceClaimAssessment,
     }
+    # Keep this registry aligned with _context_record_refs and lcr_context.SOURCE_SPECS.
+    # These sources are resolved through reflected PostgreSQL ownership columns;
+    # unsupported or unscoped tables still fail closed below.
     dynamic_source_names = {
         "care_record": "living_record",
         "lcr_record": "living_record",
@@ -13344,6 +13347,19 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "care_decision_outcome": "decision_outcomes",
         "care_uncertainty": "uncertainties",
         "information_gap": "missing_information",
+        "care_timeline_entry": "timeline",
+        "care_missing_information": "missing_information",
+        "care_uncertainty_assessment": "uncertainty_assessments",
+        "open_question_answer_event": "open_question_answer_events",
+        "open_question_review_event": "open_question_review_events",
+        "open_loop": "open_loop_records",
+        "care_follow_up_link": "follow_up_links",
+        "care_reconciliation": "reconciliations",
+        "care_conflict": "conflicts",
+        "record_provenance": "provenance",
+        "caregiver_observation": "caregiver_observations",
+        "caregiver_context": "caregiver_contexts",
+        "caregiver_perspective": "caregiver_perspectives",
     }
     metadata_fields = {
         "source_event_ids": CareEvent,
