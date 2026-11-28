@@ -81,6 +81,11 @@ def client():
     app.dependency_overrides.clear()
     main_module.SessionLocal = DefaultSessionLocal
     with engine.begin() as connection:
+        # These migration-owned append-only tables are not always registered
+        # in this test module's ORM metadata. Drop dependants before their
+        # referenced question table so PostgreSQL teardown remains deterministic.
+        connection.execute(text("DROP TABLE IF EXISTS open_question_review_events"))
+        connection.execute(text("DROP TABLE IF EXISTS open_question_answer_events"))
         connection.execute(text("DROP TABLE IF EXISTS open_questions"))
         connection.execute(text("DROP TABLE IF EXISTS care_facts"))
     Base.metadata.drop_all(bind=engine)
