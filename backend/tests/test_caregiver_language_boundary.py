@@ -63,3 +63,19 @@ def test_companion_validator_runs_language_guard_independently_of_formatting_che
     formatting_check = validator.index("if _companion_reply_needs_revision(candidate")
     assert language_check < formatting_check
     assert 'reasons.append("internal_caregiver_language")' in validator
+
+
+def test_ordinary_companion_conversation_checks_every_final_reply():
+    from pathlib import Path
+
+    source_path = Path("backend/app/api/collaboration.py")
+    if not source_path.exists():
+        source_path = Path("app/api/collaboration.py")
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index('@router.post("/conversation/message")')
+    end = source.find("\\n@router.", start + 1)
+    companion_message = source[start:end if end >= 0 else None]
+    assert "or contains_internal_caregiver_language(reply)" in companion_message
+    assert "if contains_internal_caregiver_language(reply):" in companion_message
+    assert "Companion final response rejected by caregiver-language boundary" in companion_message
+    assert "No reply was saved; please retry." in companion_message
