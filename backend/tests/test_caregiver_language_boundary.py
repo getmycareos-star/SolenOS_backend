@@ -92,6 +92,8 @@ def test_ordinary_companion_conversation_checks_every_final_reply():
         (413, "Upload provider returned a payload error", "The files are too large. Choose fewer or smaller files and try again."),
         (422, "Pydantic validation failed for person_id", "We couldn’t process that information. Please check it and try again."),
         (500, "psycopg connection refused", "We couldn’t complete that request. Please try again."),
+        (422, "due_at must include a timezone offset", "We couldn’t process that information. Please check it and try again."),
+        (422, "Invalid caregiver_access_grant_id value", "We couldn’t process that information. Please check it and try again."),
     ],
 )
 def test_api_error_boundary_replaces_internal_details_without_changing_status(status_code, detail, expected):
