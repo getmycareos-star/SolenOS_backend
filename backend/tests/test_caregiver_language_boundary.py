@@ -129,3 +129,17 @@ def test_read_only_lcr_orientation_rejects_internal_language_before_returning_re
     assert "or contains_internal_caregiver_language(candidate)" in endpoint
     assert "We couldn’t prepare a clear answer just now." in endpoint
     assert "LCR could not produce a safe, grounded response" not in endpoint
+
+
+def test_action_completion_does_not_return_internal_lifecycle_exception_text():
+    from pathlib import Path
+
+    source_path = Path("backend/app/api/actions.py")
+    if not source_path.exists():
+        source_path = Path("app/api/actions.py")
+    source = source_path.read_text(encoding="utf-8")
+    start = source.index('@router.post("/actions/{action_id}/complete"')
+    end = source.index('@router.post("/actions/{action_id}/cancel"', start)
+    endpoint = source[start:end]
+    assert "detail=str(exc)" not in endpoint
+    assert "We couldn’t confirm that this action is complete." in endpoint
