@@ -71,6 +71,7 @@ class KnowledgeItem:
     content: str
     source_ids: tuple[str, ...]
     evidence_class: EvidenceClass
+    jurisdiction: str
     applicable_context: str
     limitations: str
     reviewed_by: str | None
@@ -165,6 +166,12 @@ def validate_knowledge_item(item: KnowledgeItem) -> tuple[str, ...]:
     if not item.title.strip() or not item.content.strip():
         defects.append("empty_content")
     if item.status == KnowledgeStatus.APPROVED:
+        if any(
+            SOURCE_BY_ID[source_id].jurisdiction not in (item.jurisdiction, "International")
+            for source_id in item.source_ids
+            if source_id in SOURCE_BY_ID
+        ):
+            defects.append("source_jurisdiction_mismatch")
         if any(
             SOURCE_BY_ID[source_id].status != SourceStatus.REVIEWED
             for source_id in item.source_ids
