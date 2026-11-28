@@ -344,7 +344,16 @@ def review_source_revision(
     revision.review_due_on = review_due_on
     source = db.get(DementiaKnowledgeSource, revision.source_id)
     if source is not None:
-        source.status = SourceStatus.REVIEWED if decision == "approved" else SourceStatus.INGESTED
+        if source.status == SourceStatus.RETIRED:
+            raise ValueError("retired_knowledge_source")
+        latest_revision = db.query(DementiaKnowledgeSourceRevision).filter(
+            DementiaKnowledgeSourceRevision.source_id == source.source_id
+        ).order_by(
+            DementiaKnowledgeSourceRevision.retrieved_at.desc(),
+            DementiaKnowledgeSourceRevision.id.desc(),
+        ).first()
+        if latest_revision is not None and latest_revision.id == revision.id:
+            source.status = SourceStatus.REVIEWED if decision == "approved" else SourceStatus.INGESTED
         source.publisher_reviewed_on = revision.publisher_reviewed_on or source.publisher_reviewed_on
         source.updated_at = datetime.now(timezone.utc)
     db.flush()
@@ -500,7 +509,9 @@ def retrieve_approved_knowledge(
         DementiaKnowledgeSource, DementiaKnowledgeSourceRevision,
     )
 
-    today = as_of or datetime.now(timezone.utc).date()
+    now = datetime.now(timezone.utc)
+    today = as_of or now.date()
+    limit = min(max(int(limit), 0), 3)
     terms = {term for term in re.findall(r"[a-z0-9]+", (query or "").casefold()) if len(term) > 2}
     if not terms or limit < 1:
         return ()
@@ -517,8 +528,10 @@ def retrieve_approved_knowledge(
     ).limit(500).all():
         if (
             _content_sha256(item.content.strip()) != item.content_sha256
+            or not item.reviewed_by
             or not item.reviewer_qualification
-            or item.reviewed_at > datetime.now(timezone.utc)
+            or not item.reviewed_by
+            or item.reviewed_at > now
         ):
             continue
         linked = db.query(
@@ -540,10 +553,10 @@ def retrieve_approved_knowledge(
                 or revision.review_status != SourceStatus.REVIEWED
                 or revision.reviewed_at is None
                 or revision.reviewed_at > datetime.now(timezone.utc)
+                or not revision.reviewed_by
                 or not revision.reviewer_qualification
                 or revision.review_due_on is None
                 or revision.review_due_on < today
-                or revision.reviewed_at > datetime.now(timezone.utc)
                 or _content_sha256(revision.content_text.strip()) != revision.content_sha256
                 or not link.supporting_excerpt
                 or link.supporting_excerpt not in revision.content_text
