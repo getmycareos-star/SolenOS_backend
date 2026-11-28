@@ -13291,7 +13291,7 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
             if model is EvidenceModel:
                 available_rows = _active_person_evidence_query(db, person_id).filter(
                     EvidenceModel.id.in_(ids),
-                ).all()
+                ).with_for_update().all()
                 available_by_model[model] = {str(item.id) for item in available_rows}
                 continue
             if not hasattr(model, "person_id"):
@@ -13300,7 +13300,7 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
             available_rows = db.query(model.id).filter(
                 model.person_id == str(person_id),
                 model.id.in_(ids),
-            ).all()
+            ).with_for_update().all()
             available_by_model[model] = {str(item[0]) for item in available_rows}
         except SQLAlchemyError:
             db.rollback()
