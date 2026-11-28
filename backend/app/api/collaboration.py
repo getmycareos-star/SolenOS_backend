@@ -69,7 +69,7 @@ from app.models.collaboration import (
 from app.models.improvement_training_example import ImprovementTrainingExample
 from app.models.notifications import CareNotification, CareNotificationPreference, CarePushDelivery
 from app.models.open_loop import OpenLoopRecord, OpenLoopEvent, OpenLoopOccurrence
-from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent, InformationGap, Contradiction, UncertaintyAssessment
+from app.models.uncertainty import OpenQuestion, OpenQuestionAnswerEvent, UncertaintyAssessment
 from app.models.reminder import CareReminder
 from app.models.privacy_delivery import AuditLogEvent, NotificationReadReceipt
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenJobEvent, QwenSafetyEvaluation
@@ -106,7 +106,7 @@ from app.services.document_binary_storage import (
 )
 
 
-from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context
+from app.services.lcr_context import _expanded_search_terms, _information_status, build_lcr_context, SOURCE_SPECS, _load_source_schema
 from app.services.response_length_policy import count_response_words, is_critical_safety_message, is_self_harm_safety_message, is_greeting_message, is_low_capacity_caregiver_message, resolve_response_length_policy, resolve_workflow_response_length_policy
 from app.services.companion_care_updates import proposal_payload
 from app.services.claim_provenance import build_claim_provenance, build_distinct_event_aggregate, context_lines_to_source_records, unmatched_material_claims
@@ -13275,18 +13275,25 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
         "freshness_assessment": EvidenceFreshnessAssessment,
         "completeness_assessment": EvidenceCompletenessAssessment,
         "care_evidence_observation": EvidenceObservation,
-        "care_decision_outcome": CareActionOutcome,
+        "care_action_outcome": CareActionOutcome,
         "care_correction": Correction,
         "correction": Correction,
         "open_question": OpenQuestion,
-        "information_gap": InformationGap,
-        "care_uncertainty": Contradiction,
         "uncertainty_assessment": UncertaintyAssessment,
         "care_state_revision": CareStateRevision,
         "care_delta_run": CareDeltaRun,
         "care_record_relationship": CareRecordRelationship,
         "evidence_review": EvidenceReviewRecord,
         "evidence_claim_assessment": EvidenceClaimAssessment,
+    }
+    dynamic_source_names = {
+        "lcr_record": "living_record",
+        "living_care_record": "living_record",
+        "care_fact": "facts",
+        "care_decision": "decisions",
+        "care_decision_outcome": "decision_outcomes",
+        "care_uncertainty": "uncertainties",
+        "information_gap": "missing_information",
     }
     metadata_fields = {
         "source_event_ids": CareEvent,
@@ -13302,6 +13309,8 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
     restricted: set[str] = set()
     references: dict[type, set[str]] = {}
     references_by_message: dict[str, list[tuple[type, str]]] = {}
+    dynamic_references: dict[str, set[str]] = {}
+    dynamic_references_by_message: dict[str, list[tuple[str, str]]] = {}
 
     def add_reference(message_id: str, model: type | None, raw_id: object) -> None:
         record_id = str(raw_id or "").strip()
@@ -13342,8 +13351,13 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
                     restricted.add(message_id)
                     continue
                 record_type = str(reference.get("record_type") or "").strip().casefold()
-                record_id = reference.get("record_id") or reference.get("source_id")
-                add_reference(message_id, source_models.get(record_type), record_id)
+                record_id = str(reference.get("record_id") or reference.get("source_id") or "").strip()
+                if record_type in dynamic_source_names and record_id:
+                    source_name = dynamic_source_names[record_type]
+                    dynamic_references.setdefault(source_name, set()).add(record_id)
+                    dynamic_references_by_message.setdefault(message_id, []).append((source_name, record_id))
+                else:
+                    add_reference(message_id, source_models.get(record_type), record_id)
         except (TypeError, ValueError, json.JSONDecodeError):
             restricted.add(message_id)
 
@@ -13372,8 +13386,57 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
                 detail="SolenOS could not recheck the saved sources for this conversation. Please retry.",
             ) from exc
 
+    if dynamic_references:
+        try:
+            _, reflected_sources = _load_source_schema(db.get_bind())
+            for source_name, ids in dynamic_references.items():
+                table_name = SOURCE_SPECS[source_name]["table"]
+                source_table = reflected_sources.tables.get(table_name)
+                if source_table is None or "id" not in source_table.c:
+                    continue
+                if "person_id" in source_table.c:
+                    statement = select(source_table.c.id).where(
+                        source_table.c.person_id == str(person_id),
+                        source_table.c.id.in_(ids),
+                    ).with_for_update()
+                elif "care_record_id" in source_table.c:
+                    living_table = reflected_sources.tables.get("living_care_records")
+                    if living_table is None or "person_id" not in living_table.c:
+                        continue
+                    statement = select(source_table.c.id).select_from(
+                        source_table.join(living_table, source_table.c.care_record_id == living_table.c.id)
+                    ).where(
+                        living_table.c.person_id == str(person_id),
+                        source_table.c.id.in_(ids),
+                    ).with_for_update()
+                elif "decision_id" in source_table.c:
+                    decisions_table = reflected_sources.tables.get("care_decisions")
+                    if decisions_table is None or "person_id" not in decisions_table.c:
+                        continue
+                    statement = select(source_table.c.id).select_from(
+                        source_table.join(decisions_table, source_table.c.decision_id == decisions_table.c.id)
+                    ).where(
+                        decisions_table.c.person_id == str(person_id),
+                        source_table.c.id.in_(ids),
+                    ).with_for_update()
+                else:
+                    continue
+                available_by_model[source_name] = {
+                    str(value) for value in db.execute(statement).scalars().all()
+                }
+        except SQLAlchemyError as exc:
+            db.rollback()
+            logger.exception("Companion history dynamic source authorization failed")
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS could not recheck the saved sources for this conversation. Please retry.",
+            ) from exc
+
     for message_id, message_refs in references_by_message.items():
         if any(record_id not in available_by_model.get(model, set()) for model, record_id in message_refs):
+            restricted.add(message_id)
+    for message_id, message_refs in dynamic_references_by_message.items():
+        if any(record_id not in available_by_model.get(source_name, set()) for source_name, record_id in message_refs):
             restricted.add(message_id)
     return restricted
 
