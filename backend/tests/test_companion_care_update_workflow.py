@@ -13,6 +13,7 @@ from app.models.care_continuity import CareAssertion
 from app.models.care import CareEvent, Caregiver
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation, QwenJobEvent
 from app.models.collaboration import ConversationMessage
+from app.models.caregiver_access import CaregiverAccessGrant
 
 main_module = importlib.import_module("app.main")
 collaboration = importlib.import_module("app.api.collaboration")
@@ -85,6 +86,45 @@ def pending(client, session):
     )
     assert response.status_code == 200, response.text
     return response.json()["items"]
+
+
+def test_saving_companion_care_report_requires_add_evidence_permission(monkeypatch):
+    client = setup_client(monkeypatch, lambda text: {"observations": []})
+    try:
+        session = create_session(client, "Read-only conversation caregiver")
+        db = TestingSessionLocal()
+        try:
+            grant = db.query(CaregiverAccessGrant).filter_by(
+                person_id=session["person"]["id"],
+                caregiver_id=session["caregiver"]["id"],
+            ).one()
+            grant.can_manage_members = False
+            grant.permissions = ["view_conversations"]
+            db.commit()
+        finally:
+            db.close()
+
+        message = send(client, session, "She ate less at breakfast today.")
+        assert message.status_code == 200, message.text
+        response = client.post(
+            f"/api/v1/companion/care-updates/from-message/{message.json()['source_message_id']}",
+            headers={"Authorization": f"Bearer {session['access_token']}"},
+            json={"confirm_care_report": True},
+        )
+        assert response.status_code == 403, response.text
+
+        db = TestingSessionLocal()
+        try:
+            assert db.query(AIOutputLCRProposal).filter_by(
+                person_id=session["person"]["id"],
+            ).count() == 0
+            assert db.query(CareAssertion).filter_by(
+                person_id=session["person"]["id"],
+            ).count() == 0
+        finally:
+            db.close()
+    finally:
+        teardown()
 
 
 def test_companion_is_conversation_only_and_never_creates_lcr_proposals(monkeypatch):
