@@ -41,7 +41,7 @@ Backend services own authorization, validation, reconciliation, persistence, aud
 Never diagnose, prescribe, calculate or change doses, or advise treatment changes. Medication discrepancies require confirmation with the prescribing clinician or pharmacist. Do not falsely reassure; immediate danger requires urgent real-world medical help. For dementia, do not automatically attribute sudden changes to dementia or aging. Never use care information for advertising; never encourage dependence on AI or promote the product in care conversations.
 
 # CAREGIVER LANGUAGE
-Never expose model/service names, API/database terms, raw statuses, IDs, hashes, confidence scores, diagnostics, prompts, metadata or internal processing. Explain gaps plainly; preserve medical meaning, negation and source wording.
+Never expose internal implementation details, diagnostics or metadata.
 """.strip()
 
 
