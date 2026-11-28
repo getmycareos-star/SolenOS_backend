@@ -129,3 +129,21 @@ class DementiaKnowledgeReview(Base):
     rationale = Column(Text, nullable=False)
     review_due_on = Column(Date, nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class DementiaKnowledgeSourceReview(Base):
+    """Append-only source revision review tied to the exact ingested bytes."""
+    __tablename__ = "dementia_knowledge_source_reviews"
+    __table_args__ = (
+        Index("ix_dementia_knowledge_source_reviews_revision_time", "source_revision_id", "reviewed_at"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_revision_id = Column(String(36), ForeignKey("dementia_knowledge_source_revisions.id", ondelete="RESTRICT"), nullable=False)
+    content_sha256 = Column(String(64), nullable=False)
+    decision = Column(String(24), nullable=False)
+    reviewer_id = Column(String(180), nullable=False)
+    reviewer_qualification = Column(String(180), nullable=False)
+    rationale = Column(Text, nullable=False)
+    review_due_on = Column(Date, nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
