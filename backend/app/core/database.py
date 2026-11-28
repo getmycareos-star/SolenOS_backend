@@ -44,6 +44,7 @@ import app.models.capture_analysis  # noqa: E402, F401
 import app.models.privacy_delivery  # noqa: E402, F401
 import app.models.privacy_request  # noqa: E402, F401
 import app.models.privacy_export  # noqa: E402, F401
+import app.models.dementia_knowledge  # noqa: E402, F401
 
 
 def get_db(request: Request = None):
