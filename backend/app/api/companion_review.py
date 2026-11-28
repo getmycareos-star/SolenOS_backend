@@ -13,7 +13,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.collaboration import _companion_scope
 from app.core.database import get_db
-from app.services.caregiver_permissions import require_caregiver_permission
+from app.services.caregiver_permissions import caregiver_has_permission, require_caregiver_permission
+from app.models.caregiver_access import CaregiverAccessGrant
 from app.models.ai_output_governance import AIOutputLCRDecision, AIOutputLCRProposal
 from app.models.care import CareEvent, Evidence
 from app.models.qwen_background_job import QwenBackgroundJob, QwenModelOutput, QwenSafetyEvaluation
@@ -255,7 +256,16 @@ def create_companion_care_update_from_message(
     """Create a review-only care report from an exact caregiver message after explicit confirmation."""
     person_id, caregiver_id = _companion_scope(request, db)
     require_caregiver_permission(db, person_id, caregiver_id, "view_conversations")
-    require_caregiver_permission(db, person_id, caregiver_id, "add_evidence")
+    # Serialize proposal creation against concurrent access revocation. The
+    # grant remains locked until the pending proposal is committed.
+    write_grant = db.query(CaregiverAccessGrant).filter(
+        CaregiverAccessGrant.person_id == person_id,
+        CaregiverAccessGrant.caregiver_id == caregiver_id,
+        CaregiverAccessGrant.status == "active",
+        CaregiverAccessGrant.revoked_at.is_(None),
+    ).with_for_update().first()
+    if not caregiver_has_permission(write_grant, "add_evidence"):
+        raise HTTPException(status_code=403, detail="This caregiver does not have permission to add evidence.")
     if payload.confirm_care_report is not True:
         raise HTTPException(status_code=422, detail="Explicit confirmation that this is a care report is required")
     source = (
