@@ -10516,6 +10516,9 @@ async def companion_message(
             re.IGNORECASE,
         ))
         care_history_recall_context: dict[str, Any] | None = None
+        # Greeting turns intentionally skip LCR retrieval; later provenance
+        # assembly still reads this mapping, so initialize the no-retrieval path.
+        shared_lcr_context: dict[str, Any] = {}
         if _is_casual_greeting(user_text):
             lcr_context_coverage = {"status": "not_retrieved_for_greeting"}
         else:
