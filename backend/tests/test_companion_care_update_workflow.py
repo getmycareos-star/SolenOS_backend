@@ -92,6 +92,9 @@ def test_saving_companion_care_report_requires_add_evidence_permission(monkeypat
     client = setup_client(monkeypatch, lambda text: {"observations": []})
     try:
         session = create_session(client, "Read-only conversation caregiver")
+        message = send(client, session, "She ate less at breakfast today.")
+        assert message.status_code == 200, message.text
+
         db = TestingSessionLocal()
         try:
             grant = db.query(CaregiverAccessGrant).filter_by(
@@ -103,9 +106,6 @@ def test_saving_companion_care_report_requires_add_evidence_permission(monkeypat
             db.commit()
         finally:
             db.close()
-
-        message = send(client, session, "She ate less at breakfast today.")
-        assert message.status_code == 200, message.text
         response = client.post(
             f"/api/v1/companion/care-updates/from-message/{message.json()['source_message_id']}",
             headers={"Authorization": f"Bearer {session['access_token']}"},
