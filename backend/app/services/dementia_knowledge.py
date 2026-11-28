@@ -612,6 +612,55 @@ def retrieve_approved_knowledge(
     return tuple(results[:limit])
 
 
+def build_companion_knowledge_provenance(
+    items: Iterable[dict],
+    *,
+    status: str,
+) -> dict:
+    """Return bounded citation metadata without copying educational text into chat history."""
+    allowed_statuses = {
+        "not_included", "available", "no_approved_match", "retrieval_failed",
+        "schema_unavailable", "not_recorded",
+    }
+    safe_status = status if status in allowed_statuses else "not_recorded"
+    citations = []
+    for item in list(items)[:3]:
+        if not isinstance(item, dict):
+            continue
+        sources = []
+        for source in item.get("sources", [])[:5]:
+            if not isinstance(source, dict):
+                continue
+            url = str(source.get("url") or "").strip()
+            if not url.startswith("https://"):
+                continue
+            sources.append({
+                "publisher": str(source.get("publisher") or "")[:240],
+                "title": str(source.get("title") or "")[:400],
+                "url": url[:2048],
+                "source_revision_id": str(source.get("source_revision_id") or "")[:64],
+                "content_sha256": str(source.get("content_sha256") or "")[:64],
+                "source_locator": str(source.get("source_locator") or "")[:240] or None,
+            })
+        if not sources:
+            continue
+        citations.append({
+            "item_id": str(item.get("item_id") or "")[:64],
+            "title": str(item.get("title") or "")[:300],
+            "domain": str(item.get("domain_id") or "")[:64],
+            "evidence_class": str(item.get("evidence_class") or "")[:48],
+            "reviewed_at": str(item.get("reviewed_at") or "")[:64],
+            "review_due_on": str(item.get("review_due_on") or "")[:32],
+            "sources": sources,
+        })
+    return {
+        "status": "available" if citations else (
+            safe_status if safe_status != "available" else "no_approved_match"
+        ),
+        "items": citations,
+    }
+
+
 def format_approved_knowledge_for_companion(items: Iterable[dict]) -> str:
     """Render general education separately from person-specific LCR evidence."""
     rows = list(items)
