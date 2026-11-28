@@ -2503,6 +2503,52 @@ def _prompt_safe_lcr_record(value: Any) -> Any:
     return value
 
 
+def _fit_prompt_record_line(line: str, max_chars: int) -> tuple[str, bool]:
+    """Bound one source's first prompt record without dropping its identity.
+
+    Tight prompts must represent multiple care domains fairly. When a first
+    record is larger than its source's initial share, shorten only allow-listed
+    human-readable text fields and label every shortened field. The canonical
+    LCR record is never modified.
+    """
+    prefix = "\n" if line.startswith("\n") else ""
+    encoded = line[len(prefix):]
+    if len(encoded) <= max_chars - len(prefix):
+        return line, False
+    try:
+        payload = json.loads(encoded)
+    except (TypeError, json.JSONDecodeError):
+        return line, False
+    record = payload.get("record") if isinstance(payload, dict) else None
+    if not isinstance(record, dict):
+        return line, False
+
+    marker = "… [truncated]"
+    truncated_fields: list[str] = []
+    payload["prompt_truncated_fields"] = truncated_fields
+    available = max_chars - len(prefix)
+    while True:
+        rendered = json.dumps(payload, ensure_ascii=False, default=str, separators=(",", ":"))
+        if len(rendered) <= available:
+            return prefix + rendered, bool(truncated_fields)
+        candidates = [
+            key for key, value in record.items()
+            if key in TEXT_FIELDS and isinstance(value, str)
+            and len(value.removesuffix(marker)) > 48
+        ]
+        if not candidates:
+            return line, False
+        key = max(candidates, key=lambda candidate: len(record[candidate]))
+        value = record[key].removesuffix(marker)
+        excess = len(rendered) - available
+        keep = max(48, len(value) - excess - len(marker) - 4)
+        if keep >= len(value):
+            keep = len(value) - 1
+        record[key] = value[:keep] + marker
+        if key not in truncated_fields:
+            truncated_fields.append(key)
+
+
 def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 14000) -> str:
     """Serialize bounded LCR context fairly across source types.
 
@@ -2566,7 +2612,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
                 if source.get("status") in {"failed", "partial", "unsearchable"}
                 and source.get("interpretation_limit")
             ][:8],
-            "source_caveats": source_caveats[:10],
+            "source_caveats": source_caveats[:20],
             "history_coverage": context.get("history_coverage"),
             "retrieval_scan_complete": context.get("retrieval_scan_complete", False),
             "retrieval_projection_complete": context.get("retrieval_projection_complete", False),
@@ -2574,9 +2620,7 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             "missing_optional_sources": context.get("missing_optional_sources", [])[:12],
             "evidence_lineage": {
                 "status": lineage.get("status", "not_assessed"),
-                "interpretation_limit": str(lineage.get(
-                    "interpretation_limit", "No source-lineage assessment was supplied."
-                ))[:220],
+                **({"interpretation_limit": str(lineage["interpretation_limit"])[:220]} if lineage.get("interpretation_limit") else {}),
                 "evidence_ids_considered_count": len(lineage.get("evidence_ids_considered", []))
                 if isinstance(lineage.get("evidence_ids_considered"), list) else 0,
                 "independent_source_pair_count": len(lineage.get("independent_source_pairs", []))
@@ -2640,9 +2684,8 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
 
     base = header + "".join("\n" + source["section"] for source in prepared_sources)
     truncation_notice = (
-        "\n[Context truncated because the safe prompt budget was reached. "
-        "Some retrieved records were not included; consult the source coverage "
-        "metadata and do not treat this prompt as a complete history.]"
+        "\n[Context truncated: some retrieved records or text were omitted. "
+        "Check source coverage before treating this as complete history.]"
     )
 
     # Keep the source coverage header even when a caller supplies an unusually
@@ -2665,6 +2708,12 @@ def format_lcr_context_for_prompt(context: dict[str, Any], *, max_chars: int = 1
             if index >= len(source["items"]):
                 continue
             line = "\n" + source["items"][index]
+            if index == 0 and len(prepared_sources) > 1:
+                # Reserve an equal first-record share for every source before
+                # allowing any one long event or document to consume the budget.
+                first_record_share = max(1, item_budget // len(prepared_sources))
+                line, field_truncated = _fit_prompt_record_line(line, first_record_share)
+                omitted = omitted or field_truncated
             if current_length + len(line) > len(base) + item_budget:
                 omitted = True
                 continue
