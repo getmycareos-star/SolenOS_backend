@@ -588,6 +588,8 @@ def format_approved_knowledge_for_companion(items: Iterable[dict]) -> str:
             for source in item["sources"]
         )
         lines.append(json.dumps({
+            "knowledge_item_id": item["item_id"],
+            "item_key": item["item_key"],
             "title": item["title"],
             "domain": item["domain_id"],
             "education": item["content"],
@@ -596,5 +598,7 @@ def format_approved_knowledge_for_companion(items: Iterable[dict]) -> str:
             "reviewed_at": item["reviewed_at"],
             "review_due_on": item["review_due_on"],
             "sources": citations,
+            "source_revision_ids": [source["source_revision_id"] for source in item["sources"]],
+            "source_content_hashes": [source["content_sha256"] for source in item["sources"]],
         }, ensure_ascii=False, separators=(",", ":")))
     return "\n".join(lines)
