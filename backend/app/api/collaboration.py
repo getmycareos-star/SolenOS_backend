@@ -1372,6 +1372,56 @@ def _revalidate_companion_replay_access(
                     status_code=403,
                     detail="Document access changed; this saved response cannot be replayed.",
                 ) from exc
+
+        # A retry is another disclosure of the persisted assistant answer.
+        # Revalidate the exact saved assistant row and its source records just
+        # as history reads do; do not replay content whose evidence was deleted.
+        assistant_message_id = replay_response.pop("_assistant_message_id", None)
+        assistant_row = db.query(ConversationMessage).filter(
+            ConversationMessage.id == str(assistant_message_id or ""),
+            ConversationMessage.session_id == str(replay_response.get("session_id") or ""),
+            ConversationMessage.role == "assistant",
+        ).with_for_update().first()
+        if assistant_row is None:
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS could not confirm the saved response before retrying. Please refresh the conversation.",
+            )
+        if _companion_history_source_restrictions(db, str(person_id), [assistant_row]):
+            restricted_text = "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+            replay_response.update({
+                "reply": restricted_text,
+                "guard_verdict": "access_restricted",
+                "safety_note": None,
+                "confidence": None,
+                "evidence_ids": [],
+                "source_event_ids": [],
+                "source_evidence_ids": [],
+                "source_document_analysis_ids": [],
+                "source_appointment_ids": [],
+                "source_assertion_ids": [],
+                "source_lcr_context_ids": [],
+                "source_freshness_assessment_ids": [],
+                "freshness_source_status": "restricted",
+                "source_record_refs": [],
+                "claim_provenance": {"coverage": "restricted", "claims": []},
+                "lcr_context_coverage": {"status": "restricted"},
+                "ai_generated": None,
+                "response_mode": "access_restricted",
+                "written_to_lcr": False,
+                "persistence": "conversation_only",
+                "care_update_candidates": [],
+            })
+            for message in replay_response.get("messages", []):
+                if isinstance(message, dict) and message.get("role") == "assistant":
+                    message.update({
+                        "text": restricted_text,
+                        "guard_verdict": "access_restricted",
+                        "safety_note": None,
+                        "ai_generated": None,
+                        "response_mode": "access_restricted",
+                        "claim_provenance": {"coverage": "restricted", "claims": []},
+                    })
     bearer = db.query(AnonymousSession.id).filter(
         AnonymousSession.id == str(bearer_session_id),
         AnonymousSession.person_id == str(person_id),
@@ -3195,6 +3245,7 @@ def _companion_replay_response(
     # in their own review surface and never be surfaced by Companion replay.
     care_update_candidates = []
     return {
+        "_assistant_message_id": str(assistant.id),
         "session_id": saved_session.id,
         "person_id": person_id,
         "source_message_id": metadata.get("source_message_id"),
