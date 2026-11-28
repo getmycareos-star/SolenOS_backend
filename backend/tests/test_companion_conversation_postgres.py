@@ -2248,3 +2248,61 @@ def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
     assert replay.json()["reply"] == "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
     assert replay.json()["source_record_refs"] == []
 
+def test_companion_history_redacts_source_from_another_care_recipient():
+    """A valid source ID from another recipient must never authorize saved answer text."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    first = _new_anonymous(client, f"First source isolation recipient {suffix}")
+    second = _new_anonymous(client, f"Second source isolation recipient {suffix}")
+    session_id = f"cross-recipient-source-history-{suffix}"
+    event_id = f"other-recipient-source-event-{suffix}"
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        db.add(CareEvent(
+            id=event_id,
+            person_id=second["person"]["id"],
+            event_type="observation",
+            occurred_at=now,
+            title="Private event belonging to another care recipient",
+            description="This source must not be disclosed in the first care record.",
+            created_by_caregiver_id=second["caregiver"]["id"],
+        ))
+        db.add(ConversationSession(
+            id=session_id,
+            person_id=first["person"]["id"],
+            caregiver_id=first["caregiver"]["id"],
+            title="Care history",
+            status="active",
+            created_at=now,
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=f"cross-recipient-user-{suffix}",
+            session_id=session_id,
+            role="user",
+            content="What was recorded?",
+            created_at=now,
+        ))
+        db.add(ConversationMessage(
+            id=f"cross-recipient-assistant-{suffix}",
+            session_id=session_id,
+            role="assistant",
+            content="The other care recipient has a private event.",
+            evidence_ids_json="[]",
+            source_record_refs_json=json.dumps([{
+                "record_type": "care_event",
+                "record_id": event_id,
+            }]),
+            created_at=now + timedelta(microseconds=1),
+        ))
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {first['access_token']}"}
+    history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+    assert history.status_code == 200, history.text
+    assistant = next(item for item in history.json()["messages"] if item["role"] == "assistant")
+    assert assistant["text"] == "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+    assert assistant["source_record_refs"] == []
+    assert event_id not in history.text
+
