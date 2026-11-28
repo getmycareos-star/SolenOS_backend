@@ -636,11 +636,16 @@ def test_preparation_brief_is_read_only_source_linked_and_person_scoped(client):
             semantic_sufficiency="not_automatically_verified",
             assessed_by_caregiver_id=other["caregiver"]["id"],
         )
+        # PostgreSQL enforces the policy/evidence/claim foreign keys during
+        # each INSERT. These models intentionally have no ORM relationships,
+        # so add_all() does not provide a reliable parent-before-child flush
+        # order. Persist referenced rows before their append-only assessments.
+        db.add_all([evidence, policy, completeness_policy, foreign_completeness_policy, claim])
+        db.flush()
         db.add_all([
-            evidence, policy, assessment, event, claim, review, claim_assessment,
-            completeness_policy, prior_completeness_assessment, completeness_assessment,
-            foreign_review, foreign_claim_assessment, foreign_completeness_policy,
-            foreign_completeness_assessment,
+            assessment, event, review, claim_assessment,
+            prior_completeness_assessment, completeness_assessment,
+            foreign_review, foreign_claim_assessment, foreign_completeness_assessment,
         ])
         db.commit()
     finally:
