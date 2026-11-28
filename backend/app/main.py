@@ -1592,6 +1592,7 @@ async def generate_lcr_orientation(
 
     lcr_context = build_lcr_context(db, person_id, limit_per_source=12)
     authorized_context = format_lcr_context_for_prompt(lcr_context)
+    sources = lcr_context.get("sources", {}) if isinstance(lcr_context, dict) else {}
     orientation_source_ids = {
         source_name: [
             str(item.get("id"))
@@ -1630,7 +1631,6 @@ async def generate_lcr_orientation(
 
     # Determine first-vs-returning orientation from actual care-domain rows,
     # never from the existence of an account, session, or empty LCR shell.
-    sources = lcr_context.get("sources", {}) if isinstance(lcr_context, dict) else {}
     # Any persisted care-domain source means this is not a first-use record.
     # Count the complete source projection, not a hand-maintained subset: a
     # caregiver may have only documents, open questions, handoffs, corrections,
