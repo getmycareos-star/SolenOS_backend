@@ -90,6 +90,10 @@ from app.services.unified_lcr_retrieval import (
     build_unified_lcr_context,
     resolve_care_entity_reference,
 )
+from app.services.dementia_knowledge import (
+    format_approved_knowledge_for_companion,
+    retrieve_approved_knowledge,
+)
 from app.api.document_lifecycle import (
     MAX_PDF_PAGES,
     _blocked_page_numbers,
@@ -7569,6 +7573,15 @@ async def qwen_support_assist(payload: QwenAssistRequest, request: Request, db: 
         "source_notification_ids": [] if response_was_grounding_fallback else source_notification_ids,
         "source_freshness_assessment_ids": [] if response_was_grounding_fallback else source_freshness_assessment_ids,
         "source_freshness_status": None if response_was_grounding_fallback else source_freshness_status,
+        "dementia_knowledge": {
+            "status": "not_included" if response_was_grounding_fallback else dementia_knowledge_status,
+            "item_ids": [] if response_was_grounding_fallback else [item["item_id"] for item in dementia_knowledge_items],
+            "source_revision_ids": [] if response_was_grounding_fallback else list(dict.fromkeys(
+                source["source_revision_id"]
+                for item in dementia_knowledge_items
+                for source in item["sources"]
+            )),
+        },
         "provider_status": "available",
     }
 
@@ -11146,6 +11159,39 @@ async def companion_message(
             caregiver_guidance = _caregiver_interaction_guidance(user_text)
             if caregiver_guidance:
                 system_prompt += " " + caregiver_guidance
+        dementia_knowledge_items = []
+        dementia_knowledge_status = "not_included"
+        if (
+            not identity_question
+            and not social_only
+            and not emergency
+            and payload.workflow in shared_lcr_workflows
+        ):
+            if inspect(db.get_bind()).has_table("dementia_knowledge_items"):
+                try:
+                    dementia_knowledge_items = list(
+                        retrieve_approved_knowledge(db, user_text, limit=3)
+                    )
+                    dementia_knowledge_status = (
+                        "available" if dementia_knowledge_items else "no_approved_match"
+                    )
+                except SQLAlchemyError:
+                    logger.exception("Approved dementia education retrieval failed")
+                    dementia_knowledge_items = []
+                    dementia_knowledge_status = "retrieval_failed"
+            else:
+                dementia_knowledge_status = "schema_unavailable"
+            education_context = format_approved_knowledge_for_companion(
+                dementia_knowledge_items
+            )
+            if education_context:
+                system_prompt += (
+                    "\\n\\n" + education_context
+                    + "\\nKeep general education separate from this person's LCR evidence. "
+                    "If the education source does not answer the question, say what remains unknown. "
+                    "When using an educational item, name its source in the caregiver-facing answer."
+                )
+
         if trend_assessment and not trend_assessment["sufficient"]:
             system_prompt += (
                 " The question asks for a trend, but the retrieved authorized records do not contain two distinct "
