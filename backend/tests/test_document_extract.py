@@ -74,7 +74,8 @@ def test_document_extraction_rejects_scanned_image_without_ocr(client):
         files={"file": ("scan.png", b"not a real png", "image/png")},
     )
     assert response.status_code == 415, response.text
-    assert "OCR" in response.json()["detail"]
+    assert response.json()["detail"] == "We couldn’t complete that request. Please try again."
+    assert "OCR" not in response.json()["detail"]
 
 
 def test_cors_preflight_allows_netlify_credentials_and_required_headers(client):
