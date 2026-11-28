@@ -5209,3 +5209,44 @@ def test_entity_resolution_is_incomplete_when_history_paging_stops_early(monkeyp
     assert merged["entity_resolution"]["status"] == "incomplete"
     assert merged["entity_resolution"]["resolution_complete"] is False
     assert merged["retrieval_projection_complete"] is False
+
+
+def test_companion_rejects_internal_language_from_live_generation_before_saving_reply(monkeypatch):
+    client = setup_client(monkeypatch)
+    inference_calls = 0
+
+    def leaking_reply(*args, **kwargs):
+        nonlocal inference_calls
+        inference_calls += 1
+        return "The backend returned HTTP 500. The source_id is 12345."
+
+    monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
+    monkeypatch.setattr(collaboration, "_run_companion_inference_with_metrics", leaking_reply)
+    try:
+        token, person_id, caregiver_id = create_session(client)
+        response = client.post(
+            "/api/v1/conversation/message",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "person_id": person_id,
+                "text": "Please help me understand what has changed in Mum's care.",
+            },
+        )
+        assert inference_calls > 0
+        assert response.status_code == 503, response.text
+        assert "No reply was saved" in response.json()["detail"]
+        with TestingSessionLocal() as db:
+            saved_messages = db.query(ConversationMessage).join(
+                ConversationSession,
+                ConversationMessage.session_id == ConversationSession.id,
+            ).filter(
+                ConversationSession.person_id == person_id,
+                ConversationSession.caregiver_id == caregiver_id,
+            ).count()
+            saved_care_events = db.query(CareEvent).filter(
+                CareEvent.person_id == person_id,
+            ).count()
+        assert saved_messages == 0
+        assert saved_care_events == 0
+    finally:
+        teardown()
