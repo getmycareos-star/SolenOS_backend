@@ -13302,9 +13302,13 @@ def _companion_history_source_restrictions(db: Session, person_id: str, rows: li
                 model.id.in_(ids),
             ).with_for_update().all()
             available_by_model[model] = {str(item[0]) for item in available_rows}
-        except SQLAlchemyError:
+        except SQLAlchemyError as exc:
             db.rollback()
-            available_by_model[model] = set()
+            logger.exception("Companion history source authorization failed")
+            raise HTTPException(
+                status_code=503,
+                detail="SolenOS could not recheck the saved sources for this conversation. Please retry.",
+            ) from exc
 
     for message_id, message_refs in references_by_message.items():
         if any(record_id not in available_by_model.get(model, set()) for model, record_id in message_refs):
