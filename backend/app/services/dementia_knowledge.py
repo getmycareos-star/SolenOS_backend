@@ -174,6 +174,7 @@ def validate_knowledge_item(item: KnowledgeItem) -> tuple[str, ...]:
             defects.append("source_jurisdiction_mismatch")
         if any(
             SOURCE_BY_ID[source_id].status != SourceStatus.REVIEWED
+            or SOURCE_BY_ID[source_id].last_reviewed_on is None
             for source_id in item.source_ids
             if source_id in SOURCE_BY_ID
         ):
@@ -217,7 +218,12 @@ def search_approved_knowledge(
             continue
         if domain_id is not None and item.domain_id != domain_id:
             continue
-        if item.review_due_on is None or item.review_due_on < as_of:
+        if (
+            item.reviewed_on is None
+            or item.reviewed_on > as_of
+            or item.review_due_on is None
+            or item.review_due_on < as_of
+        ):
             continue
         if validate_knowledge_item(item):
             continue
