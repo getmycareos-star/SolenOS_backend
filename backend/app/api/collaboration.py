@@ -13038,20 +13038,6 @@ async def companion_message(
                 bearer_session_id=authenticated_session_id,
                 replay_response=replay,
             )
-            replay_message = db.query(ConversationMessage).filter(
-                ConversationMessage.id == replay.get("source_message_id"),
-                ConversationMessage.session_id == replay.get("session_id"),
-                ConversationMessage.role == "user",
-            ).first()
-            if replay_message is not None:
-                _queue_companion_care_update_extraction(
-                    db, background_tasks, request,
-                    person_id=person_id,
-                    caregiver_id=caregiver_id,
-                    conversation_id=str(replay.get("session_id")),
-                    message_id=str(replay_message.id),
-                    source_text=replay_message.content,
-                )
             _release_companion_turn_leases(db, request)
             return replay
         raise HTTPException(
