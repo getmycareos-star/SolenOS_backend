@@ -702,13 +702,13 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
                 id VARCHAR(36) PRIMARY KEY,
                 person_id VARCHAR(255) NOT NULL,
                 source VARCHAR(100) NOT NULL,
-                event_date DATETIME NOT NULL,
+                event_date TIMESTAMP WITH TIME ZONE NOT NULL,
                 source_event_id VARCHAR(255),
                 evidence_ids JSON NOT NULL,
                 delta_json TEXT NOT NULL,
                 model_name VARCHAR(120) NOT NULL,
                 created_by_caregiver_id VARCHAR(255),
-                created_at DATETIME NOT NULL
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL
             )
         """))
         connection.execute(text("""
@@ -744,11 +744,11 @@ def test_situation_understanding_assessment_is_persisted_and_person_scoped(clien
             VALUES
                 ('open-question-1', :person_id, 'appointment', 'appointment-date',
                  'Confirm whether the appointment date is Monday or Tuesday',
-                 'not_assessed', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id),
+                 'not_assessed', 'open', 'informational', CURRENT_TIMESTAMP, :caregiver_id),
                 ('open-question-closed', :person_id, 'appointment', 'appointment-date-closed',
-                 'Question already answered', 'not_assessed', 'answered', 2, CURRENT_TIMESTAMP, :caregiver_id),
+                 'Question already answered', 'not_assessed', 'answered', 'low', CURRENT_TIMESTAMP, :caregiver_id),
                 ('open-question-other-person', :other_person_id, 'appointment', 'private-appointment',
-                 'Private question for another person', 'not_assessed', 'open', 1, CURRENT_TIMESTAMP, :caregiver_id)
+                 'Private question for another person', 'not_assessed', 'open', 'informational', CURRENT_TIMESTAMP, :caregiver_id)
         """), {
             "person_id": owner["person"]["id"],
             "other_person_id": other["person"]["id"],
