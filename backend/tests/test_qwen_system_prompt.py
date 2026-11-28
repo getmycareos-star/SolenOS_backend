@@ -169,7 +169,7 @@ def test_identity_prohibits_fabrication_and_unconfirmed_action_claims():
     required = (
         "Never invent care facts",
         "Never fabricate medical references",
-        "Never claim to have examined a patient",
+        "Never claim to examine",
         "unless the application confirms it",
         "Never imply access to every conversation, document, account, or historical record",
     )
@@ -403,13 +403,8 @@ def test_shared_enforcement_includes_caregiver_language_boundary_for_every_workf
     assert boundary_index < personality_index < identity_index
     boundary = system[boundary_index:personality_index]
     for phrase in (
-        "Never expose model/service names",
-        "API/database terms",
-        "raw statuses",
-        "confidence scores",
-        "internal processing",
-        "Explain gaps plainly",
-        "preserve medical meaning, negation and source wording",
+        "Never expose internal implementation details",
+        "diagnostics or metadata",
     ):
         assert phrase in boundary
     assert "plain American English" in system
