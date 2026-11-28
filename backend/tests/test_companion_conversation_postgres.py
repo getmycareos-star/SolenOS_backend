@@ -2158,3 +2158,68 @@ def test_companion_history_and_replay_restrict_document_derived_answers_after_do
         },
     )
     assert replay.status_code == 403, replay.text
+
+def test_companion_history_redacts_answers_after_cited_care_event_is_deleted():
+    """A persisted answer must not outlive the care event it cites."""
+    suffix = uuid.uuid4().hex[:10]
+    client = TestClient(app)
+    created = _new_anonymous(client, f"Deleted source history recipient {suffix}")
+    person_id = created["person"]["id"]
+    caregiver_id = created["caregiver"]["id"]
+    session_id = f"deleted-source-history-{suffix}"
+    event_id = f"deleted-source-event-{suffix}"
+    assistant_id = f"deleted-source-assistant-{suffix}"
+    now = datetime.now(timezone.utc)
+
+    with Session() as db:
+        db.add(CareEvent(
+            id=event_id,
+            person_id=person_id,
+            event_type="observation",
+            occurred_at=now,
+            title="Caregiver reported an overnight change",
+            description="The caregiver recorded a change in overnight sleep.",
+            created_by_caregiver_id=caregiver_id,
+        ))
+        db.add(ConversationSession(
+            id=session_id,
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            title="Overnight care history",
+            status="active",
+            created_at=now,
+        ))
+        db.flush()
+        db.add(ConversationMessage(
+            id=f"deleted-source-user-{suffix}",
+            session_id=session_id,
+            role="user",
+            content="What did I report about overnight sleep?",
+            created_at=now,
+        ))
+        db.add(ConversationMessage(
+            id=assistant_id,
+            session_id=session_id,
+            role="assistant",
+            content="You reported a change in overnight sleep.",
+            source_record_refs_json=json.dumps([{
+                "record_type": "care_event",
+                "record_id": event_id,
+                "relationship": "supports",
+            }]),
+            created_at=now + timedelta(microseconds=1),
+        ))
+        db.commit()
+
+    with Session() as db:
+        event = db.query(CareEvent).filter_by(id=event_id, person_id=person_id).one()
+        db.delete(event)
+        db.commit()
+
+    headers = {"Authorization": f"Bearer {created['access_token']}"}
+    history = client.get(f"/api/v1/conversation/{session_id}", headers=headers)
+    assert history.status_code == 200, history.text
+    assistant = next(item for item in history.json()["messages"] if item["role"] == "assistant")
+    assert assistant["text"] == "This earlier response is unavailable because one or more saved sources have changed or are no longer available."
+    assert assistant["source_record_refs"] == []
+
