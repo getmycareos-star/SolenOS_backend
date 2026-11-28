@@ -149,3 +149,33 @@ def test_future_dated_knowledge_review_is_not_available_yet():
     assert search_approved_knowledge(
         "communication calm", [future], as_of=date(2026, 1, 1)
     ) == ()
+
+
+def test_companion_knowledge_provenance_exposes_source_links_without_copying_education_text():
+    from app.services.dementia_knowledge import build_companion_knowledge_provenance
+
+    result = build_companion_knowledge_provenance([{
+        "item_id": "item-1",
+        "title": "Communication",
+        "domain_id": "communication",
+        "content": "This full educational content must not be copied into message metadata.",
+        "evidence_class": "caregiver_education",
+        "reviewed_at": "2026-11-01T12:00:00+00:00",
+        "review_due_on": "2027-11-01",
+        "sources": [{
+            "publisher": "WHO",
+            "title": "iSupport for Dementia",
+            "url": "https://www.who.int/publications/i/item/9789241515863",
+            "source_revision_id": "revision-1",
+            "content_sha256": "a" * 64,
+            "source_locator": "Module 2",
+        }],
+    }], status="available")
+    assert result["status"] == "available"
+    assert result["items"][0]["sources"][0]["publisher"] == "WHO"
+    assert result["items"][0]["sources"][0]["source_revision_id"] == "revision-1"
+    assert "content" not in result["items"][0]
+    assert "must not be copied" not in str(result)
+    assert build_companion_knowledge_provenance([], status="available") == {
+        "status": "no_approved_match", "items": []
+    }
