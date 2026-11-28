@@ -1,5 +1,9 @@
+from dataclasses import replace
 from datetime import date
 
+import pytest
+
+import app.services.dementia_knowledge as knowledge
 from app.services.dementia_knowledge import (
     DOMAINS,
     KNOWLEDGE_CATALOG_VERSION,
@@ -7,9 +11,20 @@ from app.services.dementia_knowledge import (
     EvidenceClass,
     KnowledgeItem,
     KnowledgeStatus,
+    SourceStatus,
     search_approved_knowledge,
     validate_knowledge_item,
 )
+
+
+@pytest.fixture(autouse=True)
+def _review_test_source(monkeypatch):
+    source = knowledge.SOURCE_BY_ID["who_isupport"]
+    monkeypatch.setitem(
+        knowledge.SOURCE_BY_ID,
+        "who_isupport",
+        replace(source, status=SourceStatus.REVIEWED),
+    )
 
 
 def _item(**overrides):
@@ -41,7 +56,7 @@ def test_catalog_covers_all_fourteen_dementia_domains_and_known_sources():
 
 
 def test_source_catalog_does_not_claim_sources_have_been_ingested_or_reviewed():
-    assert all(source.status.value == "catalogued_not_ingested" for source in SOURCES)
+    assert all(source.status == SourceStatus.CATALOGUED for source in SOURCES)
 
 
 def test_knowledge_retrieval_excludes_drafts_and_items_past_review_date():
@@ -90,7 +105,9 @@ def test_knowledge_retrieval_returns_nothing_for_empty_or_unusable_queries():
     assert search_approved_knowledge(
         "communication", [item], as_of=date(2026, 1, 1), limit=0
     ) == ()
-\n\ndef test_approved_knowledge_is_blocked_when_its_source_is_only_catalogued(monkeypatch):
+
+
+def test_approved_knowledge_is_blocked_when_its_source_is_only_catalogued(monkeypatch):
     source = knowledge.SOURCE_BY_ID["who_isupport"]
     monkeypatch.setitem(
         knowledge.SOURCE_BY_ID,
