@@ -1592,6 +1592,41 @@ async def generate_lcr_orientation(
 
     lcr_context = build_lcr_context(db, person_id, limit_per_source=12)
     authorized_context = format_lcr_context_for_prompt(lcr_context)
+    orientation_source_ids = {
+        source_name: [
+            str(item.get("id"))
+            for item in source.get("items", [])
+            if isinstance(item, dict) and item.get("id")
+        ][:100]
+        for source_name, source in sources.items()
+        if isinstance(source, dict)
+    }
+    orientation_audit_context = {
+        "request_id": getattr(getattr(request, "state", None), "request_id", None),
+        "person_id": person_id,
+        "caregiver_id": str(authorized_session.caregiver_id) if getattr(authorized_session, "caregiver_id", None) else None,
+        "source_event_ids": orientation_source_ids.get("events", []),
+        "source_evidence_ids": orientation_source_ids.get("evidence", []),
+        "source_assertion_ids": orientation_source_ids.get("assertions", []),
+        "source_refs": [
+            f"{source_name}:{source_id}"
+            for source_name, source_ids in orientation_source_ids.items()
+            for source_id in source_ids
+        ][:100],
+        "retrieval_coverage": {
+            "status": lcr_context.get("history_coverage", "unknown"),
+            "retrieval_scan_complete": bool(lcr_context.get("retrieval_scan_complete", False)),
+            "retrieval_projection_complete": bool(lcr_context.get("retrieval_projection_complete", False)),
+            "context_truncated": "[Context truncated" in authorized_context,
+            "prompt_context_complete": "[Context truncated" not in authorized_context,
+            "missing_required_sources": list(lcr_context.get("missing_required_sources") or [])[:30],
+            "missing_optional_sources": list(lcr_context.get("missing_optional_sources") or [])[:30],
+            "failed_sources": [
+                name for name, source in sources.items()
+                if isinstance(source, dict) and source.get("status") in {"failed", "unavailable"}
+            ][:30],
+        },
+    }
 
     # Determine first-vs-returning orientation from actual care-domain rows,
     # never from the existence of an account, session, or empty LCR shell.
@@ -1742,6 +1777,7 @@ async def generate_lcr_orientation(
                 model,
                 messages,
                 {"temperature": 0.1 if attempt else 0.2, "num_predict": response_length_policy.token_budget if attempt == 0 else response_length_policy.token_budget},
+                audit_context=orientation_audit_context,
             )
             reply = validate_reply(candidate)
             if reply:
