@@ -138,7 +138,7 @@ def add_evidence(
         evidence = evidence.model_copy(update={"caregiver_id": engine._scoped_caregiver_id})
         return engine.add_evidence(evidence)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail="We couldn’t save that care information. Please check the details and try again.")
 
 
 @router.get("/evidence/{hypothesis_id}", response_model=List[CausalEvidence])
@@ -161,7 +161,7 @@ def add_alternative_explanation(
         explanation = explanation.model_copy(update={"created_by_caregiver_id": engine._scoped_caregiver_id})
         return engine.add_alternative_explanation(explanation)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail="We couldn’t save that care information. Please check the details and try again.")
 
 
 @router.patch("/alternatives/{explanation_id}", response_model=AlternativeExplanation)
@@ -187,7 +187,7 @@ def add_confounder(
         confounder = confounder.model_copy(update={"created_by_caregiver_id": engine._scoped_caregiver_id})
         return engine.add_confounder(confounder)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail="We couldn’t save that care information. Please check the details and try again.")
 
 
 @router.get("/trace/{hypothesis_id}")
