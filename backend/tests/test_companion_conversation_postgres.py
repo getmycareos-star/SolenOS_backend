@@ -1361,7 +1361,7 @@ def test_failed_first_companion_turn_removes_empty_session_and_releases_leases(m
         ).count() == 0
 
 
-def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(monkeypatch):
+def test_companion_message_stays_conversation_only_until_explicit_care_report_confirmation(monkeypatch):
     suffix = uuid.uuid4().hex[:10]
     client = TestClient(app)
     created = _new_anonymous(client, f"Companion proposal recipient {suffix}")
@@ -1369,63 +1369,72 @@ def test_companion_message_queues_exact_quote_care_proposals_without_lcr_writes(
     caregiver_id = created["caregiver"]["id"]
     headers = {"Authorization": f"Bearer {created['access_token']}"}
     original_text = "Mum woke three times during sleep. What should I watch for?"
-    exact_quote = "Mum woke three times during sleep."
 
     extraction_calls = []
     turn_id = str(uuid.uuid4())
     monkeypatch.setattr(collaboration, "_ollama_url", lambda: ("http://ollama.test", "qwen-test"))
-    monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "That sounds tiring. Keep an eye on how she feels today.")
+    monkeypatch.setattr(collaboration, "_ollama_chat", lambda *args, **kwargs: "That sounds tiring. I can help explain what is already saved.")
 
     def extract_candidates(text, audit_context=None):
         extraction_calls.append(text)
-        return {
-            "observations": [{
-                "source_quote": exact_quote,
-                "event_time_quote": "",
-            }]
-        }
+        return {"observations": [{"source_quote": original_text, "event_time_quote": ""}]}
 
     monkeypatch.setattr(companion_care_updates, "extract_companion_care_candidates", extract_candidates)
 
-    request_body = {
-        "person_id": person_id,
-        "text": original_text,
-        "client_turn_id": turn_id,
-    }
-    response = client.post(
-        "/api/v1/conversation/message",
-        headers=headers,
-        json=request_body,
-    )
+    request_body = {"person_id": person_id, "text": original_text, "client_turn_id": turn_id}
+    response = client.post("/api/v1/conversation/message", headers=headers, json=request_body)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["written_to_lcr"] is False
     assert body["persistence"] == "conversation_only"
-    assert len(extraction_calls) == 1
+    assert extraction_calls == []
 
-    replay = client.post(
-        "/api/v1/conversation/message",
-        headers=headers,
-        json=request_body,
-    )
+    replay = client.post("/api/v1/conversation/message", headers=headers, json=request_body)
     assert replay.status_code == 200, replay.text
     assert replay.json()["idempotent_replay"] is True
-    assert len(extraction_calls) == 1
+    assert extraction_calls == []
 
     with Session() as db:
-        proposal = db.query(AIOutputLCRProposal).filter_by(
+        assert db.query(AIOutputLCRProposal).filter_by(
             person_id=person_id,
             caregiver_id=caregiver_id,
             source_message_id=body["source_message_id"],
             proposal_type="companion_care_observation",
+        ).count() == 0
+        assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
+
+    # Only the caregiver's explicit "Save as a care note" confirmation creates
+    # a review-only proposal. It preserves the complete original wording.
+    confirmed = client.post(
+        f"/api/v1/companion/care-updates/from-message/{body['source_message_id']}",
+        headers=headers,
+        json={"confirm_care_report": True},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    proposal = confirmed.json()["proposal"]
+    assert proposal["status"] == "pending_authorization"
+    assert proposal["proposed_change"]["source_quote"] == original_text
+    assert proposal["proposed_change"]["asserted_value"] == original_text
+    assert proposal["proposed_change"]["model_generated_paraphrase_used"] is False
+
+    replay_confirmation = client.post(
+        f"/api/v1/companion/care-updates/from-message/{body['source_message_id']}",
+        headers=headers,
+        json={"confirm_care_report": True},
+    )
+    assert replay_confirmation.status_code == 200, replay_confirmation.text
+    assert replay_confirmation.json()["idempotent_replay"] is True
+    assert replay_confirmation.json()["proposal"]["id"] == proposal["id"]
+
+    with Session() as db:
+        saved = db.query(AIOutputLCRProposal).filter_by(
+            id=proposal["id"],
+            person_id=person_id,
+            caregiver_id=caregiver_id,
+            source_message_id=body["source_message_id"],
         ).one()
-        assert proposal.status == "pending_authorization"
-        assert proposal.proposed_change_json["source_quote"] == exact_quote
-        assert proposal.proposed_change_json["asserted_value"] == exact_quote
-        assert proposal.proposed_change_json["event_time_text"] is None
-        assert proposal.uncertainty_json["event_time"] == "not_supplied"
-        assert proposal.uncertainty_json["clinical_status"] == "not_assessed"
-        assert proposal.uncertainty_json["caregiver_review"] == "required"
+        assert saved.status == "pending_authorization"
+        assert saved.proposed_change_json["source_quote"] == original_text
         assert db.query(CareAssertion).filter_by(person_id=person_id).count() == 0
 
 
