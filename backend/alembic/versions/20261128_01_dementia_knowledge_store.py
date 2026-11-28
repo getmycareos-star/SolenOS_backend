@@ -221,6 +221,7 @@ def downgrade() -> None:
     op.execute("DROP TRIGGER IF EXISTS trg_dementia_knowledge_reviews_immutable ON dementia_knowledge_reviews")
     op.execute("DROP FUNCTION IF EXISTS reject_dementia_knowledge_review_mutation()")
     for table in (
+        "dementia_knowledge_source_reviews",
         "dementia_knowledge_reviews",
         "dementia_knowledge_item_sources",
         "dementia_knowledge_items",
