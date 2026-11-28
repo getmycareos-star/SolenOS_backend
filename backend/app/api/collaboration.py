@@ -4711,10 +4711,8 @@ def _trend_uncertainty_response(assessment: dict) -> str:
     distinct_days = int(assessment.get("distinct_days") or 0)
     minimum_days = int(assessment.get("minimum_distinct_days") or 3)
 
-    retrieval_incomplete = (
-        assessment.get("retrieval_complete") is False
-        or assessment.get("prompt_context_complete") is False
-    )
+    retrieval_incomplete = assessment.get("retrieval_complete") is False
+    prompt_context_incomplete = assessment.get("prompt_context_complete") is False
     # Partial retrieval does not erase the dated observations that were
     # successfully checked. State the measurable gap, then disclose that the
     # available subset may not represent the complete record.
@@ -4726,10 +4724,14 @@ def _trend_uncertainty_response(assessment: dict) -> str:
             f"That is not enough to establish whether {topic} has been {direction}. "
             f"At least {minimum_days} separate days are needed before I can assess a pattern."
         )
-        if retrieval_incomplete:
-            response += " The record search was also incomplete, so this may not include all saved history."
+        if retrieval_incomplete and prompt_context_incomplete:
+            response += " The record search and the information supplied for this response were incomplete, so this may not include all saved history."
+        elif retrieval_incomplete:
+            response += " The record search was incomplete, so this may not include all saved history."
+        elif prompt_context_incomplete:
+            response += " The response could not include all retrieved information, so this may not reflect the full saved history."
         return response
-    if retrieval_incomplete:
+    if retrieval_incomplete or prompt_context_incomplete:
         return (
             f"I can't reliably assess {topic} {period} because the record search or supplied history was incomplete. "
             "That is a limit of the available information, not evidence that nothing changed."
