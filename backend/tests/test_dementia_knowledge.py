@@ -90,3 +90,15 @@ def test_knowledge_retrieval_returns_nothing_for_empty_or_unusable_queries():
     assert search_approved_knowledge(
         "communication", [item], as_of=date(2026, 1, 1), limit=0
     ) == ()
+\n\ndef test_approved_knowledge_is_blocked_when_its_source_is_only_catalogued(monkeypatch):
+    source = knowledge.SOURCE_BY_ID["who_isupport"]
+    monkeypatch.setitem(
+        knowledge.SOURCE_BY_ID,
+        "who_isupport",
+        replace(source, status=SourceStatus.CATALOGUED),
+    )
+    item = _item()
+    assert "source_not_reviewed" in validate_knowledge_item(item)
+    assert search_approved_knowledge(
+        "communication calm", [item], as_of=date(2026, 1, 1)
+    ) == ()
