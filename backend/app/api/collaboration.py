@@ -39,6 +39,7 @@ from app.models.care_continuity import (
     CareAssertion,
     CareActionOutcome,
     CareDeltaRun,
+    CareStateRevision,
     EvidenceReviewRecord,
     EvidenceClaimAssessment,
     EvidenceCompletenessAssessment,
