@@ -12035,6 +12035,7 @@ async def companion_message(
                 or _contains_unsupported_care_claim(reply, validation_source)
                 or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                 or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
                 or _caregiver_response_needs_revision(user_text, reply)
             )
         ):
@@ -12044,6 +12045,7 @@ async def companion_message(
                 or _contains_unsupported_care_claim(care_history_extractive_answer, validation_source)
                 or _contains_unsupported_operational_claim(care_history_extractive_answer, validation_source, source_context)
                 or _contains_unsupported_record_reference(care_history_extractive_answer, validation_source)
+                or contains_internal_caregiver_language(care_history_extractive_answer)
                 or _caregiver_response_needs_revision(user_text, care_history_extractive_answer)
             )
             if not history_fallback_invalid:
@@ -12057,6 +12059,7 @@ async def companion_message(
             or _contains_unsupported_care_claim(reply, validation_source)
             or _contains_unsupported_operational_claim(reply, validation_source, source_context)
             or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
             or _caregiver_response_needs_revision(user_text, reply)
             or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
             or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
@@ -12068,6 +12071,7 @@ async def companion_message(
                 not isinstance(reply, str)
                 or not reply.strip()
                 or _companion_message_needs_revision(reply, response_length_policy.max_words)
+                or contains_internal_caregiver_language(reply)
             )
         if invalid_reply and caregiver_guidance:
             # Explicit caregiver-capacity and continuity constraints are part of
@@ -12120,6 +12124,7 @@ async def companion_message(
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
                     or _caregiver_response_needs_revision(user_text, reply)
                     or (greeting_only and (_greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024) or _greeting_name_missing(reply, caregiver_context.get("display_name")) or (caregiver_context.get("conversation_stage") == "first_time" and _first_time_greeting_missing_introduction(reply))))
             or (acknowledgement_only and (count_response_words(reply) > (response_length_policy.max_words or 15) or "?" in reply))
@@ -12171,6 +12176,7 @@ async def companion_message(
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
                     or _caregiver_response_needs_revision(user_text, reply)
                 )
                 if not invalid_reply:
@@ -12212,6 +12218,7 @@ async def companion_message(
                     or _companion_message_needs_revision(reply, response_length_policy.max_words)
                     or count_response_words(reply) > (response_length_policy.max_words or 15)
                     or "?" in reply
+                    or contains_internal_caregiver_language(reply)
                 )
                 if not invalid_reply:
                     break
@@ -12265,6 +12272,7 @@ async def companion_message(
                     or _contains_unsupported_care_claim(reply, validation_source)
                     or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                     or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
                     or _greeting_reply_needs_revision(reply, response_length_policy.max_words or 1024)
                     or _greeting_name_missing(reply, caregiver_context.get("display_name"))
                     or (
@@ -12316,6 +12324,8 @@ async def companion_message(
                 failed_rules.append("unsupported_operational_claim")
             if _contains_unsupported_record_reference(reply, validation_source):
                 failed_rules.append("unsupported_record_reference")
+            if contains_internal_caregiver_language(reply):
+                failed_rules.append("internal_caregiver_language")
             if _caregiver_response_needs_revision(user_text, reply):
                 failed_rules.append("caregiver_interaction_contract")
             deterministic_source_answer = bool(
@@ -12370,6 +12380,12 @@ async def companion_message(
             retrieval_receipt,
             historical_question=historical_question,
         )
+        if contains_internal_caregiver_language(reply):
+            logger.warning("Companion final response rejected by caregiver-language boundary")
+            raise HTTPException(
+                status_code=503,
+                detail="Companion couldn't prepare a clear response. No reply was saved; please retry.",
+            )
         # The deterministic retrieval qualifier is caregiver-facing text too.
         # Validate the final composed response, not only the model's pre-qualifier
         # draft. If the qualifier pushes a model answer over its ceiling, repair
@@ -12430,6 +12446,7 @@ async def companion_message(
                 or _contains_unsupported_care_claim(reply, validation_source)
                 or _contains_unsupported_operational_claim(reply, validation_source, source_context)
                 or _contains_unsupported_record_reference(reply, validation_source)
+                    or contains_internal_caregiver_language(reply)
                 or _caregiver_response_needs_revision(user_text, reply)
             ):
                 raise HTTPException(
