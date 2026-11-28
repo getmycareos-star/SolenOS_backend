@@ -3728,7 +3728,7 @@ def test_appointment_preparation_brief_surfaces_person_scoped_follow_up_without_
     assert body["appointment_context_status"]["code"] == "follow_up_needed"
     follow_ups = body["appointment_related_open_loops"]
     assert len(follow_ups) == 1
-    assert follow_ups[0]["source_id"] == "appointment-workspace:follow-up"
+    assert follow_ups[0]["source_id"] == "appointment-follow-up-without-booking"
     assert follow_ups[0]["title"] == "Confirm the clinic follow-up date"
 
     other_headers = {"Authorization": f"Bearer {other['access_token']}"}
