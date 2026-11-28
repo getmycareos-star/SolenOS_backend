@@ -35,6 +35,7 @@ def _item(**overrides):
         "content": "Use a calm, simple communication approach and allow time to respond.",
         "source_ids": ("who_isupport",),
         "evidence_class": EvidenceClass.CAREGIVER_EDUCATION,
+        "jurisdiction": "United States",
         "applicable_context": "General caregiver education; adapt to the person's preferences.",
         "limitations": "Not an assessment or clinical recommendation.",
         "reviewed_by": "qualified-reviewer",
@@ -116,6 +117,20 @@ def test_approved_knowledge_is_blocked_when_its_source_is_only_catalogued(monkey
     )
     item = _item()
     assert "source_not_reviewed" in validate_knowledge_item(item)
+    assert search_approved_knowledge(
+        "communication calm", [item], as_of=date(2026, 1, 1)
+    ) == ()
+
+
+def test_uk_guideline_cannot_be_published_as_us_specific_guidance(monkeypatch):
+    source = knowledge.SOURCE_BY_ID["nice_ng97"]
+    monkeypatch.setitem(
+        knowledge.SOURCE_BY_ID,
+        "nice_ng97",
+        replace(source, status=SourceStatus.REVIEWED),
+    )
+    item = _item(source_ids=("nice_ng97",))
+    assert "source_jurisdiction_mismatch" in validate_knowledge_item(item)
     assert search_approved_knowledge(
         "communication calm", [item], as_of=date(2026, 1, 1)
     ) == ()
