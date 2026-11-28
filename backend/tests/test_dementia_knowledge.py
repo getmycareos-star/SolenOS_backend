@@ -23,7 +23,11 @@ def _review_test_source(monkeypatch):
     monkeypatch.setitem(
         knowledge.SOURCE_BY_ID,
         "who_isupport",
-        replace(source, status=SourceStatus.REVIEWED),
+        replace(
+            source,
+            status=SourceStatus.REVIEWED,
+            last_reviewed_on=date(2026, 1, 1),
+        ),
     )
 
 
@@ -127,10 +131,21 @@ def test_uk_guideline_cannot_be_published_as_us_specific_guidance(monkeypatch):
     monkeypatch.setitem(
         knowledge.SOURCE_BY_ID,
         "nice_ng97",
-        replace(source, status=SourceStatus.REVIEWED),
+        replace(
+            source,
+            status=SourceStatus.REVIEWED,
+            last_reviewed_on=date(2026, 1, 1),
+        ),
     )
     item = _item(source_ids=("nice_ng97",))
     assert "source_jurisdiction_mismatch" in validate_knowledge_item(item)
     assert search_approved_knowledge(
         "communication calm", [item], as_of=date(2026, 1, 1)
+    ) == ()
+
+
+def test_future_dated_knowledge_review_is_not_available_yet():
+    future = _item(reviewed_on=date(2026, 1, 2))
+    assert search_approved_knowledge(
+        "communication calm", [future], as_of=date(2026, 1, 1)
     ) == ()
