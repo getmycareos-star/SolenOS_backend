@@ -880,7 +880,7 @@ def test_prompt_budget_is_shared_across_sources_instead_of_starving_later_care_d
     assert "Context truncated" in prompt
 
 
-def test_temporal_retrieval_keeps_delayed_entries_when_either_event_or_recording_time_is_in_window():
+def test_temporal_retrieval_separates_event_time_from_recording_time_intent():
     _load_source_schema.cache_clear()
     engine = create_engine("sqlite:///:memory:")
     events = _care_events_schema(engine)
@@ -927,7 +927,7 @@ def test_temporal_retrieval_keeps_delayed_entries_when_either_event_or_recording
         with engine.begin() as connection:
             connection.execute(events.insert(), rows)
         with Session(engine) as db:
-            context = build_lcr_context(
+            event_context = build_lcr_context(
                 db,
                 "person-a",
                 limit_per_source=10,
@@ -937,13 +937,30 @@ def test_temporal_retrieval_keeps_delayed_entries_when_either_event_or_recording
                     "basis": "explicit_user_temporal_expression",
                 },
             )
+            recorded_context = build_lcr_context(
+                db,
+                "person-a",
+                limit_per_source=10,
+                temporal_query="When was this recorded?",
+                temporal_window={
+                    "start": window_start.isoformat(),
+                    "end": now.isoformat(),
+                    "basis": "explicit_user_temporal_expression",
+                },
+            )
 
-        source = context["sources"]["events"]
-        returned_ids = {item["id"] for item in source["items"]}
-        assert source["candidate_scan_complete"] is True
-        assert source["candidate_count"] == 2
-        assert returned_ids == {"late-recorded-entry", "event-in-window"}
-        delayed = next(item for item in source["items"] if item["id"] == "late-recorded-entry")
+        event_source = event_context["sources"]["events"]
+        event_ids = {item["id"] for item in event_source["items"]}
+        assert event_source["candidate_scan_complete"] is True
+        assert event_source["candidate_count"] == 1
+        assert event_ids == {"event-in-window"}
+
+        recorded_source = recorded_context["sources"]["events"]
+        recorded_ids = {item["id"] for item in recorded_source["items"]}
+        assert recorded_source["candidate_scan_complete"] is True
+        assert recorded_source["candidate_count"] == 2
+        assert recorded_ids == {"late-recorded-entry", "event-in-window"}
+        delayed = next(item for item in recorded_source["items"] if item["id"] == "late-recorded-entry")
         assert delayed["occurred_at"] < window_start.isoformat()
         assert delayed["recorded_at"] >= window_start.isoformat()
     finally:
