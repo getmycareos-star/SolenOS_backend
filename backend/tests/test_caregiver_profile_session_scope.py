@@ -103,6 +103,7 @@ def test_care_recipient_profile_persists_and_isolated_by_bearer_session():
         "name": "Updated recipient",
         "relationship": "Daughter",
         "condition": "Dementia, caregiver-reported profile context",
+        "first_use_orientation_completed_at": None,
     }
 
     # The second bearer cannot read or overwrite the first person's record.
